@@ -262,7 +262,11 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "konsolai:", err)
 		return 1
 	}
-	sessionID, history := resumeSession(ctx, mem, prof, projectID, cwd, inv)
+	cand := findCandidate(ctx, mem, prof, projectID, cwd, inv)
+	routerHist := cand.Messages
+	if inv.New {
+		routerHist = nil
+	}
 	root := repo.Root(cwd)
 	inRepo := false
 	if _, err := os.Stat(filepath.Join(root, ".git")); err == nil {
@@ -270,15 +274,19 @@ func run() int {
 	}
 	routedAt := time.Now()
 	understand := ui.Start("understanding")
-	dec := decideIntent(ctx, client, inv, history, inRepo)
+	dec := decideIntent(ctx, client, inv, routerHist, inRepo)
 	understand()
 	routerTime := time.Since(routedAt)
+	sessionID, history := applyResume(inv, dec, cand)
+	if len(history) > 0 {
+		fmt.Fprintln(os.Stdout, ui.Dim("↻ continuing session: "+cand.Title))
+	}
 	if inv.Plain {
 		fmt.Fprintln(os.Stdout, "· "+string(dec.Intent))
 	} else {
 		fmt.Fprintln(os.Stdout, ui.IntentBadge(string(dec.Intent)))
 	}
-	if sessionID == "" {
+	if sessionID == "" && len(history) == 0 {
 		sessionID = createSession(ctx, mem, prof, projectID, cwd, string(dec.Intent), inv.Request)
 	}
 	rec := memory.NewRecorder(mem, sessionID, cwd)
@@ -334,33 +342,41 @@ func upsertProject(ctx context.Context, mem *memory.Guard, cwd string) *int64 {
 	return &id
 }
 
-func resumeSession(ctx context.Context, mem *memory.Guard, prof config.Profile, projectID *int64, cwd string, inv invocation) (string, []llm.Message) {
-	if inv.New {
-		return "", nil
-	}
+type resumeCandidate struct {
+	ID       string
+	Title    string
+	Messages []llm.Message
+}
+
+func findCandidate(ctx context.Context, mem *memory.Guard, prof config.Profile, projectID *int64, cwd string, inv invocation) resumeCandidate {
 	idle := time.Duration(prof.SessionIdleMinutes) * time.Minute
 	if mem.Store() == nil {
 		if sess, ok := memory.LoadLast(prof.Name, cwd, idle); ok {
-			fmt.Fprintln(os.Stdout, ui.Dim("↻ continuing session: "+sess.Title))
-			return "", sess.Messages
+			return resumeCandidate{Title: sess.Title, Messages: sess.Messages}
 		}
-		return "", nil
+		return resumeCandidate{}
 	}
 	sess, found, err := mem.Store().FindResumableSession(ctx, prof.Name, projectID, cwd, inv.Intent, idle)
 	if err != nil {
 		mem.Fail(err)
-		return "", nil
+		return resumeCandidate{}
 	}
 	if !found {
-		return "", nil
+		return resumeCandidate{}
 	}
 	msgs, err := mem.Store().LoadMessages(ctx, sess.ID)
 	if err != nil {
 		mem.Fail(err)
+		return resumeCandidate{}
+	}
+	return resumeCandidate{ID: sess.ID, Title: sess.Title, Messages: memory.ToLLM(msgs)}
+}
+
+func applyResume(inv invocation, dec intent.Decision, cand resumeCandidate) (string, []llm.Message) {
+	if inv.New || !dec.ContinuesPrevious || len(cand.Messages) == 0 {
 		return "", nil
 	}
-	fmt.Fprintln(os.Stdout, ui.Dim("↻ continuing session: "+sess.Title))
-	return sess.ID, memory.ToLLM(msgs)
+	return cand.ID, cand.Messages
 }
 
 func createSession(ctx context.Context, mem *memory.Guard, prof config.Profile, projectID *int64, cwd, mode, request string) string {
@@ -436,7 +452,10 @@ func sessionStatus(code int) string {
 
 func decideIntent(ctx context.Context, client *llm.Client, inv invocation, history []llm.Message, inRepo bool) intent.Decision {
 	if inv.Intent != "" {
-		return intent.Decision{Intent: intent.Intent(inv.Intent), Language: "en", Reason: "flag"}
+		return intent.Decision{
+			Intent: intent.Intent(inv.Intent), Language: "en", Reason: "flag",
+			ContinuesPrevious: !inv.New && len(history) > 0,
+		}
 	}
 	d, _ := intent.Classify(ctx, client, inv.Request, history, inRepo)
 	return d
