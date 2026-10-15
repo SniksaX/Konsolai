@@ -44,7 +44,7 @@ func Classify(ctx context.Context, client *llm.Client, request string, recent []
 		msgs = append(msgs, m)
 	}
 	msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: request})
-	msg, err := client.Complete(ctx, msgs, nil, llm.ChatOptions{
+	msg, _, err := client.Complete(ctx, msgs, nil, llm.ChatOptions{
 		Thinking: false, Temperature: 0, MaxTokens: 120, ResponseSchema: decisionSchema,
 	})
 	if err != nil {
