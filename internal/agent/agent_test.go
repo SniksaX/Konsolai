@@ -44,6 +44,7 @@ type replay struct {
 	toolChoices  []json.RawMessage
 	maxTokens    []int
 	promptTokens []int
+	truncates    []bool
 }
 
 func newReplay(t *testing.T, replies []llm.Message) (*llm.Client, *replay) {
@@ -95,6 +96,22 @@ func (r *replay) serve(w http.ResponseWriter, req *http.Request) {
 	r.mu.Unlock()
 	if i >= len(r.replies) {
 		http.Error(w, "no more replies", http.StatusInternalServerError)
+		return
+	}
+	if i < len(r.truncates) && r.truncates[i] {
+		payload, err := json.Marshal(map[string]any{
+			"choices": []map[string]any{{
+				"delta":         map[string]any{"content": r.replies[i].Content},
+				"finish_reason": "length",
+			}},
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: "+string(payload)+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
 		return
 	}
 	_ = json.NewEncoder(w).Encode(struct {
@@ -368,6 +385,56 @@ func TestMaxTokensComputation(t *testing.T) {
 	}
 	if len(rep.maxTokens) == 0 || rep.maxTokens[0] <= 0 || rep.maxTokens[0] > 4096 {
 		t.Fatalf("max_tokens %v", rep.maxTokens)
+	}
+}
+
+func TestTruncationRecovery(t *testing.T) {
+	var out bytes.Buffer
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, rep := newReplay(t, []llm.Message{
+		{Role: llm.RoleAssistant, Content: "cut off"},
+		{Role: llm.RoleAssistant, Content: "full answer after retry"},
+	})
+	rep.truncates = []bool{true}
+	err = Run(context.Background(), Config{
+		Client: client, Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		Confirmer: stubConfirm{d: ui.Approve}, Out: &out, MaxSteps: 5, Intent: "act",
+	}, "sys", "task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "full answer after retry") {
+		t.Fatalf("%q", out.String())
+	}
+	if len(rep.reqs) != 2 {
+		t.Fatalf("reqs %d", len(rep.reqs))
+	}
+	if len(rep.maxTokens) < 2 || rep.maxTokens[1] <= rep.maxTokens[0] {
+		t.Fatalf("max_tokens not raised %v", rep.maxTokens)
+	}
+}
+
+func TestTruncationTwiceOverflows(t *testing.T) {
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, rep := newReplay(t, []llm.Message{
+		{Role: llm.RoleAssistant, Content: "cut"},
+		{Role: llm.RoleAssistant, Content: "cut again"},
+	})
+	rep.truncates = []bool{true, true}
+	err = Run(context.Background(), Config{
+		Client: client, Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		Confirmer: stubConfirm{d: ui.Approve}, Out: io.Discard, MaxSteps: 5, Intent: "act",
+	}, "sys", "task")
+	if !errors.Is(err, ErrContextOverflow) {
+		t.Fatalf("got %v", err)
 	}
 }
 
