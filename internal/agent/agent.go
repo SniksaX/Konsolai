@@ -167,6 +167,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	seenRead := make(map[string]struct{})
 	planApproved := false
 	var planFiles []string
+	var planCmds []string
 	explore := 0
 	shellFail := false
 	var st Stats
@@ -274,13 +275,31 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			decision := "auto"
 			summary := action.Summary()
 			outside := false
+			inPlanHit := false
 			if kind == tools.Mutating && cfg.RequirePlan && planApproved {
-				if p, ok := filePathOf(action); ok && !inPlan(planFiles, p) {
+				if p, ok := filePathOf(action); ok {
+					if inPlan(planFiles, p) {
+						inPlanHit = true
+					} else {
+						outside = true
+					}
+				} else if c, ok := commandOf(action); ok {
+					if inPlanCmd(planCmds, c) {
+						inPlanHit = true
+					} else {
+						outside = true
+					}
+				} else {
 					outside = true
+				}
+				if outside {
 					summary = "⚠ outside plan: " + summary
 				}
 			}
-			if kind != tools.ReadOnly && kind != tools.Final {
+			if inPlanHit {
+				summary += " " + ui.Current().Muted("(in plan)")
+			}
+			if !inPlanHit && kind != tools.ReadOnly && kind != tools.Final {
 				var d ui.Decision
 				var reason string
 				var err error
@@ -316,6 +335,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					if kind == tools.Plan {
 						planApproved = true
 						planFiles = planFilesOf(action)
+						planCmds = planCmdsOf(action)
 					}
 				case ui.ApproveAll:
 					decision = "approved_all"
@@ -325,6 +345,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					if kind == tools.Plan {
 						planApproved = true
 						planFiles = planFilesOf(action)
+						planCmds = planCmdsOf(action)
 					}
 				}
 			}
@@ -507,6 +528,38 @@ func planFilesOf(a tools.Action) []string {
 		return nil
 	}
 	return p.PlanFiles()
+}
+
+func planCmdsOf(a tools.Action) []string {
+	type hasCmds interface{ PlanCommands() []string }
+	p, ok := a.(hasCmds)
+	if !ok {
+		return nil
+	}
+	return p.PlanCommands()
+}
+
+func commandOf(a tools.Action) (string, bool) {
+	type hasCmd interface{ PlanCommand() string }
+	p, ok := a.(hasCmd)
+	if !ok {
+		return "", false
+	}
+	return p.PlanCommand(), true
+}
+
+func normCmd(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func inPlanCmd(cmds []string, cmd string) bool {
+	want := normCmd(cmd)
+	for _, c := range cmds {
+		if normCmd(c) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func inPlan(files []string, path string) bool {
