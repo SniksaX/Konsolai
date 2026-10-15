@@ -16,6 +16,7 @@ import (
 
 	"github.com/siraj/konsolai/internal/diff"
 	"github.com/siraj/konsolai/internal/llm"
+	"github.com/siraj/konsolai/internal/redact"
 	"github.com/siraj/konsolai/internal/safety"
 )
 
@@ -239,7 +240,12 @@ func (a *readFileAction) Run(ctx context.Context) (Result, error) {
 	if !utf8.Valid(allBytes) {
 		return Result{Output: "error: binary content (not UTF-8)", IsError: true}, nil
 	}
-	lines := strings.Split(string(allBytes), "\n")
+	text := string(allBytes)
+	masked := 0
+	if redact.SensitivePath(a.path) || redact.SensitivePath(a.display) {
+		text, masked = redact.MaskValues(text)
+	}
+	lines := strings.Split(text, "\n")
 	if len(allBytes) > 0 && allBytes[len(allBytes)-1] == '\n' {
 		lines = lines[:len(lines)-1]
 	}
@@ -247,7 +253,11 @@ func (a *readFileAction) Run(ctx context.Context) (Result, error) {
 	if truncated {
 		out += "\n... [truncated; set start_line to read the rest]"
 	}
-	return Result{Output: out, Meta: formatSize(int64(len(allBytes)))}, nil
+	meta := formatSize(int64(len(allBytes)))
+	if masked > 0 {
+		meta = fmt.Sprintf("masked %d values", masked)
+	}
+	return Result{Output: out, Meta: meta}, nil
 }
 
 type listDirTool struct{ guard *safety.Guard }
