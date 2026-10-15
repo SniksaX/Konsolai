@@ -228,6 +228,10 @@ func TestSanitizeAnswerHistory(t *testing.T) {
 func TestStreamAnswerRetryThenEmpty(t *testing.T) {
 	var n int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/models") {
+			http.NotFound(w, r)
+			return
+		}
 		n++
 		w.Header().Set("Content-Type", "text/event-stream")
 		if n == 1 {
