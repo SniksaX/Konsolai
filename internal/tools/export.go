@@ -12,6 +12,7 @@ import (
 	"github.com/siraj/konsolai/internal/diff"
 	"github.com/siraj/konsolai/internal/llm"
 	"github.com/siraj/konsolai/internal/safety"
+	"github.com/siraj/konsolai/internal/ui"
 )
 
 type exportDocTool struct{ guard *safety.Guard }
@@ -96,6 +97,8 @@ func (a *exportDocAction) Preview() string {
 func (a *exportDocAction) Kind() ActionKind { return Mutating }
 
 func (a *exportDocAction) Run(ctx context.Context) (Result, error) {
+	stop := ui.Start("exporting")
+	defer stop()
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
