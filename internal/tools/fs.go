@@ -121,7 +121,10 @@ func (a *writeFileAction) Run(ctx context.Context) (Result, error) {
 		return Result{Output: err.Error(), IsError: true}, nil
 	}
 	cleanup = false
-	return Result{Output: fmt.Sprintf("wrote %s (%d bytes)", a.display, len(a.content))}, nil
+	return Result{
+		Output: fmt.Sprintf("wrote %s (%d bytes)", a.display, len(a.content)),
+		Meta:   fmt.Sprintf("%d B", len(a.content)),
+	}, nil
 }
 
 type readFileTool struct{ guard *safety.Guard }
@@ -198,7 +201,7 @@ func (a *readFileAction) Run(ctx context.Context) (Result, error) {
 	if n > readFileCap {
 		out += fmt.Sprintf("\n... [truncated at %d bytes]", readFileCap)
 	}
-	return Result{Output: out}, nil
+	return Result{Output: out, Meta: formatSize(fi.Size())}, nil
 }
 
 type listDirTool struct{ guard *safety.Guard }
@@ -280,7 +283,14 @@ func (a *listDirAction) Run(ctx context.Context) (Result, error) {
 	if out == "" {
 		out = "(empty)"
 	}
-	return Result{Output: out}, nil
+	return Result{Output: out, Meta: fmt.Sprintf("%d entries", len(entries))}, nil
+}
+
+func formatSize(n int64) string {
+	if n < 1024 {
+		return fmt.Sprintf("%d B", n)
+	}
+	return fmt.Sprintf("%.1f KiB", float64(n)/1024)
 }
 
 func firstLines(s string, n int) string {
