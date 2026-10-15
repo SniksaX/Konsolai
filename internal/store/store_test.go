@@ -405,6 +405,52 @@ func TestFacts(t *testing.T) {
 	}
 }
 
+func TestRecentSessions(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	gitID, err := s.CreateSession(ctx, NewSession{
+		Profile: "home", CWD: "/tmp/k", Mode: "answer", Model: "m", Title: "how do I list git branches?",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendMessage(ctx, gitID, 1, Message{Role: "user", Content: "how do I list git branches?"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EndSession(ctx, gitID, "finished"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE sessions SET last_activity_at = now() - interval '3 minutes' WHERE id = $1::uuid`, gitID); err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("x", 200)
+	pdfID, err := s.CreateSession(ctx, NewSession{
+		Profile: "home", CWD: "/tmp/k", Mode: "build", Model: "m", Title: "PDF build about konsolai",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendMessage(ctx, pdfID, 1, Message{Role: "user", Content: long}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.RecentSessions(ctx, "home", nil, "/tmp/k", 30*time.Minute, 3)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("n=%d err=%v", len(got), err)
+	}
+	if got[0].ID != pdfID || got[0].Title != "PDF build about konsolai" {
+		t.Fatalf("want pdf first %+v", got[0])
+	}
+	if len(got[0].LastUserMessage) != 120 {
+		t.Fatalf("cut %d %q", len(got[0].LastUserMessage), got[0].LastUserMessage)
+	}
+	if got[1].ID != gitID || got[1].LastUserMessage != "how do I list git branches?" {
+		t.Fatalf("want git second %+v", got[1])
+	}
+	if got[1].Age < 2*time.Minute {
+		t.Fatalf("git age %s", got[1].Age)
+	}
+}
+
 func TestOpenRequiresPostgres13(t *testing.T) {
 	if os.Getenv("KONSOLAI_TEST_DATABASE_URL") == "" {
 		t.Skip("KONSOLAI_TEST_DATABASE_URL not set")
