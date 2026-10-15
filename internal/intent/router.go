@@ -26,11 +26,12 @@ const (
 )
 
 type Decision struct {
-	Intent    Intent `json:"intent"`
-	Language  string `json:"language"`
-	Reason    string `json:"reason"`
-	Reasoning bool   `json:"reasoning"`
-	Task      Task   `json:"task"`
+	Intent            Intent `json:"intent"`
+	Language          string `json:"language"`
+	Reason            string `json:"reason"`
+	Reasoning         bool   `json:"reasoning"`
+	Task              Task   `json:"task"`
+	ContinuesPrevious bool   `json:"continues_previous"`
 }
 
 const routerPrompt = `Classify the user's request into exactly one intent.
@@ -44,27 +45,32 @@ When unsure between answer and anything else, choose answer if the message is a 
 language is the ISO 639-1 code of the user's message.
 reasoning=true when the request needs multi-step analysis: debugging an error or a pasted command, comparing approaches, non-trivial code questions. false for greetings, simple facts and simple commands.
 task is "analysis" when the user asks to analyse, review or give an opinion on code; otherwise "other".
+continues_previous=true only if the message depends on or follows up the recent conversation (references to 'it', 'that', 'continue', answers to a question you asked, same task). A new unrelated request -> false.
 Never print a secret value in full. Refer to it by name and its first 4 characters.`
 
-var decisionSchema = json.RawMessage(`{"type":"object","properties":{"intent":{"type":"string","enum":["answer","lookup","act","build"]},"language":{"type":"string"},"reason":{"type":"string"},"reasoning":{"type":"boolean"},"task":{"type":"string","enum":["analysis","other"]}},"required":["intent","language","reason","reasoning","task"],"additionalProperties":false}`)
+var decisionSchema = json.RawMessage(`{"type":"object","properties":{"intent":{"type":"string","enum":["answer","lookup","act","build"]},"language":{"type":"string"},"reason":{"type":"string"},"reasoning":{"type":"boolean"},"task":{"type":"string","enum":["analysis","other"]},"continues_previous":{"type":"boolean"}},"required":["intent","language","reason","reasoning","task","continues_previous"],"additionalProperties":false}`)
 
 func Classify(ctx context.Context, client *llm.Client, request string, recent []llm.Message, inRepo bool) (Decision, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	msgs := []llm.Message{{Role: llm.RoleSystem, Content: routerPrompt}}
+	sys := routerPrompt
+	if len(recent) == 0 {
+		sys += "\nThere is no previous conversation."
+	}
+	msgs := []llm.Message{{Role: llm.RoleSystem, Content: sys}}
 	for _, m := range lastNonTool(recent, 4) {
 		msgs = append(msgs, m)
 	}
 	msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: request})
 	msg, _, err := client.Complete(ctx, msgs, nil, llm.ChatOptions{
-		Thinking: false, Temperature: 0, MaxTokens: 120, ResponseSchema: decisionSchema,
+		Thinking: false, Temperature: 0, MaxTokens: 160, ResponseSchema: decisionSchema,
 	})
 	if err != nil {
-		return fallback(request, inRepo), err
+		return fallback(request, inRepo, len(recent) > 0), err
 	}
 	d, ok := parseDecision(msg.Content)
 	if !ok {
-		return fallback(request, inRepo), nil
+		return fallback(request, inRepo, len(recent) > 0), nil
 	}
 	return d, nil
 }
@@ -112,16 +118,18 @@ func parseDecision(raw string) (Decision, bool) {
 	return d, true
 }
 
-func fallback(request string, inRepo bool) Decision {
+func fallback(request string, inRepo bool, hasRecent bool) Decision {
 	q := strings.HasSuffix(strings.TrimSpace(request), "?")
+	d := Decision{Language: "en", Reason: "fallback", Task: TaskOther, ContinuesPrevious: hasRecent}
 	switch {
 	case q && inRepo:
-		return Decision{Intent: Lookup, Language: "en", Reason: "fallback"}
+		d.Intent = Lookup
 	case q:
-		return Decision{Intent: Answer, Language: "en", Reason: "fallback"}
+		d.Intent = Answer
 	default:
-		return Decision{Intent: Act, Language: "en", Reason: "fallback"}
+		d.Intent = Act
 	}
+	return d
 }
 
 func Schema() json.RawMessage { return decisionSchema }
