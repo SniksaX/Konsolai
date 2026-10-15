@@ -50,8 +50,10 @@ Structure the answer as: Observed (each point with file:line or file), Inferred 
 ` + preferReadOnlyCmd + "\n" + SecretRule
 
 const (
-	ToolsGoneNote = "Tools are no longer available. Answer now with what you have."
-	MaxStepsNote  = "Step limit reached. Summarize what you found or did, and what remains."
+	ToolsGoneNote  = "Tools are no longer available. Answer now with what you have."
+	ForcedPlanNote = "Exploration is over. Call propose_plan now."
+	DocsFileNote   = "The user asked for a file. Write it with write_file, then export_doc if a PDF/HTML was requested."
+	MaxStepsNote   = "Step limit reached. Summarize what you found or did, and what remains."
 )
 
 const preferReadOnlyCmd = "Prefer running a read-only command (e.g. `go version`, `ss -ltnp`) over guessing from files when the question is about the installed or running state of the machine."
