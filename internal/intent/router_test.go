@@ -120,6 +120,21 @@ func TestClassifySchemaAndRecent(t *testing.T) {
 	if !strings.Contains(joined, "Prefer 0 when unsure") {
 		t.Fatal("router prompt missing prefer-0 rule")
 	}
+	if !strings.Contains(joined, "Prefer 0 (new topic) when the new request is a different task") {
+		t.Fatal("router prompt missing different-task prefer-0")
+	}
+	if !strings.Contains(joined, "PDF overview after a README request") {
+		t.Fatal("router prompt missing PDF-after-README example")
+	}
+}
+
+func TestRouterPrefersNewTaskExamples(t *testing.T) {
+	if !strings.Contains(routerPrompt, "Prefer 0 (new topic) when the new request is a different task, even about the same project") {
+		t.Fatal("missing different-task rule")
+	}
+	if !strings.Contains(routerPrompt, "a PDF overview after a README request") {
+		t.Fatal("missing README-then-PDF example")
+	}
 }
 
 func TestParseDecision(t *testing.T) {
