@@ -65,6 +65,9 @@ func TestClassifySchemaAndRecent(t *testing.T) {
 	if !strings.Contains(joined, "reasoning=true when the request needs multi-step analysis") {
 		t.Fatal("router prompt missing reasoning rule")
 	}
+	if !strings.Contains(joined, "search online") || !strings.Contains(joined, "lookup") {
+		t.Fatal("router prompt missing web-search rule")
+	}
 	var wrap struct {
 		JSONSchema struct {
 			Schema struct {
