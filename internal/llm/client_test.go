@@ -74,6 +74,47 @@ func TestCompleteParsesToolCallsAndSendsTools(t *testing.T) {
 	}
 }
 
+func TestNamedToolChoice(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		_ = json.NewEncoder(w).Encode(completeResponse{
+			Choices: []struct {
+				Message Message `json:"message"`
+			}{{Message: Message{Role: RoleAssistant, Content: "ok"}}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL+"/v1", "qwen")
+	specs := []ToolSpec{{
+		Type: "function",
+		Function: FunctionSpec{
+			Name:       "propose_plan",
+			Parameters: json.RawMessage(`{"type":"object"}`),
+		},
+	}}
+	_, _, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, specs, ChatOptions{ToolChoice: "propose_plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(gotBody, &raw); err != nil {
+		t.Fatal(err)
+	}
+	var choice struct {
+		Type     string `json:"type"`
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(raw["tool_choice"], &choice); err != nil {
+		t.Fatal(err)
+	}
+	if choice.Type != "function" || choice.Function.Name != "propose_plan" {
+		t.Fatalf("tool_choice %s", raw["tool_choice"])
+	}
+}
+
 func TestCompleteOmitsToolsWhenEmpty(t *testing.T) {
 	var gotBody []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
