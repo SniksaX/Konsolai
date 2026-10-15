@@ -291,7 +291,9 @@ func run() int {
 	}
 	if sessionID != "" {
 		if s := mem.Store(); s != nil {
-			if err := s.EndSession(ctx, sessionID, sessionStatus(code)); err != nil {
+			endCtx, cancel := memory.Isolated(ctx)
+			defer cancel()
+			if err := s.EndSession(endCtx, sessionID, sessionStatus(code)); err != nil {
 				mem.Fail(err)
 			}
 		}
@@ -444,10 +446,7 @@ func runHowto(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, fac
 }
 
 func runAgent(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, mem *memory.Guard, sessionID string, projectID *int64, profile string, inv invocation, cwd string, prompter *ui.Prompter) int {
-	root := cwd
-	if inv.Mode == modeCode {
-		root = repo.Root(cwd)
-	}
+	root := repo.Root(cwd)
 	sg, err := safety.New(root)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "konsolai:", err)
