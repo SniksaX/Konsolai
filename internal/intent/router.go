@@ -31,6 +31,7 @@ lookup: needs facts from this machine or project (files, versions, processes, po
 act: perform operations on the system (create, move or delete files and dirs, install, run commands, git).
 build: write, modify or document code in a project (features, fixes, refactors, tests, docs, diagrams, exports).
 If the user explicitly asks to search online, look something up on the web, or check a URL -> lookup.
+References to the current location or its contents ('this', 'this one', 'here', 'this folder', 'the code here', 'ce dossier', 'ici', 'ce projet') mean the current directory -> lookup (or build if changes are requested). Never answer these without looking.
 When unsure between answer and anything else, choose answer if the message is a question.
 language is the ISO 639-1 code of the user's message.
 reasoning=true when the request needs multi-step analysis: debugging an error or a pasted command, comparing approaches, non-trivial code questions. false for greetings, simple facts and simple commands.`
