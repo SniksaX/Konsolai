@@ -687,6 +687,71 @@ func TestRunAccumulatesStats(t *testing.T) {
 	}
 }
 
+type countConfirm struct {
+	n, forced int
+	d         ui.Decision
+}
+
+func (c *countConfirm) Confirm(string, string) (ui.Decision, string, error) {
+	c.n++
+	return c.d, "", nil
+}
+func (c *countConfirm) ConfirmForced(string, string) (ui.Decision, string, error) {
+	c.forced++
+	return c.d, "", nil
+}
+
+func TestInPlanAutoApprove(t *testing.T) {
+	cc := &countConfirm{d: ui.Approve}
+	var buf strings.Builder
+	_, _, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "propose_plan", `{"summary":"a","steps":["write","touch"],"files":["a.txt"],"commands":["touch  x"]}`)),
+		assistant(call("2", "write_file", `{"path":"a.txt","content":"hi"}`)),
+		assistant(call("3", "run_shell", `{"cmd":"touch x"}`)),
+		assistant(call("4", "finish", `{"summary":"done"}`)),
+	}, cc, Config{RequirePlan: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cc.n != 1 {
+		t.Fatalf("confirm %d want 1 (plan only)", cc.n)
+	}
+	if cc.forced != 0 {
+		t.Fatalf("forced %d", cc.forced)
+	}
+	_ = buf
+}
+
+func TestInPlanMarkerAndWhitespace(t *testing.T) {
+	var buf strings.Builder
+	_, _, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "propose_plan", `{"summary":"a","steps":["t"],"files":["a.txt"],"commands":["touch   x"]}`)),
+		assistant(call("2", "run_shell", `{"cmd":"touch x"}`)),
+		assistant(call("3", "finish", `{"summary":"done"}`)),
+	}, stubConfirm{d: ui.Approve}, Config{RequirePlan: true, Out: &buf})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "(in plan)") {
+		t.Fatalf("%q", buf.String())
+	}
+}
+
+func TestApproveAllDoesNotCoverOutsidePlan(t *testing.T) {
+	cc := &countConfirm{d: ui.ApproveAll}
+	_, _, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "propose_plan", `{"summary":"a","steps":["a"],"files":["a.txt"]}`)),
+		assistant(call("2", "write_file", `{"path":"b.txt","content":"x"}`)),
+		assistant(call("3", "finish", `{"summary":"done"}`)),
+	}, cc, Config{RequirePlan: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cc.forced != 1 {
+		t.Fatalf("forced %d", cc.forced)
+	}
+}
+
 func TestAgentCompleteSpinner(t *testing.T) {
 	var buf bytes.Buffer
 	restore := ui.TestHook(&buf, true, 5*time.Millisecond, nil)
