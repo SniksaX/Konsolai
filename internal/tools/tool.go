@@ -83,12 +83,20 @@ type Result struct {
 	Change  *FileChange
 }
 
+type Options struct {
+	ReadOnlyShell bool
+}
+
 type Registry struct {
 	tools  []Tool
 	byName map[string]Tool
 }
 
-func NewRegistry(g *safety.Guard, out io.Writer, files FileLister, cache WebCache, facts FactStore) *Registry {
+func NewRegistry(g *safety.Guard, out io.Writer, files FileLister, cache WebCache, facts FactStore, opts ...Options) *Registry {
+	var o Options
+	if len(opts) > 0 {
+		o = opts[0]
+	}
 	if files == nil {
 		files = func(context.Context) ([]string, error) { return nil, nil }
 	}
@@ -99,7 +107,7 @@ func NewRegistry(g *safety.Guard, out io.Writer, files FileLister, cache WebCach
 		facts = NopFactStore{}
 	}
 	list := []Tool{
-		newShell(g, out),
+		newShell(g, out, o.ReadOnlyShell),
 		newWriteFile(g),
 		newReadFile(g),
 		newListDir(g),
