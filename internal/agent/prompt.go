@@ -12,6 +12,7 @@ Tool-generated configs (tsc --init, npm init, etc.) may differ from what you exp
 Only claim something works in finish if a tool call in this session verified it.
 Call finish exactly once, at the end, with a summary of at most 5 lines.
 Call remember ONLY if the user's current message explicitly asks to remember, save or note something (e.g. 'remember that ...'). Stating a fact is not a request to remember it.
+Plan only what the user asked for. Example: 'init a ts project and install express' means npm init, install express, typescript and types, and tsc --init. It does NOT mean writing a server, changing module type, or running anything.
 ` + preferReadOnlyCmd
 
 const CodePrompt = `You are Konsolai in code mode, a careful senior engineer working in the user's repository.
