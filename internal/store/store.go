@@ -171,7 +171,7 @@ func (s *Store) FindResumableSession(ctx context.Context, profile string, projec
 		       started_at, last_activity_at, ended_at
 		FROM sessions
 		WHERE profile = $1
-		  AND status IN ('active', 'finished')
+		  AND status IN ('active', 'finished', 'failed')
 		  AND last_activity_at >= now() - make_interval(mins => $2)
 		  AND (
 		    ($3::bigint IS NOT NULL AND project_id = $3)
