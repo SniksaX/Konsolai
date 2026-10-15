@@ -169,6 +169,10 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	var planFiles []string
 	var planCmds []string
 	explore := 0
+	noteSent := false
+	readonlyAfterNote := 0
+	toolsGone := false
+	goneNoteAdded := false
 	shellFail := false
 	var st Stats
 	st.RouterTime = cfg.RouterTime
@@ -196,9 +200,23 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		} else if think {
 			label = "thinking"
 		}
+		if toolsGone && !goneNoteAdded {
+			gone := llm.Message{Role: llm.RoleUser, Content: ToolsGoneNote}
+			msgs = append(msgs, gone)
+			_ = rec.Message(ctx, gone)
+			goneNoteAdded = true
+		}
+		stepSpecs := specs
+		if toolsGone {
+			if cfg.RequirePlan && !planApproved {
+				stepSpecs = planOnlySpecs(specs)
+			} else if !cfg.RequirePlan {
+				stepSpecs = nil
+			}
+		}
 		clear := ui.Start(label)
 		t0 := time.Now()
-		msg, usage, err := cfg.Client.Complete(ctx, msgs, specs, opts)
+		msg, usage, err := cfg.Client.Complete(ctx, msgs, stepSpecs, opts)
 		modelElapsed := time.Since(t0)
 		clear()
 		if err != nil {
@@ -261,6 +279,12 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				continue
 			}
 			kind := action.Kind()
+			if noteSent && kind == tools.ReadOnly {
+				readonlyAfterNote++
+				if readonlyAfterNote >= 2 {
+					toolsGone = true
+				}
+			}
 			if kind == tools.Mutating && cfg.RequirePlan && !planApproved {
 				tm := llm.Message{
 					Role:       llm.RoleTool,
@@ -408,6 +432,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			}
 			if cfg.ExploreBudget > 0 && explore >= cfg.ExploreBudget && cfg.ExploreNote != "" {
 				content += "\n\n" + cfg.ExploreNote
+				noteSent = true
 			}
 			if result.IsError {
 				sum := sha256.Sum256([]byte(result.Output))
@@ -430,7 +455,34 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			}
 		}
 	}
+	note := llm.Message{Role: llm.RoleUser, Content: MaxStepsNote}
+	msgs = append(msgs, note)
+	_ = rec.Message(ctx, note)
+	clear := ui.Start("thinking")
+	t0 := time.Now()
+	msg, usage, err := cfg.Client.Complete(ctx, msgs, nil, llm.ChatOptions{Thinking: false, Temperature: temp})
+	clear()
+	if err == nil {
+		st.Steps++
+		st.ModelTime += time.Since(t0)
+		st.PromptTokens += usage.PromptTokens
+		st.CompletionTokens += usage.CompletionTokens
+		text := trimLeadingBlanks(msg.Content)
+		if strings.TrimSpace(text) != "" {
+			fmt.Fprintln(cfg.Out)
+			writeAnswer(cfg.Out, text, cfg.Plain)
+		}
+	}
 	return ErrMaxSteps
+}
+
+func planOnlySpecs(specs []llm.ToolSpec) []llm.ToolSpec {
+	for _, s := range specs {
+		if s.Function.Name == "propose_plan" {
+			return []llm.ToolSpec{s}
+		}
+	}
+	return nil
 }
 
 func writeAnswer(w io.Writer, text string, plain bool) {
