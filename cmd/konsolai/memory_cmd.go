@@ -10,9 +10,23 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/siraj/konsolai/internal/diff"
 	"github.com/siraj/konsolai/internal/memory"
 	"github.com/siraj/konsolai/internal/repo"
 )
+
+var askRestore = confirmRestoreAnyway
+
+func shouldForceRestore(yes bool) (bool, error) {
+	if yes {
+		return false, nil
+	}
+	ans, err := askRestore()
+	if err != nil {
+		return false, err
+	}
+	return ans == "r" || ans == "restore", nil
+}
 
 func runHistory(ctx context.Context, mem *memory.Guard, profile string) int {
 	s := mem.Store()
@@ -162,8 +176,16 @@ func runUndo(ctx context.Context, mem *memory.Guard, projectID *int64, cwd strin
 				continue
 			}
 			if sha256Hex(cur) != r.AfterHash {
-				fmt.Printf("%s: modified since, skipped\n", r.Path)
-				continue
+				fmt.Println(diff.Unified(r.Path, string(cur), string(r.BeforeContent), 3))
+				ok, err := shouldForceRestore(yes)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "konsolai:", err)
+					return 1
+				}
+				if !ok {
+					fmt.Printf("%s: modified since, skipped\n", r.Path)
+					continue
+				}
 			}
 			if err := os.Remove(full); err != nil {
 				fmt.Printf("%s: %v\n", r.Path, err)
@@ -176,8 +198,16 @@ func runUndo(ctx context.Context, mem *memory.Guard, projectID *int64, cwd strin
 				continue
 			}
 			if sha256Hex(cur) != r.AfterHash {
-				fmt.Printf("%s: modified since, skipped\n", r.Path)
-				continue
+				fmt.Println(diff.Unified(r.Path, string(cur), string(r.BeforeContent), 3))
+				ok, err := shouldForceRestore(yes)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "konsolai:", err)
+					return 1
+				}
+				if !ok {
+					fmt.Printf("%s: modified since, skipped\n", r.Path)
+					continue
+				}
 			}
 			if err := atomicWriteBytes(full, r.BeforeContent); err != nil {
 				fmt.Printf("%s: %v\n", r.Path, err)
@@ -191,6 +221,20 @@ func runUndo(ctx context.Context, mem *memory.Guard, projectID *int64, cwd strin
 	}
 	fmt.Println("undo covers file edits only; shell command effects are not reverted")
 	return 0
+}
+
+func confirmRestoreAnyway() (string, error) {
+	f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	fmt.Fprint(f, "[r]estore anyway [s]kip ")
+	sc := bufio.NewScanner(f)
+	if !sc.Scan() {
+		return "", sc.Err()
+	}
+	return strings.ToLower(strings.TrimSpace(sc.Text())), nil
 }
 
 func confirmUndo() (bool, error) {
