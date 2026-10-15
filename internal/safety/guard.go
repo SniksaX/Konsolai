@@ -10,9 +10,16 @@ import (
 
 type Guard struct {
 	root string
+	base string
 }
 
 func New(root string) (*Guard, error) {
+	return NewAt(root, root)
+}
+
+// NewAt confines paths to root (the repo root, or cwd when there is no repo)
+// and resolves relative paths against base (the invocation cwd).
+func NewAt(root, base string) (*Guard, error) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		return nil, fmt.Errorf("safety: abs: %w", err)
@@ -21,11 +28,26 @@ func New(root string) (*Guard, error) {
 	if err != nil {
 		return nil, fmt.Errorf("safety: eval root: %w", err)
 	}
-	return &Guard{root: eval}, nil
+	babs, err := filepath.Abs(base)
+	if err != nil {
+		return nil, fmt.Errorf("safety: abs base: %w", err)
+	}
+	beval, err := filepath.EvalSymlinks(babs)
+	if err != nil {
+		return nil, fmt.Errorf("safety: eval base: %w", err)
+	}
+	if !containsPath(eval, beval) {
+		return nil, fmt.Errorf("safety: base %s is outside root %s", beval, eval)
+	}
+	return &Guard{root: eval, base: beval}, nil
 }
 
 func (g *Guard) Root() string {
 	return g.root
+}
+
+func (g *Guard) Base() string {
+	return g.base
 }
 
 type DeniedError struct {
@@ -80,6 +102,15 @@ func (g *Guard) CheckCommand(cmd string) error {
 }
 
 func (g *Guard) ResolvePath(p string) (string, error) {
+	return g.resolve(p, g.base)
+}
+
+// ResolveFromRoot joins a relative path to Root (for FileLister paths).
+func (g *Guard) ResolveFromRoot(p string) (string, error) {
+	return g.resolve(p, g.root)
+}
+
+func (g *Guard) resolve(p, joinRoot string) (string, error) {
 	if strings.HasPrefix(p, "~") {
 		return "", &DeniedError{Rule: "tilde", Detail: p}
 	}
@@ -90,7 +121,7 @@ func (g *Guard) ResolvePath(p string) (string, error) {
 	if filepath.IsAbs(p) {
 		abs = filepath.Clean(p)
 	} else {
-		abs = filepath.Clean(filepath.Join(g.root, p))
+		abs = filepath.Clean(filepath.Join(joinRoot, p))
 	}
 	if !containsPath(g.root, abs) {
 		return "", &DeniedError{Rule: "escape", Detail: p}
@@ -103,6 +134,16 @@ func (g *Guard) ResolvePath(p string) (string, error) {
 		return "", &DeniedError{Rule: "symlink-escape", Detail: p}
 	}
 	return resolved, nil
+}
+
+// Display formats a root-relative path: relative to Base when inside it,
+// otherwise "<root>/"+rel.
+func (g *Guard) Display(rootRel string) string {
+	abs := filepath.Join(g.root, filepath.FromSlash(rootRel))
+	if rel, err := filepath.Rel(g.base, abs); err == nil && containsPath(g.base, abs) {
+		return filepath.ToSlash(rel)
+	}
+	return "<root>/" + filepath.ToSlash(rootRel)
 }
 
 func evalDeepest(p string) (string, error) {
