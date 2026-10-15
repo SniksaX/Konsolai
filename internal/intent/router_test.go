@@ -90,8 +90,12 @@ func TestClassifySchemaAndRecent(t *testing.T) {
 	if _, ok := wrap.JSONSchema.Schema.Properties["task"]; !ok {
 		t.Fatal("schema missing task")
 	}
+	if _, ok := wrap.JSONSchema.Schema.Properties["continues_previous"]; !ok {
+		t.Fatal("schema missing continues_previous")
+	}
 	found := false
 	taskReq := false
+	contReq := false
 	for _, r := range wrap.JSONSchema.Schema.Required {
 		if r == "reasoning" {
 			found = true
@@ -99,12 +103,18 @@ func TestClassifySchemaAndRecent(t *testing.T) {
 		if r == "task" {
 			taskReq = true
 		}
+		if r == "continues_previous" {
+			contReq = true
+		}
 	}
-	if !found || !taskReq {
+	if !found || !taskReq || !contReq {
 		t.Fatalf("required %v", wrap.JSONSchema.Schema.Required)
 	}
 	if !strings.Contains(joined, `task is "analysis"`) {
 		t.Fatal("router prompt missing task rule")
+	}
+	if !strings.Contains(joined, "continues_previous=true only if") {
+		t.Fatal("router prompt missing continues_previous rule")
 	}
 }
 
@@ -113,8 +123,8 @@ func TestParseDecision(t *testing.T) {
 	if !ok || d.Intent != Build || d.Language != "fr" || d.Reasoning || d.Task != TaskOther {
 		t.Fatalf("%+v %v", d, ok)
 	}
-	d, ok = parseDecision(`{"intent":"lookup","language":"en","reason":"review","reasoning":true,"task":"analysis"}`)
-	if !ok || d.Task != TaskAnalysis {
+	d, ok = parseDecision(`{"intent":"lookup","language":"en","reason":"review","reasoning":true,"task":"analysis","continues_previous":true}`)
+	if !ok || d.Task != TaskAnalysis || !d.ContinuesPrevious {
 		t.Fatalf("task %+v %v", d, ok)
 	}
 	d, ok = parseDecision(`{"intent":"answer","language":"en","reason":"debug","reasoning":true}`)
@@ -138,14 +148,34 @@ func TestDeicticRoutingPhrases(t *testing.T) {
 }
 
 func TestFallback(t *testing.T) {
-	if g := fallback("what is go?", true); g.Intent != Lookup {
+	if g := fallback("what is go?", true, false); g.Intent != Lookup || g.ContinuesPrevious {
 		t.Fatalf("%+v", g)
 	}
-	if g := fallback("what is go?", false); g.Intent != Answer {
+	if g := fallback("what is go?", false, true); g.Intent != Answer || !g.ContinuesPrevious {
 		t.Fatalf("%+v", g)
 	}
-	if g := fallback("create a folder", false); g.Intent != Act {
+	if g := fallback("create a folder", false, false); g.Intent != Act {
 		t.Fatalf("%+v", g)
+	}
+}
+
+func TestClassifyTellsNoPrevious(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]any{
+				"role": "assistant", "content": `{"intent":"answer","language":"en","reason":"q","reasoning":false,"task":"other","continues_previous":false}`,
+			}}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	c := llm.New(srv.URL+"/v1", "qwen")
+	if _, err := Classify(context.Background(), c, "hi", nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(gotBody), "There is no previous conversation.") {
+		t.Fatalf("%s", gotBody)
 	}
 }
 
