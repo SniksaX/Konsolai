@@ -18,7 +18,7 @@ func TestClassifySchemaAndRecent(t *testing.T) {
 		gotBody, _ = io.ReadAll(r.Body)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{{"message": map[string]any{
-				"role": "assistant", "content": `{"intent":"act","language":"en","reason":"do it"}`,
+				"role": "assistant", "content": `{"intent":"act","language":"en","reason":"do it","reasoning":true}`,
 			}}},
 		})
 	}))
@@ -34,7 +34,7 @@ func TestClassifySchemaAndRecent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Intent != Act {
+	if d.Intent != Act || !d.Reasoning {
 		t.Fatalf("%+v", d)
 	}
 	var raw map[string]json.RawMessage
@@ -62,11 +62,41 @@ func TestClassifySchemaAndRecent(t *testing.T) {
 	if strings.Contains(joined, "ignored") {
 		t.Fatal("tool message included")
 	}
+	if !strings.Contains(joined, "reasoning=true when the request needs multi-step analysis") {
+		t.Fatal("router prompt missing reasoning rule")
+	}
+	var wrap struct {
+		JSONSchema struct {
+			Schema struct {
+				Required   []string                   `json:"required"`
+				Properties map[string]json.RawMessage `json:"properties"`
+			} `json:"schema"`
+		} `json:"json_schema"`
+	}
+	if err := json.Unmarshal(raw["response_format"], &wrap); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := wrap.JSONSchema.Schema.Properties["reasoning"]; !ok {
+		t.Fatal("schema missing reasoning")
+	}
+	found := false
+	for _, r := range wrap.JSONSchema.Schema.Required {
+		if r == "reasoning" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("required %v", wrap.JSONSchema.Schema.Required)
+	}
 }
 
 func TestParseDecision(t *testing.T) {
-	d, ok := parseDecision(`{"intent":"build","language":"fr","reason":"code"}`)
-	if !ok || d.Intent != Build || d.Language != "fr" {
+	d, ok := parseDecision(`{"intent":"build","language":"fr","reason":"code","reasoning":false}`)
+	if !ok || d.Intent != Build || d.Language != "fr" || d.Reasoning {
+		t.Fatalf("%+v %v", d, ok)
+	}
+	d, ok = parseDecision(`{"intent":"answer","language":"en","reason":"debug","reasoning":true}`)
+	if !ok || !d.Reasoning {
 		t.Fatalf("%+v %v", d, ok)
 	}
 	if _, ok := parseDecision(`{"intent":"nope","language":"en","reason":"x"}`); ok {
