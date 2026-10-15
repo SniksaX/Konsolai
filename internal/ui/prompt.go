@@ -49,11 +49,11 @@ func (p *Prompter) confirm(summary, preview string, force bool) (Decision, strin
 	}
 	in := bufio.NewReader(p.tty)
 	for {
-		fmt.Fprintln(p.tty, summary)
+		fmt.Fprintln(p.tty, Current().Strong(summary))
 		if preview != "" {
-			fmt.Fprintln(p.tty, preview)
+			fmt.Fprintln(p.tty, ColorDiff(preview))
 		}
-		fmt.Fprint(p.tty, "[y]es [n]o [a]ll [q]uit ")
+		fmt.Fprint(p.tty, PromptOptions())
 		line, err := in.ReadString('\n')
 		if err != nil {
 			return 0, "", fmt.Errorf("ui: read prompt: %w", err)
