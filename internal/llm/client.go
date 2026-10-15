@@ -108,6 +108,20 @@ type ChatOptions struct {
 	ResponseSchema json.RawMessage
 }
 
+type Usage struct {
+	PromptTokens     int
+	CompletionTokens int
+}
+
+type usageJSON struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+}
+
+type streamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
+}
+
 type responseFormat struct {
 	Type       string         `json:"type"`
 	JSONSchema jsonSchemaSpec `json:"json_schema"`
@@ -129,12 +143,14 @@ type chatRequest struct {
 	Tools              []ToolSpec         `json:"tools,omitempty"`
 	ToolChoice         string             `json:"tool_choice,omitempty"`
 	ResponseFormat     *responseFormat    `json:"response_format,omitempty"`
+	StreamOptions      *streamOptions     `json:"stream_options,omitempty"`
 }
 
 type completeResponse struct {
 	Choices []struct {
 		Message Message `json:"message"`
 	} `json:"choices"`
+	Usage *usageJSON `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
@@ -150,16 +166,24 @@ type streamChunk struct {
 			Content string `json:"content"`
 		} `json:"delta"`
 	} `json:"choices"`
+	Usage *usageJSON `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
 }
 
+func usageOf(u *usageJSON) Usage {
+	if u == nil {
+		return Usage{}
+	}
+	return Usage{PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens}
+}
+
 // Complete sends a non-streaming chat completion request and returns the assistant message.
-func (c *Client) Complete(ctx context.Context, msgs []Message, tools []ToolSpec, opts ChatOptions) (Message, error) {
+func (c *Client) Complete(ctx context.Context, msgs []Message, tools []ToolSpec, opts ChatOptions) (Message, Usage, error) {
 	model, err := c.ResolveModel(ctx)
 	if err != nil {
-		return Message{}, err
+		return Message{}, Usage{}, err
 	}
 	reqBody := chatRequest{
 		Model:              model,
@@ -185,42 +209,42 @@ func (c *Client) Complete(ctx context.Context, msgs []Message, tools []ToolSpec,
 	}
 	payload, err := json.Marshal(reqBody)
 	if err != nil {
-		return Message{}, fmt.Errorf("llm: encode request: %w", err)
+		return Message{}, Usage{}, fmt.Errorf("llm: encode request: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(payload))
 	if err != nil {
-		return Message{}, fmt.Errorf("llm: build chat request: %w", err)
+		return Message{}, Usage{}, fmt.Errorf("llm: build chat request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return Message{}, fmt.Errorf("llm: chat: %w", err)
+		return Message{}, Usage{}, fmt.Errorf("llm: chat: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return Message{}, httpError(resp)
+		return Message{}, Usage{}, httpError(resp)
 	}
 	var body completeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return Message{}, fmt.Errorf("llm: decode completion: %w", err)
+		return Message{}, Usage{}, fmt.Errorf("llm: decode completion: %w", err)
 	}
 	if body.Error != nil {
-		return Message{}, fmt.Errorf("llm: server error: %s", body.Error.Message)
+		return Message{}, Usage{}, fmt.Errorf("llm: server error: %s", body.Error.Message)
 	}
 	if len(body.Choices) == 0 {
-		return Message{}, errors.New("llm: no choices")
+		return Message{}, Usage{}, errors.New("llm: no choices")
 	}
 	msg := body.Choices[0].Message
 	msg.Role = RoleAssistant
-	return msg, nil
+	return msg, usageOf(body.Usage), nil
 }
 
 // Stream sends a chat completion request and invokes onDelta for each content token.
-func (c *Client) Stream(ctx context.Context, msgs []Message, opts ChatOptions, onDelta func(string) error) error {
+func (c *Client) Stream(ctx context.Context, msgs []Message, opts ChatOptions, onDelta func(string) error) (Usage, error) {
 	model, err := c.ResolveModel(ctx)
 	if err != nil {
-		return err
+		return Usage{}, err
 	}
 	payload, err := json.Marshal(chatRequest{
 		Model:              model,
@@ -228,26 +252,28 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, opts ChatOptions, o
 		Stream:             true,
 		Temperature:        opts.Temperature,
 		ChatTemplateKwargs: chatTemplateKwargs{EnableThinking: opts.Thinking},
+		StreamOptions:      &streamOptions{IncludeUsage: true},
 	})
 	if err != nil {
-		return fmt.Errorf("llm: encode request: %w", err)
+		return Usage{}, fmt.Errorf("llm: encode request: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(payload))
 	if err != nil {
-		return fmt.Errorf("llm: build chat request: %w", err)
+		return Usage{}, fmt.Errorf("llm: build chat request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("llm: chat: %w", err)
+		return Usage{}, fmt.Errorf("llm: chat: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return httpError(resp)
+		return Usage{}, httpError(resp)
 	}
 
+	var usage Usage
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 64*1024), 1<<20)
 	for sc.Scan() {
@@ -257,28 +283,31 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, opts ChatOptions, o
 		}
 		data = bytes.TrimSpace(data)
 		if bytes.Equal(data, []byte("[DONE]")) {
-			return nil
+			return usage, nil
 		}
 		var chunk streamChunk
 		if err := json.Unmarshal(data, &chunk); err != nil {
-			return fmt.Errorf("llm: decode chunk: %w", err)
+			return Usage{}, fmt.Errorf("llm: decode chunk: %w", err)
 		}
 		if chunk.Error != nil {
-			return fmt.Errorf("llm: server error: %s", chunk.Error.Message)
+			return Usage{}, fmt.Errorf("llm: server error: %s", chunk.Error.Message)
+		}
+		if chunk.Usage != nil {
+			usage = usageOf(chunk.Usage)
 		}
 		for _, choice := range chunk.Choices {
 			if choice.Delta.Content == "" {
 				continue
 			}
 			if err := onDelta(choice.Delta.Content); err != nil {
-				return err
+				return Usage{}, err
 			}
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return fmt.Errorf("llm: read stream: %w", err)
+		return Usage{}, fmt.Errorf("llm: read stream: %w", err)
 	}
-	return nil
+	return usage, nil
 }
 
 func httpError(resp *http.Response) error {
