@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1370,5 +1371,110 @@ func TestDocsNudgeFiresOnce(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "Here is the overview in chat") {
 		t.Fatalf("pre-nudge text should not finish: %q", out.String())
+	}
+}
+
+func TestLeanResumeElidesOldToolOutputs(t *testing.T) {
+	longArgs := `{"path":"` + strings.Repeat("x", 300) + `"}`
+	hist := []llm.Message{
+		{Role: llm.RoleUser, Content: "first"},
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call("1", "read_file", longArgs)}},
+		{Role: llm.RoleTool, Content: "huge old output from read_file", ToolCallID: "1"},
+		{Role: llm.RoleAssistant, Content: "done first"},
+		{Role: llm.RoleUser, Content: "second"},
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call("2", "read_file", `{"path":"b.txt"}`)}},
+		{Role: llm.RoleTool, Content: "recent output", ToolCallID: "2"},
+	}
+	got := LeanResume(hist, 0.30)
+	if !toolProtocolValid(got) {
+		t.Fatal("protocol broken")
+	}
+	var old, recent bool
+	for _, m := range got {
+		if m.Role == llm.RoleTool && m.ToolCallID == "1" {
+			if m.Content != resumeToolElided {
+				t.Fatalf("old tool %q", m.Content)
+			}
+			old = true
+		}
+		if m.Role == llm.RoleTool && m.ToolCallID == "2" {
+			if m.Content != "recent output" {
+				t.Fatalf("recent tool %q", m.Content)
+			}
+			recent = true
+		}
+		for _, c := range m.ToolCalls {
+			if len(c.Function.Arguments) > 200 {
+				t.Fatalf("args len %d", len(c.Function.Arguments))
+			}
+		}
+	}
+	if !old || !recent {
+		t.Fatalf("old=%v recent=%v", old, recent)
+	}
+	if hist[1].ToolCalls[0].Function.Arguments != longArgs {
+		t.Fatal("LeanResume must not mutate the input")
+	}
+}
+
+func TestLeanResumeCapsPairs(t *testing.T) {
+	var hist []llm.Message
+	for i := 0; i < 12; i++ {
+		hist = append(hist,
+			llm.Message{Role: llm.RoleUser, Content: fmt.Sprintf("user-%d ", i) + strings.Repeat("u", 2500)},
+			llm.Message{Role: llm.RoleAssistant, Content: fmt.Sprintf("asst-%d ", i) + strings.Repeat("a", 2500)},
+		)
+	}
+	got := LeanResume(hist, 0.30)
+	if resumeTokens(got, 0.30) > resumeTokenCap {
+		t.Fatalf("tokens %d", resumeTokens(got, 0.30))
+	}
+	if len(got) == 0 || got[0].Role != llm.RoleUser {
+		t.Fatalf("pair broken: first %+v", got)
+	}
+	for i := 0; i < len(got)-1; i++ {
+		if got[i].Role == llm.RoleUser && got[i+1].Role != llm.RoleAssistant {
+			t.Fatalf("user not followed by assistant at %d", i)
+		}
+	}
+	last := got[len(got)-1]
+	if last.Role != llm.RoleAssistant || !strings.Contains(last.Content, "asst-11") {
+		t.Fatalf("dropped the newest pair: %+v", last)
+	}
+	if strings.Contains(got[0].Content, "user-0") {
+		t.Fatal("oldest pair should have been dropped")
+	}
+}
+
+func TestLeanResumeKeepsToolProtocol(t *testing.T) {
+	var hist []llm.Message
+	for i := 0; i < 8; i++ {
+		id := fmt.Sprintf("c%d", i)
+		hist = append(hist,
+			llm.Message{Role: llm.RoleUser, Content: fmt.Sprintf("q%d %s", i, strings.Repeat("q", 2000))},
+			llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call(id, "read_file", `{"path":"f.txt"}`)}},
+			llm.Message{Role: llm.RoleTool, Content: strings.Repeat("out", 800), ToolCallID: id},
+		)
+	}
+	got := LeanResume(hist, 0.30)
+	if !toolProtocolValid(got) {
+		t.Fatalf("invalid protocol after cap: %d msgs", len(got))
+	}
+	for i, m := range got {
+		if m.Role != llm.RoleTool {
+			continue
+		}
+		if i == 0 || got[i-1].Role != llm.RoleAssistant {
+			t.Fatalf("tool %d not after assistant", i)
+		}
+		found := false
+		for _, c := range got[i-1].ToolCalls {
+			if c.ID == m.ToolCallID {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("tool %s has no matching tool_call", m.ToolCallID)
+		}
 	}
 }
