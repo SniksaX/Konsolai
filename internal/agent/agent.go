@@ -188,7 +188,13 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		think := cfg.ThinkingPolicy.enabled(planApproved, shellFail)
 		opts := llm.ChatOptions{Thinking: think, Temperature: temp}
 		shellFail = false
-		clear := ui.Status(cfg.Out, "planning...")
+		label := "working"
+		if cfg.RequirePlan && !planApproved {
+			label = "planning"
+		} else if think {
+			label = "thinking"
+		}
+		clear := ui.Start(label)
 		t0 := time.Now()
 		msg, usage, err := cfg.Client.Complete(ctx, msgs, specs, opts)
 		modelElapsed := time.Since(t0)
