@@ -46,9 +46,9 @@ func (t *finishTool) Prepare(rawArgs string) (Action, error) {
 	return &finishAction{summary: args.Summary}, nil
 }
 
-func (a *finishAction) Summary() string { return "finish" }
-func (a *finishAction) Preview() string { return a.summary }
-func (a *finishAction) ReadOnly() bool  { return true }
+func (a *finishAction) Summary() string  { return "finish" }
+func (a *finishAction) Preview() string  { return a.summary }
+func (a *finishAction) Kind() ActionKind { return Final }
 
 func (a *finishAction) Run(ctx context.Context) (Result, error) {
 	if err := ctx.Err(); err != nil {

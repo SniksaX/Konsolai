@@ -104,7 +104,7 @@ func setup(t *testing.T, replies []llm.Message, confirm Confirmer, maxSteps int)
 	}
 	err = Run(context.Background(), Config{
 		Client:    client,
-		Tools:     tools.NewRegistry(g, io.Discard),
+		Tools:     tools.NewRegistry(g, io.Discard, nil),
 		Confirmer: confirm,
 		Out:       io.Discard,
 		MaxSteps:  maxSteps,
@@ -189,6 +189,118 @@ func TestRunRepeatedFailureNote(t *testing.T) {
 	got := rep.lastTool()
 	if !strings.Contains(got.Content, "already failed") {
 		t.Fatalf("want already-failed note, got %q", got.Content)
+	}
+}
+
+func setupCfg(t *testing.T, replies []llm.Message, confirm Confirmer, extra Config) (string, *replay, error) {
+	t.Helper()
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, rep := newReplay(t, replies)
+	if confirm == nil {
+		confirm = stubConfirm{d: ui.Approve}
+	}
+	extra.Client = client
+	if extra.Tools == nil {
+		extra.Tools = tools.NewRegistry(g, io.Discard, nil)
+	}
+	extra.Confirmer = confirm
+	if extra.Out == nil {
+		extra.Out = io.Discard
+	}
+	if extra.MaxSteps == 0 {
+		extra.MaxSteps = 15
+	}
+	err = Run(context.Background(), extra, "sys", "do the task")
+	return root, rep, err
+}
+
+func TestPlanGateBlocksMutating(t *testing.T) {
+	root, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "write_file", `{"path":"a.txt","content":"x"}`)),
+		{Role: llm.RoleAssistant, Content: "ok"},
+	}, nil, Config{RequirePlan: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := rep.lastTool()
+	if !strings.Contains(got.Content, "plan not approved") {
+		t.Fatalf("%q", got.Content)
+	}
+	if _, err := os.Stat(filepath.Join(root, "a.txt")); !os.IsNotExist(err) {
+		t.Fatal("mutating write should not have run")
+	}
+}
+
+func TestPlanApprovalAllowsMutating(t *testing.T) {
+	root, _, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "propose_plan", `{"summary":"add a.txt","steps":["write a.txt"]}`)),
+		assistant(call("2", "write_file", `{"path":"a.txt","content":"ok"}`)),
+		assistant(call("3", "finish", `{"summary":"done"}`)),
+	}, stubConfirm{d: ui.Approve}, Config{RequirePlan: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(root, "a.txt"))
+	if err != nil || string(b) != "ok" {
+		t.Fatalf("%q %v", b, err)
+	}
+}
+
+func TestPlanRejectFeedsReason(t *testing.T) {
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "propose_plan", `{"summary":"x","steps":["y"]}`)),
+		{Role: llm.RoleAssistant, Content: "ok"},
+	}, stubConfirm{d: ui.Reject, reason: "too risky"}, Config{RequirePlan: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := rep.lastTool()
+	if !strings.Contains(got.Content, "too risky") {
+		t.Fatalf("%q", got.Content)
+	}
+}
+
+func TestContextElision(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "big.txt"), []byte(strings.Repeat("hello world\n", 80)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := func(context.Context) ([]string, error) { return []string{"big.txt"}, nil }
+	var replies []llm.Message
+	for i := 0; i < 8; i++ {
+		replies = append(replies, assistant(call(string(rune('a'+i)), "read_file", `{"path":"big.txt"}`)))
+	}
+	replies = append(replies, llm.Message{Role: llm.RoleAssistant, Content: "done"})
+	client, rep := newReplay(t, replies)
+	err = Run(context.Background(), Config{
+		Client:              client,
+		Tools:               tools.NewRegistry(g, io.Discard, list),
+		Confirmer:           stubConfirm{d: ui.Approve},
+		Out:                 io.Discard,
+		MaxSteps:            15,
+		ContextBudgetTokens: 80,
+	}, "sys", "task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, req := range rep.reqs {
+		for _, m := range req {
+			if m.Role == llm.RoleTool && m.Content == elidedOutput {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected an elided tool message")
 	}
 }
 

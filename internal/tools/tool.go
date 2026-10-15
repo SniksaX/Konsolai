@@ -8,6 +8,17 @@ import (
 	"github.com/siraj/konsolai/internal/safety"
 )
 
+type ActionKind int
+
+const (
+	ReadOnly ActionKind = iota
+	Mutating
+	Plan
+	Final
+)
+
+type FileLister func(ctx context.Context) ([]string, error)
+
 type Tool interface {
 	Spec() llm.ToolSpec
 	Prepare(rawArgs string) (Action, error)
@@ -16,7 +27,7 @@ type Tool interface {
 type Action interface {
 	Summary() string
 	Preview() string
-	ReadOnly() bool
+	Kind() ActionKind
 	Run(ctx context.Context) (Result, error)
 }
 
@@ -32,12 +43,19 @@ type Registry struct {
 	byName map[string]Tool
 }
 
-func NewRegistry(g *safety.Guard, out io.Writer) *Registry {
+func NewRegistry(g *safety.Guard, out io.Writer, files FileLister) *Registry {
+	if files == nil {
+		files = func(context.Context) ([]string, error) { return nil, nil }
+	}
 	list := []Tool{
 		newShell(g, out),
 		newWriteFile(g),
 		newReadFile(g),
 		newListDir(g),
+		newSearch(g, files),
+		newFindFiles(files),
+		newEditFile(g),
+		newProposePlan(),
 		newFinish(),
 	}
 	byName := make(map[string]Tool, len(list))

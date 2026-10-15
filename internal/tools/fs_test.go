@@ -18,7 +18,7 @@ func fsRegistry(t *testing.T) (*safety.Guard, *Registry, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return g, NewRegistry(g, os.Stdout), root
+	return g, NewRegistry(g, os.Stdout, nil), root
 }
 
 func TestWriteFileAtomicAndMode(t *testing.T) {

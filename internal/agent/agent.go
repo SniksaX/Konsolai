@@ -19,12 +19,16 @@ type Confirmer interface {
 }
 
 type Config struct {
-	Client    *llm.Client
-	Tools     *tools.Registry
-	Confirmer Confirmer
-	Out       io.Writer
-	MaxSteps  int
-	Thinking  bool
+	Client              *llm.Client
+	Tools               *tools.Registry
+	Confirmer           Confirmer
+	Out                 io.Writer
+	MaxSteps            int
+	Thinking            bool
+	RequirePlan         bool
+	ContextBudgetTokens int
+	Prompt              string
+	Temperature         float64
 }
 
 var (
@@ -32,16 +36,28 @@ var (
 	ErrMaxSteps = errors.New("agent: max steps exceeded")
 )
 
+const elidedOutput = "[output elided to save context]"
+
 func Run(ctx context.Context, cfg Config, systemContext, task string) error {
+	prompt := cfg.Prompt
+	if prompt == "" {
+		prompt = systemPrompt
+	}
+	temp := cfg.Temperature
+	if temp == 0 {
+		temp = 0.2
+	}
 	msgs := []llm.Message{
-		{Role: llm.RoleSystem, Content: systemPrompt + "\n\n" + systemContext},
+		{Role: llm.RoleSystem, Content: prompt + "\n\n" + systemContext},
 		{Role: llm.RoleUser, Content: task},
 	}
-	opts := llm.ChatOptions{Thinking: cfg.Thinking, Temperature: 0.2}
+	opts := llm.ChatOptions{Thinking: cfg.Thinking, Temperature: temp}
 	specs := cfg.Tools.Specs()
 	seenFail := make(map[string]struct{})
+	planApproved := false
 
 	for step := 0; step < cfg.MaxSteps; step++ {
+		elideToolOutputs(msgs, cfg.ContextBudgetTokens)
 		clear := ui.Status(cfg.Out, "planning...")
 		msg, err := cfg.Client.Complete(ctx, msgs, specs, opts)
 		clear()
@@ -82,7 +98,16 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				})
 				continue
 			}
-			if !action.ReadOnly() {
+			kind := action.Kind()
+			if kind == tools.Mutating && cfg.RequirePlan && !planApproved {
+				msgs = append(msgs, llm.Message{
+					Role:       llm.RoleTool,
+					Content:    "error: plan not approved. Explore with read-only tools, then call propose_plan.",
+					ToolCallID: call.ID,
+				})
+				continue
+			}
+			if kind != tools.ReadOnly && kind != tools.Final {
 				d, reason, err := cfg.Confirmer.Confirm(action.Summary(), action.Preview())
 				if err != nil {
 					return err
@@ -97,9 +122,13 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					continue
 				case ui.Quit:
 					return ErrAborted
+				case ui.Approve, ui.ApproveAll:
+					if kind == tools.Plan {
+						planApproved = true
+					}
 				}
 			}
-			finish := call.Function.Name == "finish"
+			finish := action.Kind() == tools.Final
 			if !finish {
 				fmt.Fprintln(cfg.Out, ui.Cyan("▸ ")+action.Summary())
 			}
@@ -141,4 +170,38 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 
 func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%.1fs", d.Seconds())
+}
+
+func tokenEstimate(msgs []llm.Message) int {
+	n := 0
+	for _, m := range msgs {
+		n += len(m.Content)
+		for _, c := range m.ToolCalls {
+			n += len(c.Function.Name) + len(c.Function.Arguments)
+		}
+	}
+	return n / 4
+}
+
+func elideToolOutputs(msgs []llm.Message, budget int) {
+	if budget <= 0 {
+		return
+	}
+	for tokenEstimate(msgs) > budget {
+		limit := len(msgs) - 6
+		if limit <= 0 {
+			return
+		}
+		idx := -1
+		for i := 0; i < limit; i++ {
+			if msgs[i].Role == llm.RoleTool && msgs[i].Content != elidedOutput {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 {
+			return
+		}
+		msgs[idx].Content = elidedOutput
+	}
 }

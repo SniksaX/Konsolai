@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
 	"github.com/siraj/konsolai/internal/agent"
 	"github.com/siraj/konsolai/internal/llm"
+	"github.com/siraj/konsolai/internal/repo"
 	"github.com/siraj/konsolai/internal/safety"
 	"github.com/siraj/konsolai/internal/sysctx"
 	"github.com/siraj/konsolai/internal/tools"
@@ -23,6 +26,7 @@ var _ agent.Confirmer = (*ui.Prompter)(nil)
 
 const (
 	defaultEndpoint = "http://fatboy:11436/v1"
+	usageText       = `usage: konsolai [--yes] [howto|do|code] "<request>"`
 
 	howtoSystemPrompt = `You are Konsolai, a terminal assistant running inside the user's shell.
 Answer with the exact command(s) that accomplish the request in a single bash code block,
@@ -31,30 +35,69 @@ Prefer tools present on a default install of the user's OS. Use paths relative t
 If the request is destructive or ambiguous, say so in one line. No preamble, no closing remarks.`
 )
 
+type mode int
+
+const (
+	modeDo mode = iota
+	modeHowto
+	modeCode
+)
+
+type invocation struct {
+	Mode    mode
+	Request string
+	Yes     bool
+}
+
+var errRequest = errors.New(`request must be a single argument in double quotes, e.g. konsolai code "add a /health endpoint"`)
+
+func parseArgs(args []string) (invocation, error) {
+	if len(args) > 0 && args[0] == "--" {
+		args = args[1:]
+	}
+	fs := flag.NewFlagSet("konsolai", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	yes := fs.Bool("yes", false, "auto-approve non-denylisted actions")
+	if err := fs.Parse(args); err != nil {
+		return invocation{}, err
+	}
+	rest := fs.Args()
+	if len(rest) == 0 {
+		return invocation{}, errRequest
+	}
+	inv := invocation{Mode: modeDo, Yes: *yes}
+	switch rest[0] {
+	case "howto":
+		inv.Mode = modeHowto
+		rest = rest[1:]
+	case "do":
+		inv.Mode = modeDo
+		rest = rest[1:]
+	case "code":
+		inv.Mode = modeCode
+		rest = rest[1:]
+	}
+	if len(rest) != 1 {
+		return invocation{}, errRequest
+	}
+	if strings.TrimSpace(rest[0]) == "" {
+		return invocation{}, errRequest
+	}
+	inv.Request = rest[0]
+	return inv, nil
+}
+
 func main() {
 	os.Exit(run())
 }
 
 func run() int {
-	args := os.Args[1:]
-	if len(args) > 0 && args[0] == "--" {
-		args = args[1:]
-	}
-	fs := flag.NewFlagSet("konsolai", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	yes := fs.Bool("yes", false, "auto-approve non-denylisted actions")
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	query := strings.TrimSpace(strings.Join(fs.Args(), " "))
-	if query == "" {
-		fmt.Fprintln(os.Stderr, "usage: konsolai [--yes] -- <task>")
-		return 2
-	}
-
-	howto, rest := splitMode(query)
-	if rest == "" {
-		fmt.Fprintln(os.Stderr, "usage: konsolai [--yes] -- <task>")
+	inv, err := parseArgs(os.Args[1:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, usageText)
+		if !errors.Is(err, flag.ErrHelp) {
+			fmt.Fprintln(os.Stderr, err)
+		}
 		return 2
 	}
 
@@ -68,10 +111,10 @@ func run() int {
 	}
 	client := llm.New(envOr("KONSOLAI_ENDPOINT", defaultEndpoint), os.Getenv("KONSOLAI_MODEL"))
 
-	if howto {
-		return runHowto(ctx, client, snap, rest)
+	if inv.Mode == modeHowto {
+		return runHowto(ctx, client, snap, inv.Request)
 	}
-	return runAgent(ctx, client, snap, rest, *yes)
+	return runAgent(ctx, client, snap, inv)
 }
 
 func runHowto(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, query string) int {
@@ -97,32 +140,55 @@ func runHowto(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, que
 	return 0
 }
 
-func runAgent(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, task string, yes bool) int {
+func runAgent(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, inv invocation) int {
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "konsolai:", err)
 		return 1
 	}
-	guard, err := safety.New(cwd)
+	root := cwd
+	if inv.Mode == modeCode {
+		root = repo.Root(cwd)
+	}
+	guard, err := safety.New(root)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "konsolai:", err)
 		return 1
 	}
-	prompter, err := ui.OpenPrompter(yes)
+	prompter, err := ui.OpenPrompter(inv.Yes)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "konsolai:", err)
 		return 1
 	}
 	defer prompter.Close()
 
-	err = agent.Run(ctx, agent.Config{
-		Client:    client,
-		Tools:     tools.NewRegistry(guard, os.Stdout),
-		Confirmer: prompter,
-		Out:       os.Stdout,
-		MaxSteps:  15,
-		Thinking:  false,
-	}, snap.String(), task)
+	lister := func(ctx context.Context) ([]string, error) {
+		return repo.Files(ctx, root)
+	}
+	cfg := agent.Config{
+		Client:              client,
+		Tools:               tools.NewRegistry(guard, os.Stdout, lister),
+		Confirmer:           prompter,
+		Out:                 os.Stdout,
+		ContextBudgetTokens: 60000,
+	}
+	sys := snap.String()
+	if inv.Mode == modeCode {
+		cfg.Prompt = agent.CodePrompt
+		cfg.Thinking = true
+		cfg.Temperature = 0.3
+		cfg.MaxSteps = 60
+		cfg.RequirePlan = true
+		sys = codeContext(ctx, snap, root)
+	} else {
+		cfg.Thinking = false
+		cfg.MaxSteps = 15
+	}
+
+	err = agent.Run(ctx, cfg, sys, inv.Request)
+	if inv.Mode == modeCode {
+		printDiffStat(root)
+	}
 	if err == nil {
 		return 0
 	}
@@ -139,19 +205,56 @@ func runAgent(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, tas
 	return 1
 }
 
-// splitMode reports whether q is a howto query and the remaining text.
-// "howto ..." and "?..." are howto. "do ..." strips the prefix and is agent. Anything else is agent.
-func splitMode(q string) (howto bool, rest string) {
-	if rest, ok := strings.CutPrefix(q, "?"); ok {
-		return true, strings.TrimSpace(rest)
+func codeContext(ctx context.Context, snap sysctx.Snapshot, root string) string {
+	var b strings.Builder
+	b.WriteString(snap.String())
+	b.WriteString("\n\nrepo root: ")
+	b.WriteString(root)
+	proj := repo.Detect(root)
+	if len(proj.Kinds) > 0 {
+		b.WriteString("\nproject kinds: ")
+		b.WriteString(strings.Join(proj.Kinds, ", "))
 	}
-	if rest, ok := strings.CutPrefix(q, "howto"); ok && (rest == "" || rest[0] == ' ') {
-		return true, strings.TrimSpace(rest)
+	if len(proj.Commands) > 0 {
+		b.WriteString("\nproject commands:\n")
+		for _, c := range proj.Commands {
+			b.WriteString("- ")
+			b.WriteString(c)
+			b.WriteByte('\n')
+		}
 	}
-	if rest, ok := strings.CutPrefix(q, "do"); ok && (rest == "" || rest[0] == ' ') {
-		return false, strings.TrimSpace(rest)
+	files, err := repo.Files(ctx, root)
+	if err == nil {
+		if m := repo.Map(files, 120); m != "" {
+			b.WriteString("\nrepo map:\n")
+			b.WriteString(m)
+			b.WriteByte('\n')
+		}
 	}
-	return false, q
+	instr, err := repo.Instructions(root)
+	if err == nil && instr != "" {
+		b.WriteString("\nproject instructions:\n")
+		b.WriteString(instr)
+		if !strings.HasSuffix(instr, "\n") {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+func printDiffStat(root string) {
+	if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
+		return
+	}
+	out, err := exec.Command("git", "-C", root, "diff", "--stat").Output()
+	if err != nil {
+		return
+	}
+	s := strings.TrimRight(string(out), "\n")
+	if s == "" {
+		return
+	}
+	fmt.Fprintln(os.Stdout, ui.Dim(s))
 }
 
 func envOr(key, fallback string) string {
