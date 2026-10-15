@@ -121,6 +121,26 @@ func TestKVVariantsAndCode(t *testing.T) {
 	if got := String(code); got != code {
 		t.Fatalf("code redacted: %q", got)
 	}
+	hex := "26f789a3dde42ad6ec6a50fc258c2a59a9833069884e231b0081525ef87cbc301ba28e96d4e0f46c"
+	got := String("ABUSEIPDB_KEY=" + hex)
+	if strings.Contains(got, hex) {
+		t.Fatalf("ABUSEIPDB_KEY leaked: %q", got)
+	}
+	if !strings.Contains(got, "ABUSEIPDB_KEY=[REDACTED:kv]") {
+		t.Fatalf("ABUSEIPDB_KEY: %q", got)
+	}
+	got = String("STRIPE_SECRET=sk_live_notthis")
+	if !strings.Contains(got, "STRIPE_SECRET=[REDACTED:kv]") {
+		t.Fatalf("STRIPE_SECRET: %q", got)
+	}
+	got = String("DB_PASS=hunter2")
+	if got != "DB_PASS=[REDACTED:kv]" {
+		t.Fatalf("DB_PASS: %q", got)
+	}
+	got = String("PLAIN=" + hex)
+	if strings.Contains(got, hex) || !strings.Contains(got, "[REDACTED:env]") {
+		t.Fatalf("env hex: %q", got)
+	}
 }
 
 func TestIdempotent(t *testing.T) {
@@ -175,5 +195,26 @@ func TestSensitivePath(t *testing.T) {
 		if SensitivePath(p) {
 			t.Fatalf("want not sensitive %q", p)
 		}
+	}
+	if !SensitivePath(".env.example") {
+		t.Fatal(".env.example must be sensitive")
+	}
+}
+
+func TestMaskValues(t *testing.T) {
+	hex := "26f789a3dde42ad6ec6a50fc258c2a59a9833069884e231b0081525ef87cbc301ba28e96d4e0f46c"
+	in := "ABUSEIPDB_KEY=" + hex + "\n# comment\nEMPTY=\n"
+	got, n := MaskValues(in)
+	if n != 1 {
+		t.Fatalf("n=%d", n)
+	}
+	if strings.Contains(got, hex) {
+		t.Fatalf("leaked: %q", got)
+	}
+	if !strings.Contains(got, "ABUSEIPDB_KEY=26f7…[masked 80 chars]") {
+		t.Fatalf("mask: %q", got)
+	}
+	if !strings.Contains(got, "# comment") || !strings.Contains(got, "EMPTY=") {
+		t.Fatalf("structure lost: %q", got)
 	}
 }
