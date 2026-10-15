@@ -12,12 +12,14 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/siraj/konsolai/internal/diff"
 	"github.com/siraj/konsolai/internal/llm"
 	"github.com/siraj/konsolai/internal/safety"
 )
 
 const (
 	readFileCap  = 32 * 1024
+	readLineCap  = 2000
 	listDirCap   = 200
 	previewLines = 20
 )
@@ -32,7 +34,7 @@ func (t *writeFileTool) Spec() llm.ToolSpec {
 		Function: llm.FunctionSpec{
 			Name:        "write_file",
 			Description: "Create or overwrite a UTF-8 text file at path relative to the project root. Parent directories are created. Never use shell heredocs or echo redirection for file contents.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path relative to the project root."},"content":{"type":"string","description":"Full file contents to write."}},"required":["path","content"]}`),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path relative to the project root. Use only for new files; prefer edit_file for existing files."},"content":{"type":"string","description":"Full file contents to write."}},"required":["path","content"]}`),
 		},
 	}
 }
@@ -46,6 +48,7 @@ type writeFileAction struct {
 	path      string
 	display   string
 	content   string
+	oldText   string
 	overwrite bool
 }
 
@@ -68,7 +71,15 @@ func (t *writeFileTool) Prepare(rawArgs string) (Action, error) {
 	if statErr != nil && !os.IsNotExist(statErr) {
 		return nil, fmt.Errorf("tools: write_file: stat: %w", statErr)
 	}
-	return &writeFileAction{path: resolved, display: args.Path, content: args.Content, overwrite: overwrite}, nil
+	old := ""
+	if overwrite {
+		b, err := os.ReadFile(resolved)
+		if err != nil {
+			return nil, fmt.Errorf("tools: write_file: read: %w", err)
+		}
+		old = string(b)
+	}
+	return &writeFileAction{path: resolved, display: args.Path, content: args.Content, oldText: old, overwrite: overwrite}, nil
 }
 
 func (a *writeFileAction) Summary() string {
@@ -80,10 +91,13 @@ func (a *writeFileAction) Summary() string {
 }
 
 func (a *writeFileAction) Preview() string {
+	if a.overwrite {
+		return diff.Unified(a.display, a.oldText, a.content, 3)
+	}
 	return firstLines(a.content, previewLines)
 }
 
-func (a *writeFileAction) ReadOnly() bool { return false }
+func (a *writeFileAction) Kind() ActionKind { return Mutating }
 
 func (a *writeFileAction) Run(ctx context.Context) (Result, error) {
 	if err := ctx.Err(); err != nil {
@@ -92,13 +106,28 @@ func (a *writeFileAction) Run(ctx context.Context) (Result, error) {
 	if err := os.MkdirAll(filepath.Dir(a.path), 0755); err != nil {
 		return Result{Output: err.Error(), IsError: true}, nil
 	}
+	if err := atomicWrite(a.path, a.content); err != nil {
+		return Result{Output: err.Error(), IsError: true}, nil
+	}
+	meta := fmt.Sprintf("%d B", len(a.content))
+	if a.overwrite {
+		add, rem := diff.Stat(a.oldText, a.content)
+		meta = fmt.Sprintf("+%d -%d", add, rem)
+	}
+	return Result{
+		Output: fmt.Sprintf("wrote %s (%d bytes)", a.display, len(a.content)),
+		Meta:   meta,
+	}, nil
+}
+
+func atomicWrite(path, content string) error {
 	mode := os.FileMode(0644)
-	if fi, err := os.Stat(a.path); err == nil {
+	if fi, err := os.Stat(path); err == nil {
 		mode = fi.Mode().Perm()
 	}
-	f, err := os.CreateTemp(filepath.Dir(a.path), ".konsolai-write-*")
+	f, err := os.CreateTemp(filepath.Dir(path), ".konsolai-write-*")
 	if err != nil {
-		return Result{Output: err.Error(), IsError: true}, nil
+		return err
 	}
 	tmp := f.Name()
 	cleanup := true
@@ -108,23 +137,20 @@ func (a *writeFileAction) Run(ctx context.Context) (Result, error) {
 			_ = os.Remove(tmp)
 		}
 	}()
-	if _, err := io.WriteString(f, a.content); err != nil {
-		return Result{Output: err.Error(), IsError: true}, nil
+	if _, err := io.WriteString(f, content); err != nil {
+		return err
 	}
 	if err := f.Chmod(mode); err != nil {
-		return Result{Output: err.Error(), IsError: true}, nil
+		return err
 	}
 	if err := f.Close(); err != nil {
-		return Result{Output: err.Error(), IsError: true}, nil
+		return err
 	}
-	if err := os.Rename(tmp, a.path); err != nil {
-		return Result{Output: err.Error(), IsError: true}, nil
+	if err := os.Rename(tmp, path); err != nil {
+		return err
 	}
 	cleanup = false
-	return Result{
-		Output: fmt.Sprintf("wrote %s (%d bytes)", a.display, len(a.content)),
-		Meta:   fmt.Sprintf("%d B", len(a.content)),
-	}, nil
+	return nil
 }
 
 type readFileTool struct{ guard *safety.Guard }
@@ -136,19 +162,23 @@ func (t *readFileTool) Spec() llm.ToolSpec {
 		Type: "function",
 		Function: llm.FunctionSpec{
 			Name:        "read_file",
-			Description: "Read a UTF-8 text file. Directories and binary files are rejected. Output is capped at 32 KiB.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path relative to the project root."}},"required":["path"]}`),
+			Description: "Read a UTF-8 text file. Optional 1-based start_line and end_line (inclusive). Output is line-numbered and capped at 2000 lines or 32 KiB.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"start_line":{"type":"integer","description":"1-based inclusive start. Default 1."},"end_line":{"type":"integer","description":"1-based inclusive end. Default last line."}},"required":["path"]}`),
 		},
 	}
 }
 
 type readFileArgs struct {
-	Path string `json:"path"`
+	Path      string `json:"path"`
+	StartLine int    `json:"start_line"`
+	EndLine   int    `json:"end_line"`
 }
 
 type readFileAction struct {
-	path    string
-	display string
+	path      string
+	display   string
+	startLine int
+	endLine   int
 }
 
 func (t *readFileTool) Prepare(rawArgs string) (Action, error) {
@@ -165,12 +195,12 @@ func (t *readFileTool) Prepare(rawArgs string) (Action, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &readFileAction{path: resolved, display: args.Path}, nil
+	return &readFileAction{path: resolved, display: args.Path, startLine: args.StartLine, endLine: args.EndLine}, nil
 }
 
-func (a *readFileAction) Summary() string { return "read " + a.display }
-func (a *readFileAction) Preview() string { return "" }
-func (a *readFileAction) ReadOnly() bool  { return true }
+func (a *readFileAction) Summary() string  { return "read " + a.display }
+func (a *readFileAction) Preview() string  { return "" }
+func (a *readFileAction) Kind() ActionKind { return ReadOnly }
 
 func (a *readFileAction) Run(ctx context.Context) (Result, error) {
 	if err := ctx.Err(); err != nil {
@@ -183,25 +213,22 @@ func (a *readFileAction) Run(ctx context.Context) (Result, error) {
 	if fi.IsDir() {
 		return Result{Output: "error: is a directory", IsError: true}, nil
 	}
-	f, err := os.Open(a.path)
+	allBytes, err := os.ReadFile(a.path)
 	if err != nil {
 		return Result{Output: err.Error(), IsError: true}, nil
 	}
-	defer f.Close()
-	buf := make([]byte, readFileCap+1)
-	n, err := io.ReadFull(f, buf)
-	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
-		return Result{Output: err.Error(), IsError: true}, nil
-	}
-	data := buf[:min(n, readFileCap)]
-	if !utf8.Valid(data) {
+	if !utf8.Valid(allBytes) {
 		return Result{Output: "error: binary content (not UTF-8)", IsError: true}, nil
 	}
-	out := string(data)
-	if n > readFileCap {
-		out += fmt.Sprintf("\n... [truncated at %d bytes]", readFileCap)
+	lines := strings.Split(string(allBytes), "\n")
+	if len(allBytes) > 0 && allBytes[len(allBytes)-1] == '\n' {
+		lines = lines[:len(lines)-1]
 	}
-	return Result{Output: out, Meta: formatSize(fi.Size())}, nil
+	out, truncated := formatRead(a.display, lines, a.startLine, a.endLine)
+	if truncated {
+		out += "\n... [truncated; set start_line to read the rest]"
+	}
+	return Result{Output: out, Meta: formatSize(int64(len(allBytes)))}, nil
 }
 
 type listDirTool struct{ guard *safety.Guard }
@@ -250,9 +277,9 @@ func (t *listDirTool) Prepare(rawArgs string) (Action, error) {
 	return &listDirAction{path: resolved, display: display}, nil
 }
 
-func (a *listDirAction) Summary() string { return "list " + a.display }
-func (a *listDirAction) Preview() string { return "" }
-func (a *listDirAction) ReadOnly() bool  { return true }
+func (a *listDirAction) Summary() string  { return "list " + a.display }
+func (a *listDirAction) Preview() string  { return "" }
+func (a *listDirAction) Kind() ActionKind { return ReadOnly }
 
 func (a *listDirAction) Run(ctx context.Context) (Result, error) {
 	if err := ctx.Err(); err != nil {
@@ -284,6 +311,43 @@ func (a *listDirAction) Run(ctx context.Context) (Result, error) {
 		out = "(empty)"
 	}
 	return Result{Output: out, Meta: fmt.Sprintf("%d entries", len(entries))}, nil
+}
+
+func formatRead(display string, lines []string, start, end int) (string, bool) {
+	n := len(lines)
+	if start < 1 {
+		start = 1
+	}
+	if end < 1 || end > n {
+		end = n
+	}
+	if n == 0 {
+		return fmt.Sprintf("%s (lines 0-0 of 0)\n", display), false
+	}
+	if start > n {
+		return fmt.Sprintf("error: start_line %d past end (%d lines)", start, n), false
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s (lines %d-%d of %d)\n", display, start, end, n)
+	trunc := false
+	size := 0
+	shown := 0
+	last := start - 1
+	for i := start; i <= end; i++ {
+		line := fmt.Sprintf("%6d\t%s\n", i, lines[i-1])
+		if shown >= readLineCap || size+len(line) > readFileCap {
+			trunc = true
+			break
+		}
+		b.WriteString(line)
+		size += len(line)
+		shown++
+		last = i
+	}
+	if last < end {
+		trunc = true
+	}
+	return b.String(), trunc
 }
 
 func formatSize(n int64) string {
