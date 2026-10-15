@@ -18,12 +18,13 @@ import (
 )
 
 type shellTool struct {
-	guard *safety.Guard
-	out   io.Writer
+	guard        *safety.Guard
+	out          io.Writer
+	readOnlyOnly bool
 }
 
-func newShell(g *safety.Guard, out io.Writer) *shellTool {
-	return &shellTool{guard: g, out: out}
+func newShell(g *safety.Guard, out io.Writer, readOnlyOnly bool) *shellTool {
+	return &shellTool{guard: g, out: out, readOnlyOnly: readOnlyOnly}
 }
 
 func (t *shellTool) Spec() llm.ToolSpec {
@@ -51,6 +52,7 @@ type shellAction struct {
 	cwd     string
 	timeout time.Duration
 	out     io.Writer
+	kind    ActionKind
 }
 
 var reCD = regexp.MustCompile(`(^|[;&|(]\s*)cd(\s|$)`)
@@ -71,6 +73,14 @@ func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 	if err := t.guard.CheckCommand(args.Cmd); err != nil {
 		return nil, err
 	}
+	ro := safety.IsReadOnlyCommand(args.Cmd)
+	if t.readOnlyOnly && !ro {
+		return nil, errors.New("lookup can only run read-only commands")
+	}
+	kind := Mutating
+	if ro {
+		kind = ReadOnly
+	}
 	cwd := args.Cwd
 	if cwd == "" {
 		cwd = "."
@@ -86,12 +96,12 @@ func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 	if sec < 1 || sec > 600 {
 		return nil, fmt.Errorf("tools: run_shell: timeout_sec must be between 1 and 600")
 	}
-	return &shellAction{cmd: args.Cmd, cwd: resolved, timeout: time.Duration(sec) * time.Second, out: t.out}, nil
+	return &shellAction{cmd: args.Cmd, cwd: resolved, timeout: time.Duration(sec) * time.Second, out: t.out, kind: kind}, nil
 }
 
 func (a *shellAction) Summary() string  { return "run: " + a.cmd }
 func (a *shellAction) Preview() string  { return "" }
-func (a *shellAction) Kind() ActionKind { return Mutating }
+func (a *shellAction) Kind() ActionKind { return a.kind }
 
 func (a *shellAction) Run(ctx context.Context) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, a.timeout)
