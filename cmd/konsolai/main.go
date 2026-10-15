@@ -167,7 +167,7 @@ func runAgent(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, inv
 	}
 	cfg := agent.Config{
 		Client:              client,
-		Tools:               tools.NewRegistry(guard, os.Stdout, lister),
+		Tools:               tools.NewRegistry(guard, os.Stdout, lister, nil, nil),
 		Confirmer:           prompter,
 		Out:                 os.Stdout,
 		ContextBudgetTokens: 60000,
