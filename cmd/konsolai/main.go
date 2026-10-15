@@ -157,7 +157,7 @@ func runAgent(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, tas
 
 	err = agent.Run(ctx, agent.Config{
 		Client:    client,
-		Tools:     tools.NewRegistry(guard, os.Stdout),
+		Tools:     tools.NewRegistry(guard, os.Stdout, nil),
 		Confirmer: prompter,
 		Out:       os.Stdout,
 		MaxSteps:  15,
