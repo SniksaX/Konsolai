@@ -207,3 +207,49 @@ func TestResolveModelCaches(t *testing.T) {
 		t.Fatalf("models requests %d want 1", n.Load())
 	}
 }
+
+func TestResponseSchemaShape(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		_ = json.NewEncoder(w).Encode(completeResponse{
+			Choices: []struct {
+				Message Message `json:"message"`
+			}{{Message: Message{Role: RoleAssistant, Content: `{"intent":"answer"}`}}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	schema := json.RawMessage(`{"type":"object","properties":{"intent":{"type":"string"}}}`)
+	c := New(srv.URL+"/v1", "qwen")
+	_, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{
+		ResponseSchema: schema, MaxTokens: 120,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(gotBody, &raw); err != nil {
+		t.Fatal(err)
+	}
+	var rf struct {
+		Type       string `json:"type"`
+		JSONSchema struct {
+			Name   string          `json:"name"`
+			Schema json.RawMessage `json:"schema"`
+			Strict bool            `json:"strict"`
+		} `json:"json_schema"`
+	}
+	if err := json.Unmarshal(raw["response_format"], &rf); err != nil {
+		t.Fatal(err)
+	}
+	if rf.Type != "json_schema" || rf.JSONSchema.Name != "out" || !rf.JSONSchema.Strict {
+		t.Fatalf("%+v", rf)
+	}
+	if string(rf.JSONSchema.Schema) != string(schema) {
+		t.Fatalf("schema %s", rf.JSONSchema.Schema)
+	}
+	var max int
+	if err := json.Unmarshal(raw["max_tokens"], &max); err != nil || max != 120 {
+		t.Fatalf("max_tokens %s", raw["max_tokens"])
+	}
+}
