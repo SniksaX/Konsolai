@@ -18,6 +18,7 @@ import (
 
 	"github.com/siraj/konsolai/internal/agent"
 	"github.com/siraj/konsolai/internal/config"
+	"github.com/siraj/konsolai/internal/intent"
 	"github.com/siraj/konsolai/internal/llm"
 	"github.com/siraj/konsolai/internal/memory"
 	"github.com/siraj/konsolai/internal/repo"
@@ -31,35 +32,10 @@ import (
 var _ agent.Confirmer = (*ui.Prompter)(nil)
 
 const (
-	usageText = `usage: konsolai [--yes] [--profile NAME] [new] [howto|do|code] "<request>"`
-
-	howtoSystemPrompt = `You are Konsolai, a terminal assistant running inside the user's shell.
-Answer with the exact command(s) that accomplish the request in a single bash code block,
-then at most 3 short bullet points explaining non-obvious flags.
-Prefer tools present on a default install of the user's OS. Use paths relative to the current directory.
-If the request is destructive or ambiguous, say so in one line. No preamble, no closing remarks.`
+	usageText = `usage: konsolai [--yes] [--profile NAME] [--intent answer|lookup|act|build] [new] ["<request>"]`
 
 	noMemory = "memory is not configured (see ~/.config/konsolai/config.json)"
 )
-
-type mode int
-
-const (
-	modeDo mode = iota
-	modeHowto
-	modeCode
-)
-
-func (m mode) String() string {
-	switch m {
-	case modeHowto:
-		return "howto"
-	case modeCode:
-		return "code"
-	default:
-		return "do"
-	}
-}
 
 type command int
 
@@ -74,7 +50,7 @@ const (
 )
 
 type invocation struct {
-	Mode      mode
+	Intent    string
 	Request   string
 	Yes       bool
 	Profile   string
@@ -95,15 +71,19 @@ func parseArgs(args []string) (invocation, error) {
 	fs.SetOutput(io.Discard)
 	yes := fs.Bool("yes", false, "auto-approve non-denylisted actions")
 	profile := fs.String("profile", "", "config profile")
+	intent := fs.String("intent", "", "skip the router")
 	project := fs.Bool("project", false, "project-scoped fact")
 	if err := fs.Parse(args); err != nil {
 		return invocation{}, err
 	}
-	rest := fs.Args()
-	if len(rest) == 0 {
+	if *intent != "" && *intent != "answer" && *intent != "lookup" && *intent != "act" && *intent != "build" {
 		return invocation{}, errRequest
 	}
-	inv := invocation{Mode: modeDo, Yes: *yes, Profile: *profile}
+	rest := fs.Args()
+	inv := invocation{Yes: *yes, Profile: *profile, Intent: *intent}
+	if len(rest) == 0 {
+		return inv, nil
+	}
 	switch rest[0] {
 	case "history":
 		if len(rest) != 1 {
@@ -161,22 +141,11 @@ func parseArgs(args []string) (invocation, error) {
 	if rest[0] == "new" {
 		inv.New = true
 		rest = rest[1:]
-		if len(rest) == 0 {
-			return invocation{}, errRequest
-		}
 	}
-	switch rest[0] {
-	case "howto":
-		inv.Mode = modeHowto
-		rest = rest[1:]
-	case "do":
-		inv.Mode = modeDo
-		rest = rest[1:]
-	case "code":
-		inv.Mode = modeCode
-		rest = rest[1:]
+	if len(rest) == 0 {
+		return inv, nil
 	}
-	if len(rest) != 1 || strings.TrimSpace(rest[0]) == "" {
+	if len(rest) != 1 {
 		return invocation{}, errRequest
 	}
 	inv.Request = rest[0]
@@ -264,6 +233,13 @@ func run() int {
 		return runForget(ctx, mem, inv.FactScope, inv.FactID)
 	}
 
+	inv, err = resolveRequest(inv)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, usageText)
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+
 	snap, err := sysctx.Collect()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "konsolai:", err)
@@ -272,23 +248,24 @@ func run() int {
 	client := llm.New(prof.Endpoint, prof.Model)
 	facts := loadFactsBlock(ctx, mem, prof.Name, projectID)
 
-	var code int
-	var sessionID string
-	var history []llm.Message
-	if inv.Mode == modeHowto {
-		sessionID, history = resumeOrCreate(ctx, mem, prof, projectID, cwd, inv)
-		rec := memory.NewRecorder(mem, sessionID)
-		code = runHowto(ctx, client, snap, facts, history, rec, inv.Request)
-	} else {
-		prompter, err := ui.OpenPrompter(inv.Yes)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "konsolai:", err)
-			return 1
-		}
-		sessionID, history = resumeOrCreate(ctx, mem, prof, projectID, cwd, inv)
-		rec := memory.NewRecorder(mem, sessionID)
-		code = runAgent(ctx, client, snap, facts, history, rec, mem, sessionID, projectID, prof.Name, inv, cwd, prompter)
+	prompter, err := ui.OpenPrompter(inv.Yes)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "konsolai:", err)
+		return 1
 	}
+	sessionID, history := resumeSession(ctx, mem, prof, projectID, cwd, inv)
+	root := repo.Root(cwd)
+	inRepo := false
+	if _, err := os.Stat(filepath.Join(root, ".git")); err == nil {
+		inRepo = true
+	}
+	dec := decideIntent(ctx, client, inv, history, inRepo)
+	fmt.Fprintln(os.Stdout, ui.Dim("· "+string(dec.Intent)))
+	if sessionID == "" {
+		sessionID = createSession(ctx, mem, prof, projectID, cwd, string(dec.Intent), inv.Request)
+	}
+	rec := memory.NewRecorder(mem, sessionID)
+	code := runProfile(ctx, client, snap, facts, history, rec, mem, sessionID, projectID, prof.Name, inv, cwd, prompter, dec)
 	if sessionID != "" {
 		if s := mem.Store(); s != nil {
 			endCtx, cancel := memory.Isolated(ctx)
@@ -319,44 +296,46 @@ func upsertProject(ctx context.Context, mem *memory.Guard, cwd string) *int64 {
 	return &id
 }
 
-func resumeOrCreate(ctx context.Context, mem *memory.Guard, prof config.Profile, projectID *int64, cwd string, inv invocation) (string, []llm.Message) {
-	if mem.Store() == nil {
+func resumeSession(ctx context.Context, mem *memory.Guard, prof config.Profile, projectID *int64, cwd string, inv invocation) (string, []llm.Message) {
+	if mem.Store() == nil || inv.New {
 		return "", nil
 	}
 	idle := time.Duration(prof.SessionIdleMinutes) * time.Minute
-	if !inv.New {
-		sess, found, err := mem.Store().FindResumableSession(ctx, prof.Name, projectID, cwd, inv.Mode.String(), idle)
-		if err != nil {
-			mem.Fail(err)
-			return "", nil
-		}
-		if found {
-			msgs, err := mem.Store().LoadMessages(ctx, sess.ID)
-			if err != nil {
-				mem.Fail(err)
-				return "", nil
-			}
-			fmt.Fprintln(os.Stdout, ui.Dim("↻ continuing session: "+sess.Title))
-			return sess.ID, memory.ToLLM(msgs)
-		}
-	}
-	title := inv.Request
-	if utf8.RuneCountInString(title) > 80 {
-		title = string([]rune(title)[:80])
-	}
-	s := mem.Store()
-	if s == nil {
-		return "", nil
-	}
-	id, err := s.CreateSession(ctx, store.NewSession{
-		Profile: prof.Name, ProjectID: projectID, CWD: cwd,
-		Mode: inv.Mode.String(), Model: prof.Model, Title: title,
-	})
+	sess, found, err := mem.Store().FindResumableSession(ctx, prof.Name, projectID, cwd, inv.Intent, idle)
 	if err != nil {
 		mem.Fail(err)
 		return "", nil
 	}
-	return id, nil
+	if !found {
+		return "", nil
+	}
+	msgs, err := mem.Store().LoadMessages(ctx, sess.ID)
+	if err != nil {
+		mem.Fail(err)
+		return "", nil
+	}
+	fmt.Fprintln(os.Stdout, ui.Dim("↻ continuing session: "+sess.Title))
+	return sess.ID, memory.ToLLM(msgs)
+}
+
+func createSession(ctx context.Context, mem *memory.Guard, prof config.Profile, projectID *int64, cwd, mode, request string) string {
+	s := mem.Store()
+	if s == nil {
+		return ""
+	}
+	title := request
+	if utf8.RuneCountInString(title) > 80 {
+		title = string([]rune(title)[:80])
+	}
+	id, err := s.CreateSession(ctx, store.NewSession{
+		Profile: prof.Name, ProjectID: projectID, CWD: cwd,
+		Mode: mode, Model: prof.Model, Title: title,
+	})
+	if err != nil {
+		mem.Fail(err)
+		return ""
+	}
+	return id
 }
 
 func loadFactsBlock(ctx context.Context, mem *memory.Guard, profile string, projectID *int64) string {
@@ -410,12 +389,28 @@ func sessionStatus(code int) string {
 	}
 }
 
-func runHowto(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, query string) int {
+func decideIntent(ctx context.Context, client *llm.Client, inv invocation, history []llm.Message, inRepo bool) intent.Decision {
+	if inv.Intent != "" {
+		return intent.Decision{Intent: intent.Intent(inv.Intent), Language: "en", Reason: "flag"}
+	}
+	d, _ := intent.Classify(ctx, client, inv.Request, history, inRepo)
+	return d
+}
+
+func langLine(d intent.Decision) string {
+	lang := d.Language
+	if lang == "" {
+		lang = "en"
+	}
+	return "Reply in the user's language (" + lang + ")."
+}
+
+func runAnswer(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, query, extra string) int {
 	if rec == nil {
 		rec = agent.NopRecorder{}
 	}
 	msgs := []llm.Message{
-		{Role: llm.RoleSystem, Content: howtoSystemPrompt + "\n\n" + snap.String() + facts},
+		{Role: llm.RoleSystem, Content: extra + "\n\n" + snap.String() + facts},
 	}
 	msgs = append(msgs, history...)
 	user := llm.Message{Role: llm.RoleUser, Content: query}
@@ -424,7 +419,7 @@ func runHowto(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, fac
 
 	var filter llm.ThinkFilter
 	var collected strings.Builder
-	streamErr := client.Stream(ctx, msgs, llm.ChatOptions{Thinking: false, Temperature: 0.2}, func(delta string) error {
+	streamErr := client.Stream(ctx, msgs, llm.ChatOptions{Thinking: false, Temperature: 0.3}, func(delta string) error {
 		s := filter.Write(delta)
 		collected.WriteString(s)
 		_, err := io.WriteString(os.Stdout, s)
@@ -432,8 +427,12 @@ func runHowto(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, fac
 	})
 	rest := filter.Flush()
 	collected.WriteString(rest)
-	_, _ = io.WriteString(os.Stdout, rest+"\n")
-	_ = rec.Message(ctx, llm.Message{Role: llm.RoleAssistant, Content: collected.String()})
+	out := trimLeadingBlanks(collected.String())
+	if rest != "" {
+		_, _ = io.WriteString(os.Stdout, rest)
+	}
+	_, _ = io.WriteString(os.Stdout, "\n")
+	_ = rec.Message(ctx, llm.Message{Role: llm.RoleAssistant, Content: out})
 
 	if streamErr != nil {
 		if errors.Is(streamErr, context.Canceled) {
@@ -442,46 +441,69 @@ func runHowto(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, fac
 		fmt.Fprintln(os.Stderr, "konsolai:", streamErr)
 		return 1
 	}
+	if strings.TrimSpace(out) == "" {
+		fmt.Fprintln(os.Stderr, "konsolai: the model returned no answer")
+		return 1
+	}
 	return 0
 }
 
-func runAgent(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, mem *memory.Guard, sessionID string, projectID *int64, profile string, inv invocation, cwd string, prompter *ui.Prompter) int {
+func trimLeadingBlanks(s string) string { return strings.TrimLeft(s, "\r\n") }
+
+func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, mem *memory.Guard, sessionID string, projectID *int64, profile string, inv invocation, cwd string, prompter *ui.Prompter, dec intent.Decision) int {
+	defer prompter.Close()
+	lang := langLine(dec)
+	if dec.Intent == intent.Answer {
+		return runAnswer(ctx, client, snap, facts, history, rec, inv.Request, agent.AnswerPrompt+"\n"+lang)
+	}
+
 	root := repo.Root(cwd)
 	sg, err := safety.New(root)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "konsolai:", err)
 		return 1
 	}
-	defer prompter.Close()
-
 	lister := func(ctx context.Context) ([]string, error) {
 		return repo.Files(ctx, root)
 	}
+	reg := tools.NewRegistry(sg, os.Stdout, lister, memory.NewWebCache(mem), memory.NewFactStore(mem, profile, projectID, sessionID))
 	cfg := agent.Config{
 		Client:              client,
-		Tools:               tools.NewRegistry(sg, os.Stdout, lister, memory.NewWebCache(mem), memory.NewFactStore(mem, profile, projectID, sessionID)),
+		Tools:               reg,
 		Confirmer:           prompter,
 		Out:                 os.Stdout,
 		ContextBudgetTokens: 60000,
 		Recorder:            rec,
 		History:             history,
 		AutoApprove:         inv.Yes,
+		Prompt:              agent.ActPrompt + "\n" + lang,
 	}
 	sys := snap.String() + facts
-	if inv.Mode == modeCode {
-		cfg.Prompt = agent.CodePrompt
+	switch dec.Intent {
+	case intent.Lookup:
+		cfg.Tools = reg.Named("list_dir", "read_file", "outline", "search", "find_files", "web_fetch", "finish")
+		cfg.Prompt = agent.LookupPrompt + "\n" + lang
+		cfg.MaxSteps = 10
+		cfg.ExploreBudget = 6
+		cfg.ExploreNote = agent.ExploreNoteLookup
+	case intent.Build:
+		cfg.Prompt = agent.CodePrompt + "\n" + lang + "\n" + agent.ScopeRule
 		cfg.Thinking = true
 		cfg.Temperature = 0.3
 		cfg.MaxSteps = 60
 		cfg.RequirePlan = true
+		cfg.ExploreBudget = 12
+		cfg.ExploreNote = agent.ExploreNoteBuild
 		sys = codeContext(ctx, snap, root) + facts
-	} else {
-		cfg.Thinking = false
+	default:
+		cfg.Prompt = agent.ActPrompt + "\n" + lang + "\n" + agent.ScopeRule
 		cfg.MaxSteps = 15
+		cfg.ExploreBudget = 6
+		cfg.ExploreNote = agent.ExploreNoteLookup
 	}
 
 	err = agent.Run(ctx, cfg, sys, inv.Request)
-	if inv.Mode == modeCode {
+	if dec.Intent == intent.Build {
 		printDiffStat(root)
 	}
 	if err == nil {
@@ -491,10 +513,16 @@ func runAgent(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, fac
 		return 130
 	}
 	if errors.Is(err, agent.ErrAborted) {
+		fmt.Fprintln(os.Stderr, "konsolai: aborted")
 		return 3
 	}
 	if errors.Is(err, agent.ErrMaxSteps) {
+		fmt.Fprintf(os.Stderr, "konsolai: stopped after %d steps without finishing\n", cfg.MaxSteps)
 		return 4
+	}
+	if errors.Is(err, agent.ErrNoAnswer) {
+		fmt.Fprintln(os.Stderr, "konsolai: the model returned no answer")
+		return 1
 	}
 	fmt.Fprintln(os.Stderr, "konsolai:", err)
 	return 1
