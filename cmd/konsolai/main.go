@@ -546,13 +546,17 @@ func runAnswer(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, hi
 		RouterTime:       routerTime,
 	}
 	if inv.Trace {
-		agent.PrintTrace(os.Stderr, 1, think, modelTime, usage.PromptTokens, usage.CompletionTokens, nil)
+		agent.PrintTrace(os.Stderr, 1, think, modelTime, usage.PromptTokens, usage.CompletionTokens, client.ContextWindow(), nil)
 	}
 	agent.PrintSummary(os.Stderr, string(dec.Intent), st)
 
 	if streamErr != nil {
 		if errors.Is(streamErr, context.Canceled) {
 			return 130
+		}
+		if errors.Is(streamErr, agent.ErrContextOverflow) {
+			fmt.Fprintln(os.Stderr, streamErr.Error())
+			return 1
 		}
 		fmt.Fprintln(os.Stderr, modelErrorLine(inv.Endpoint, streamErr, inv.Trace))
 		return 1
@@ -591,8 +595,15 @@ func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 	live := ui.StartLive("thinking")
 	first := true
 	rend := ui.NewRenderer(os.Stdout, plain)
+	if _, err := client.ResolveModel(ctx); err != nil {
+		return "", llm.Usage{}, err
+	}
+	_, maxTok, err := agent.PrepareCall(client, msgs, nil, "answer")
+	if err != nil {
+		return "", llm.Usage{}, err
+	}
 	usage, err := client.Stream(ctx, msgs, llm.ChatOptions{
-		Thinking: think, Temperature: 0.3,
+		Thinking: think, Temperature: 0.3, MaxTokens: maxTok,
 		OnProgress: func(p llm.Progress) { live.SetLabel(agent.ProgressLabel("thinking", p)) },
 	}, func(delta string) error {
 		s := filter.Write(delta)
@@ -678,22 +689,21 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 	}
 	reg := tools.NewRegistry(sg, toolOut, lister, memory.NewWebCache(mem), memory.NewFactStore(mem, profile, projectID, sessionID), tools.Options{ReadOnlyShell: dec.Intent == intent.Lookup})
 	cfg := agent.Config{
-		Client:              client,
-		Tools:               reg,
-		Confirmer:           prompter,
-		Out:                 os.Stdout,
-		ContextBudgetTokens: 60000,
-		Recorder:            rec,
-		History:             history,
-		AutoApprove:         inv.Yes,
-		Prompt:              agent.ActPrompt + "\n" + lang,
-		ThinkingPolicy:      thinkingFor(dec),
-		Trace:               inv.Trace,
-		Intent:              string(dec.Intent),
-		RouterTime:          routerTime,
-		Err:                 os.Stderr,
-		Plain:               inv.Plain,
-		Task:                string(dec.Task),
+		Client:         client,
+		Tools:          reg,
+		Confirmer:      prompter,
+		Out:            os.Stdout,
+		Recorder:       rec,
+		History:        history,
+		AutoApprove:    inv.Yes,
+		Prompt:         agent.ActPrompt + "\n" + lang,
+		ThinkingPolicy: thinkingFor(dec),
+		Trace:          inv.Trace,
+		Intent:         string(dec.Intent),
+		RouterTime:     routerTime,
+		Err:            os.Stderr,
+		Plain:          inv.Plain,
+		Task:           string(dec.Task),
 	}
 	sys := snap.String() + facts
 	sub := ""
@@ -743,6 +753,10 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 	}
 	if errors.Is(err, agent.ErrNoAnswer) {
 		fmt.Fprintln(os.Stderr, "konsolai: the model returned no answer")
+		return 1
+	}
+	if errors.Is(err, agent.ErrContextOverflow) {
+		fmt.Fprintln(os.Stderr, err.Error())
 		return 1
 	}
 	fmt.Fprintln(os.Stderr, modelErrorLine(inv.Endpoint, err, inv.Trace))
