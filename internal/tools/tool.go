@@ -24,6 +24,7 @@ type Result struct {
 	Output  string
 	IsError bool
 	Final   bool
+	Meta    string
 }
 
 type Registry struct {
