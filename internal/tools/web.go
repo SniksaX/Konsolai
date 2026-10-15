@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -53,6 +54,82 @@ type webFetchAction struct {
 	cache  WebCache
 	client *http.Client
 	url    string
+	kind   ActionKind
+}
+
+var fetchAllowSuffixes = []string{
+	"wikipedia.org",
+	"github.com",
+	"githubusercontent.com",
+	"gitlab.com",
+	"pkg.go.dev",
+	"go.dev",
+	"golang.org",
+	"docs.rs",
+	"npmjs.com",
+	"pypi.org",
+	"developer.mozilla.org",
+}
+
+var lookupIPs = defaultLookupIPs
+
+func defaultLookupIPs(ctx context.Context, host string) ([]net.IP, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	ips := make([]net.IP, 0, len(addrs))
+	for _, a := range addrs {
+		if a.IP != nil {
+			ips = append(ips, a.IP)
+		}
+	}
+	return ips, nil
+}
+
+func hostAllowed(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	for _, s := range fetchAllowSuffixes {
+		if host == s || strings.HasSuffix(host, "."+s) {
+			return true
+		}
+	}
+	return false
+}
+
+func ipRestricted(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+}
+
+func hostRestricted(host string) bool {
+	if host == "" {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	ips, err := lookupIPs(ctx, host)
+	if err != nil || len(ips) == 0 {
+		return true
+	}
+	for _, ip := range ips {
+		if ipRestricted(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func classifyFetchURL(u *url.URL) ActionKind {
+	host := u.Hostname()
+	if hostRestricted(host) {
+		return Mutating
+	}
+	if !hostAllowed(host) {
+		return Mutating
+	}
+	return ReadOnly
 }
 
 func (t *webFetchTool) Prepare(rawArgs string) (Action, error) {
@@ -66,12 +143,12 @@ func (t *webFetchTool) Prepare(rawArgs string) (Action, error) {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, errors.New("tools: web_fetch: url must be an absolute http or https URL")
 	}
-	return &webFetchAction{cache: t.cache, client: t.client, url: u.String()}, nil
+	return &webFetchAction{cache: t.cache, client: t.client, url: u.String(), kind: classifyFetchURL(u)}, nil
 }
 
 func (a *webFetchAction) Summary() string  { return "fetch " + a.url }
 func (a *webFetchAction) Preview() string  { return "" }
-func (a *webFetchAction) Kind() ActionKind { return ReadOnly }
+func (a *webFetchAction) Kind() ActionKind { return a.kind }
 
 func (a *webFetchAction) Run(ctx context.Context) (Result, error) {
 	stop := ui.Start("fetching")
