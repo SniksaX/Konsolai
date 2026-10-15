@@ -80,6 +80,8 @@ func (t *exportDocTool) Prepare(rawArgs string) (Action, error) {
 	return act, nil
 }
 
+func (a *exportDocAction) FilePath() string { return a.display }
+
 func (a *exportDocAction) Summary() string {
 	return fmt.Sprintf("export %s (%s, %d B)", a.display, a.format, len(a.newBytes))
 }
