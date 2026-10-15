@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -90,6 +91,23 @@ type Stats struct {
 
 func FormatTokens(n int) string {
 	return fmt.Sprintf("%.1fk", float64(n)/1000)
+}
+
+func formatTok(n int) string {
+	if n >= 1000 {
+		return FormatTokens(n)
+	}
+	return strconv.Itoa(n)
+}
+
+func ProgressLabel(base string, p llm.Progress) string {
+	if p.ContentTokens > 0 {
+		return "writing · " + formatTok(p.ContentTokens) + " tok"
+	}
+	if p.ReasoningTokens > 0 {
+		return "thinking · " + formatTok(p.ReasoningTokens) + " tok"
+	}
+	return base
 }
 
 func FormatSummary(intent string, s Stats) string {
@@ -216,11 +234,14 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				stepSpecs = nil
 			}
 		}
-		clear := ui.Start(label)
+		live := ui.StartLive(label)
+		opts.OnProgress = func(p llm.Progress) {
+			live.SetLabel(ProgressLabel(label, p))
+		}
 		t0 := time.Now()
 		msg, usage, err := cfg.Client.Complete(ctx, msgs, stepSpecs, opts)
 		modelElapsed := time.Since(t0)
-		clear()
+		live.Stop()
 		if err != nil {
 			return err
 		}
@@ -463,10 +484,13 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	note := llm.Message{Role: llm.RoleUser, Content: MaxStepsNote}
 	msgs = append(msgs, note)
 	_ = rec.Message(ctx, note)
-	clear := ui.Start("thinking")
+	live := ui.StartLive("thinking")
 	t0 := time.Now()
-	msg, usage, err := cfg.Client.Complete(ctx, msgs, nil, llm.ChatOptions{Thinking: false, Temperature: temp})
-	clear()
+	msg, usage, err := cfg.Client.Complete(ctx, msgs, nil, llm.ChatOptions{
+		Thinking: false, Temperature: temp,
+		OnProgress: func(p llm.Progress) { live.SetLabel(ProgressLabel("thinking", p)) },
+	})
+	live.Stop()
 	if err == nil {
 		st.Steps++
 		st.ModelTime += time.Since(t0)

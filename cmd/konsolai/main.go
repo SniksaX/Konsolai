@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -61,6 +63,7 @@ type invocation struct {
 	FactScope string
 	FactID    int64
 	Fact      string
+	Endpoint  string
 }
 
 var errRequest = errors.New(`request must be a single argument in double quotes, e.g. konsolai code "add a /health endpoint"`)
@@ -183,6 +186,7 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "konsolai:", err)
 		return 1
 	}
+	inv.Endpoint = prof.Endpoint
 
 	needMem := inv.Cmd != cmdRequest
 	var st *store.Store
@@ -250,6 +254,7 @@ func run() int {
 		return 1
 	}
 	client := llm.New(prof.Endpoint, prof.Model)
+	client.SetIdleTimeout(time.Duration(prof.LLMIdleTimeoutSeconds) * time.Second)
 	facts := loadFactsBlock(ctx, mem, prof.Name, projectID)
 
 	prompter, err := ui.OpenPrompter(inv.Yes)
@@ -257,7 +262,11 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "konsolai:", err)
 		return 1
 	}
-	sessionID, history := resumeSession(ctx, mem, prof, projectID, cwd, inv)
+	cand := findCandidate(ctx, mem, prof, projectID, cwd, inv)
+	routerHist := cand.Messages
+	if inv.New {
+		routerHist = nil
+	}
 	root := repo.Root(cwd)
 	inRepo := false
 	if _, err := os.Stat(filepath.Join(root, ".git")); err == nil {
@@ -265,15 +274,19 @@ func run() int {
 	}
 	routedAt := time.Now()
 	understand := ui.Start("understanding")
-	dec := decideIntent(ctx, client, inv, history, inRepo)
+	dec := decideIntent(ctx, client, inv, routerHist, inRepo)
 	understand()
 	routerTime := time.Since(routedAt)
+	sessionID, history := applyResume(inv, dec, cand)
+	if len(history) > 0 {
+		fmt.Fprintln(os.Stdout, ui.Dim("↻ continuing session: "+cand.Title))
+	}
 	if inv.Plain {
 		fmt.Fprintln(os.Stdout, "· "+string(dec.Intent))
 	} else {
 		fmt.Fprintln(os.Stdout, ui.IntentBadge(string(dec.Intent)))
 	}
-	if sessionID == "" {
+	if sessionID == "" && len(history) == 0 {
 		sessionID = createSession(ctx, mem, prof, projectID, cwd, string(dec.Intent), inv.Request)
 	}
 	rec := memory.NewRecorder(mem, sessionID, cwd)
@@ -329,33 +342,41 @@ func upsertProject(ctx context.Context, mem *memory.Guard, cwd string) *int64 {
 	return &id
 }
 
-func resumeSession(ctx context.Context, mem *memory.Guard, prof config.Profile, projectID *int64, cwd string, inv invocation) (string, []llm.Message) {
-	if inv.New {
-		return "", nil
-	}
+type resumeCandidate struct {
+	ID       string
+	Title    string
+	Messages []llm.Message
+}
+
+func findCandidate(ctx context.Context, mem *memory.Guard, prof config.Profile, projectID *int64, cwd string, inv invocation) resumeCandidate {
 	idle := time.Duration(prof.SessionIdleMinutes) * time.Minute
 	if mem.Store() == nil {
 		if sess, ok := memory.LoadLast(prof.Name, cwd, idle); ok {
-			fmt.Fprintln(os.Stdout, ui.Dim("↻ continuing session: "+sess.Title))
-			return "", sess.Messages
+			return resumeCandidate{Title: sess.Title, Messages: sess.Messages}
 		}
-		return "", nil
+		return resumeCandidate{}
 	}
 	sess, found, err := mem.Store().FindResumableSession(ctx, prof.Name, projectID, cwd, inv.Intent, idle)
 	if err != nil {
 		mem.Fail(err)
-		return "", nil
+		return resumeCandidate{}
 	}
 	if !found {
-		return "", nil
+		return resumeCandidate{}
 	}
 	msgs, err := mem.Store().LoadMessages(ctx, sess.ID)
 	if err != nil {
 		mem.Fail(err)
+		return resumeCandidate{}
+	}
+	return resumeCandidate{ID: sess.ID, Title: sess.Title, Messages: memory.ToLLM(msgs)}
+}
+
+func applyResume(inv invocation, dec intent.Decision, cand resumeCandidate) (string, []llm.Message) {
+	if inv.New || !dec.ContinuesPrevious || len(cand.Messages) == 0 {
 		return "", nil
 	}
-	fmt.Fprintln(os.Stdout, ui.Dim("↻ continuing session: "+sess.Title))
-	return sess.ID, memory.ToLLM(msgs)
+	return cand.ID, cand.Messages
 }
 
 func createSession(ctx context.Context, mem *memory.Guard, prof config.Profile, projectID *int64, cwd, mode, request string) string {
@@ -431,7 +452,10 @@ func sessionStatus(code int) string {
 
 func decideIntent(ctx context.Context, client *llm.Client, inv invocation, history []llm.Message, inRepo bool) intent.Decision {
 	if inv.Intent != "" {
-		return intent.Decision{Intent: intent.Intent(inv.Intent), Language: "en", Reason: "flag"}
+		return intent.Decision{
+			Intent: intent.Intent(inv.Intent), Language: "en", Reason: "flag",
+			ContinuesPrevious: !inv.New && len(history) > 0,
+		}
 	}
 	d, _ := intent.Classify(ctx, client, inv.Request, history, inRepo)
 	return d
@@ -489,7 +513,7 @@ func runAnswer(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, hi
 		if errors.Is(streamErr, context.Canceled) {
 			return 130
 		}
-		fmt.Fprintln(os.Stderr, "konsolai:", streamErr)
+		fmt.Fprintln(os.Stderr, modelErrorLine(inv.Endpoint, streamErr, inv.Trace))
 		return 1
 	}
 	if strings.TrimSpace(out) == "" {
@@ -523,13 +547,16 @@ func sanitizeAnswerHistory(hist []llm.Message) []llm.Message {
 func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, think, plain bool) (string, llm.Usage, error) {
 	var filter llm.ThinkFilter
 	var collected strings.Builder
-	stopThink := ui.Start("thinking")
+	live := ui.StartLive("thinking")
 	first := true
 	rend := ui.NewRenderer(os.Stdout, plain)
-	usage, err := client.Stream(ctx, msgs, llm.ChatOptions{Thinking: think, Temperature: 0.3}, func(delta string) error {
+	usage, err := client.Stream(ctx, msgs, llm.ChatOptions{
+		Thinking: think, Temperature: 0.3,
+		OnProgress: func(p llm.Progress) { live.SetLabel(agent.ProgressLabel("thinking", p)) },
+	}, func(delta string) error {
 		s := filter.Write(delta)
 		if first && s != "" {
-			stopThink()
+			live.Stop()
 			first = false
 			_, _ = io.WriteString(os.Stdout, "\n")
 		}
@@ -538,7 +565,7 @@ func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 		return werr
 	})
 	if first {
-		stopThink()
+		live.Stop()
 	}
 	rest := filter.Flush()
 	collected.WriteString(rest)
@@ -677,7 +704,7 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 		fmt.Fprintln(os.Stderr, "konsolai: the model returned no answer")
 		return 1
 	}
-	fmt.Fprintln(os.Stderr, "konsolai:", err)
+	fmt.Fprintln(os.Stderr, modelErrorLine(inv.Endpoint, err, inv.Trace))
 	return 1
 }
 
@@ -743,4 +770,60 @@ func printDiffStat(root string) {
 		return
 	}
 	fmt.Fprintln(os.Stdout, ui.Dim(s))
+}
+
+func modelErrorLine(endpoint string, err error, trace bool) string {
+	if err == nil {
+		return "konsolai: unknown error"
+	}
+	if trace {
+		return "konsolai: " + err.Error()
+	}
+	host := endpointHost(endpoint)
+	if errors.Is(err, llm.ErrIdleTimeout) {
+		return "konsolai: the model server stopped responding (" + host + "). Try again, or check the server."
+	}
+	if errors.Is(err, llm.ErrTruncated) {
+		return "konsolai: the model's answer was cut off; try a narrower request."
+	}
+	var he *llm.HTTPError
+	if errors.As(err, &he) && he.Status >= 400 && he.Status < 500 {
+		return "konsolai: the model server rejected the request: " + firstErrLine(he.Body)
+	}
+	if isDialErr(err) {
+		return "konsolai: cannot reach the model server at " + host + "."
+	}
+	return "konsolai: " + err.Error()
+}
+
+func endpointHost(endpoint string) string {
+	u, err := url.Parse(endpoint)
+	if err == nil && u.Host != "" {
+		return u.Host
+	}
+	s := strings.TrimPrefix(strings.TrimPrefix(endpoint, "http://"), "https://")
+	if i := strings.IndexByte(s, '/'); i >= 0 {
+		s = s[:i]
+	}
+	if s == "" {
+		return "the model server"
+	}
+	return s
+}
+
+func firstErrLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
+}
+
+func isDialErr(err error) bool {
+	var op *net.OpError
+	if errors.As(err, &op) {
+		return true
+	}
+	s := err.Error()
+	return strings.Contains(s, "connection refused") || strings.Contains(s, "no such host") || strings.Contains(s, "dial tcp")
 }

@@ -3,12 +3,14 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestCompleteParsesToolCallsAndSendsTools(t *testing.T) {
@@ -97,6 +99,16 @@ func TestCompleteOmitsToolsWhenEmpty(t *testing.T) {
 	}
 	if _, ok := raw["tool_choice"]; ok {
 		t.Fatal("tool_choice should be omitted")
+	}
+	var stream bool
+	if err := json.Unmarshal(raw["stream"], &stream); err != nil || !stream {
+		t.Fatalf("stream %s", raw["stream"])
+	}
+	var so struct {
+		IncludeUsage bool `json:"include_usage"`
+	}
+	if err := json.Unmarshal(raw["stream_options"], &so); err != nil || !so.IncludeUsage {
+		t.Fatalf("stream_options %s", raw["stream_options"])
 	}
 }
 
@@ -301,5 +313,200 @@ func TestStreamUsageAndOptions(t *testing.T) {
 	}
 	if err := json.Unmarshal(raw["stream_options"], &so); err != nil || !so.IncludeUsage {
 		t.Fatalf("stream_options %s %v", raw["stream_options"], err)
+	}
+}
+
+func writeSSE(w http.ResponseWriter, payloads ...string) {
+	fl, _ := w.(http.Flusher)
+	w.Header().Set("Content-Type", "text/event-stream")
+	for _, p := range payloads {
+		_, _ = io.WriteString(w, "data: "+p+"\n\n")
+		if fl != nil {
+			fl.Flush()
+		}
+	}
+	_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	if fl != nil {
+		fl.Flush()
+	}
+}
+
+func TestCompleteSSEContentOnly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeSSE(w,
+			`{"choices":[{"delta":{"content":"hel"}}]}`,
+			`{"choices":[{"delta":{"content":"lo"}}]}`,
+		)
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL+"/v1", "qwen")
+	msg, _, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Content != "hello" {
+		t.Fatalf("got %q", msg.Content)
+	}
+}
+
+func TestCompleteSSEToolCallsInterleaved(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeSSE(w,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","type":"function","function":{"name":"read_file"}}]}}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"b","type":"function","function":{"name":"list_dir"}}]}}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":"}}]}}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"arguments":"{\"path\":"}}]}}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\".\"}"}}]}}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"arguments":"\"src\"}"}}]}}]}`,
+		)
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL+"/v1", "qwen")
+	msg, _, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.ToolCalls) != 2 {
+		t.Fatalf("calls %+v", msg.ToolCalls)
+	}
+	if msg.ToolCalls[0].ID != "a" || msg.ToolCalls[0].Function.Name != "read_file" || msg.ToolCalls[0].Function.Arguments != `{"path":"."}` {
+		t.Fatalf("call0 %+v", msg.ToolCalls[0])
+	}
+	if msg.ToolCalls[1].ID != "b" || msg.ToolCalls[1].Function.Name != "list_dir" || msg.ToolCalls[1].Function.Arguments != `{"path":"src"}` {
+		t.Fatalf("call1 %+v", msg.ToolCalls[1])
+	}
+	if !json.Valid([]byte(msg.ToolCalls[0].Function.Arguments)) {
+		t.Fatal("args 0")
+	}
+}
+
+func TestCompleteSSEInvalidToolArgsPassedThrough(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeSSE(w, `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c","function":{"name":"x","arguments":"{not json"}}]}}]}`)
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL+"/v1", "qwen")
+	msg, _, err := c.Complete(context.Background(), nil, nil, ChatOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.ToolCalls[0].Function.Arguments != "{not json" {
+		t.Fatalf("%q", msg.ToolCalls[0].Function.Arguments)
+	}
+}
+
+func TestCompleteSSEUsage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeSSE(w,
+			`{"choices":[{"delta":{"content":"hi"}}]}`,
+			`{"choices":[],"usage":{"prompt_tokens":41,"completion_tokens":3}}`,
+		)
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL+"/v1", "qwen")
+	_, u, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.PromptTokens != 41 || u.CompletionTokens != 3 {
+		t.Fatalf("%+v", u)
+	}
+}
+
+func TestCompleteSSETruncated(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeSSE(w, `{"choices":[{"delta":{"content":"hello"},"finish_reason":"length"}]}`)
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL+"/v1", "qwen")
+	msg, _, err := c.Complete(context.Background(), nil, nil, ChatOptions{})
+	if !errors.Is(err, ErrTruncated) {
+		t.Fatalf("err %v", err)
+	}
+	if msg.Content != "hello" {
+		t.Fatalf("partial %q", msg.Content)
+	}
+}
+
+func TestCompleteSSEIdleTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		<-r.Context().Done()
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL+"/v1", "qwen")
+	c.retryWait = time.Hour
+	_, _, err := c.Complete(context.Background(), nil, nil, ChatOptions{IdleTimeout: 150 * time.Millisecond})
+	if !errors.Is(err, ErrIdleTimeout) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestCompleteRetry503ThenSuccess(t *testing.T) {
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if n.Add(1) == 1 {
+			http.Error(w, "busy", http.StatusServiceUnavailable)
+			return
+		}
+		writeSSE(w, `{"choices":[{"delta":{"content":"ok"}}]}`)
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL+"/v1", "qwen")
+	c.retryWait = time.Millisecond
+	msg, _, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Content != "ok" {
+		t.Fatalf("%q", msg.Content)
+	}
+	if n.Load() != 2 {
+		t.Fatalf("requests %d", n.Load())
+	}
+}
+
+func TestCompleteNoRetryAfterPartialData(t *testing.T) {
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n")
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL+"/v1", "qwen")
+	c.retryWait = time.Millisecond
+	msg, _, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Content != "hel" {
+		t.Fatalf("%q", msg.Content)
+	}
+	if n.Load() != 1 {
+		t.Fatalf("retried: %d", n.Load())
+	}
+}
+
+func TestCompleteNoRetry4xx(t *testing.T) {
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n.Add(1)
+		http.Error(w, "bad", http.StatusBadRequest)
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL+"/v1", "qwen")
+	c.retryWait = time.Millisecond
+	_, _, err := c.Complete(context.Background(), nil, nil, ChatOptions{})
+	var he *HTTPError
+	if !errors.As(err, &he) || he.Status != 400 {
+		t.Fatalf("got %v", err)
+	}
+	if n.Load() != 1 {
+		t.Fatalf("retried %d", n.Load())
 	}
 }

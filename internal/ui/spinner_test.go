@@ -106,6 +106,21 @@ func TestQuietStartsAfterSilenceAndRestarts(t *testing.T) {
 	}
 }
 
+func TestLiveSetLabel(t *testing.T) {
+	var buf bytes.Buffer
+	restore := TestHook(&buf, true, 5*time.Millisecond, nil)
+	defer restore()
+	live := StartLive("thinking")
+	time.Sleep(12 * time.Millisecond)
+	live.SetLabel("writing · 300 tok")
+	time.Sleep(12 * time.Millisecond)
+	live.Stop()
+	got := buf.String()
+	if !strings.Contains(got, "thinking") || !strings.Contains(got, "writing · 300 tok") {
+		t.Fatalf("%q", got)
+	}
+}
+
 func TestSpinnerCallSiteLabels(t *testing.T) {
 	labels := []string{"understanding", "loading memory", "thinking", "planning", "working", "running", "exporting", "fetching"}
 	for _, label := range labels {

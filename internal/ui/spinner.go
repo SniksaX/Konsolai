@@ -87,6 +87,7 @@ func hookInterval() time.Duration {
 
 type spinner struct {
 	w        io.Writer
+	mu       sync.Mutex
 	label    string
 	delay    time.Duration
 	interval time.Duration
@@ -98,19 +99,45 @@ type spinner struct {
 	shown    bool
 }
 
+// Live is a spinner whose label can be updated while it runs.
+type Live struct {
+	s *spinner
+}
+
+func (l *Live) SetLabel(label string) {
+	if l == nil || l.s == nil {
+		return
+	}
+	l.s.mu.Lock()
+	l.s.label = label
+	l.s.mu.Unlock()
+}
+
+func (l *Live) Stop() {
+	if l == nil || l.s == nil {
+		return
+	}
+	l.s.Stop()
+}
+
 // Start runs a braille spinner on stderr with label until the returned func is called.
 func Start(label string) func() {
-	return startAfter(label, 0)
+	return StartLive(label).Stop
+}
+
+// StartLive is Start, but the label can be changed while the spinner runs.
+func StartLive(label string) *Live {
+	return startLiveAfter(label, 0)
 }
 
 // StartAfter waits delay before the first frame (store open uses 300ms).
 func StartAfter(label string, delay time.Duration) func() {
-	return startAfter(label, delay)
+	return startLiveAfter(label, delay).Stop
 }
 
-func startAfter(label string, delay time.Duration) func() {
+func startLiveAfter(label string, delay time.Duration) *Live {
 	if !hookTTY() {
-		return func() {}
+		return &Live{}
 	}
 	s := &spinner{
 		w:        hookWriter(),
@@ -122,7 +149,7 @@ func startAfter(label string, delay time.Duration) func() {
 		done:     make(chan struct{}),
 	}
 	go s.loop()
-	return s.Stop
+	return &Live{s: s}
 }
 
 func (s *spinner) loop() {
@@ -158,7 +185,10 @@ func (s *spinner) loop() {
 
 func (s *spinner) paint() {
 	elapsed := hookNow().Sub(s.start)
-	msg := braille[s.frame%len(braille)] + " " + s.label
+	s.mu.Lock()
+	label := s.label
+	s.mu.Unlock()
+	msg := braille[s.frame%len(braille)] + " " + label
 	if elapsed >= time.Second {
 		msg += " " + formatElapsed(elapsed)
 	}

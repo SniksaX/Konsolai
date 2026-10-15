@@ -101,6 +101,31 @@ func TestSessionResumeWindow(t *testing.T) {
 	}
 }
 
+func TestResumeFailedSession(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	id, err := s.CreateSession(ctx, NewSession{
+		Profile: "home", CWD: "/tmp/fail", Mode: "build", Model: "m", Title: "mid-build",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendMessage(ctx, id, 1, Message{Role: "user", Content: "keep me"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EndSession(ctx, id, "failed"); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := s.FindResumableSession(ctx, "home", nil, "/tmp/fail", "build", 30*time.Minute)
+	if err != nil || !ok || got.ID != id {
+		t.Fatalf("failed resume: ok=%v id=%s err=%v", ok, got.ID, err)
+	}
+	msgs, err := s.LoadMessages(ctx, id)
+	if err != nil || len(msgs) != 1 || msgs[0].Content != "keep me" {
+		t.Fatalf("msgs kept %+v err=%v", msgs, err)
+	}
+}
+
 func TestResumeModeFamily(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
