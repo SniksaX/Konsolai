@@ -219,25 +219,27 @@ func run() int {
 			return 1
 		}
 	} else {
+		clear := ui.Status(os.Stderr, "loading memory")
 		opened, err := store.Open(ctx, prof.DatabaseURL)
+		clear()
 		if err != nil {
 			if needMem {
 				fmt.Fprintln(os.Stderr, "konsolai:", err)
 				return 1
 			}
-			fmt.Fprintln(os.Stderr, ui.Dim("memory disabled: "+err.Error()))
+			fmt.Fprintln(os.Stderr, ui.Dim(config.DisableLine(prof.DatabaseURL, err)))
 		} else {
 			st = opened
 			defer st.Close()
 		}
 	}
 	mem := memory.NewGuard(st, func(err error) {
-		fmt.Fprintln(os.Stderr, ui.Dim("memory disabled: "+err.Error()))
+		fmt.Fprintln(os.Stderr, ui.Dim(config.DisableLine(prof.DatabaseURL, err)))
 	})
-	if st != nil {
-		mem.Do(func(s *store.Store) error {
-			return s.PruneIfDue(ctx, prof.RetentionDays)
-		})
+	if s := mem.Store(); s != nil {
+		if err := s.PruneIfDue(ctx, prof.RetentionDays); err != nil {
+			mem.Fail(err)
+		}
 	}
 
 	cwd, err := os.Getwd()
@@ -268,15 +270,24 @@ func run() int {
 		return 1
 	}
 	client := llm.New(prof.Endpoint, prof.Model)
-	sessionID, history := resumeOrCreate(ctx, mem, prof, projectID, cwd, inv)
 	facts := loadFactsBlock(ctx, mem, prof.Name, projectID)
-	rec := memory.NewRecorder(mem, sessionID)
 
 	var code int
+	var sessionID string
+	var history []llm.Message
 	if inv.Mode == modeHowto {
+		sessionID, history = resumeOrCreate(ctx, mem, prof, projectID, cwd, inv)
+		rec := memory.NewRecorder(mem, sessionID)
 		code = runHowto(ctx, client, snap, facts, history, rec, inv.Request)
 	} else {
-		code = runAgent(ctx, client, snap, facts, history, rec, mem, sessionID, projectID, prof.Name, inv, cwd)
+		prompter, err := ui.OpenPrompter(inv.Yes)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "konsolai:", err)
+			return 1
+		}
+		sessionID, history = resumeOrCreate(ctx, mem, prof, projectID, cwd, inv)
+		rec := memory.NewRecorder(mem, sessionID)
+		code = runAgent(ctx, client, snap, facts, history, rec, mem, sessionID, projectID, prof.Name, inv, cwd, prompter)
 	}
 	if sessionID != "" {
 		if s := mem.Store(); s != nil {
@@ -293,16 +304,14 @@ func upsertProject(ctx context.Context, mem *memory.Guard, cwd string) *int64 {
 	if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
 		return nil
 	}
-	var id int64
-	ok := false
-	mem.Do(func(s *store.Store) error {
-		p := repo.Detect(root)
-		var err error
-		id, err = s.UpsertProject(ctx, root, p.Kinds, p.Commands)
-		ok = err == nil
-		return err
-	})
-	if !ok {
+	s := mem.Store()
+	if s == nil {
+		return nil
+	}
+	p := repo.Detect(root)
+	id, err := s.UpsertProject(ctx, root, p.Kinds, p.Commands)
+	if err != nil {
+		mem.Fail(err)
 		return nil
 	}
 	return &id
@@ -314,7 +323,7 @@ func resumeOrCreate(ctx context.Context, mem *memory.Guard, prof config.Profile,
 	}
 	idle := time.Duration(prof.SessionIdleMinutes) * time.Minute
 	if !inv.New {
-		sess, found, err := mem.Store().FindResumableSession(ctx, prof.Name, projectID, cwd, idle)
+		sess, found, err := mem.Store().FindResumableSession(ctx, prof.Name, projectID, cwd, inv.Mode.String(), idle)
 		if err != nil {
 			mem.Fail(err)
 			return "", nil
@@ -333,15 +342,18 @@ func resumeOrCreate(ctx context.Context, mem *memory.Guard, prof config.Profile,
 	if utf8.RuneCountInString(title) > 80 {
 		title = string([]rune(title)[:80])
 	}
-	var id string
-	mem.Do(func(s *store.Store) error {
-		var err error
-		id, err = s.CreateSession(ctx, store.NewSession{
-			Profile: prof.Name, ProjectID: projectID, CWD: cwd,
-			Mode: inv.Mode.String(), Model: prof.Model, Title: title,
-		})
-		return err
+	s := mem.Store()
+	if s == nil {
+		return "", nil
+	}
+	id, err := s.CreateSession(ctx, store.NewSession{
+		Profile: prof.Name, ProjectID: projectID, CWD: cwd,
+		Mode: inv.Mode.String(), Model: prof.Model, Title: title,
 	})
+	if err != nil {
+		mem.Fail(err)
+		return "", nil
+	}
 	return id, nil
 }
 
@@ -431,17 +443,12 @@ func runHowto(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, fac
 	return 0
 }
 
-func runAgent(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, mem *memory.Guard, sessionID string, projectID *int64, profile string, inv invocation, cwd string) int {
+func runAgent(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, mem *memory.Guard, sessionID string, projectID *int64, profile string, inv invocation, cwd string, prompter *ui.Prompter) int {
 	root := cwd
 	if inv.Mode == modeCode {
 		root = repo.Root(cwd)
 	}
 	sg, err := safety.New(root)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "konsolai:", err)
-		return 1
-	}
-	prompter, err := ui.OpenPrompter(inv.Yes)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "konsolai:", err)
 		return 1
