@@ -49,6 +49,10 @@ func Collect() (Snapshot, error) {
 	return s, nil
 }
 
+func (s Snapshot) Brief() string {
+	return fmt.Sprintf("OS: %s\nShell: %s\nCWD: %s", s.OS, s.Shell, s.CWD)
+}
+
 func (s Snapshot) String() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "OS: %s\nShell: %s\nUser: %s\nCWD: %s\nGit repo: %t\n", s.OS, s.Shell, s.User, s.CWD, s.GitRepo)
