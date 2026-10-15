@@ -1019,3 +1019,108 @@ func analysisSourceRead(name, args string) bool {
 	}
 	return p.Path != ""
 }
+
+const (
+	resumeTokenCap   = 6000
+	resumeArgMax     = 200
+	resumeToolElided = "[tool output from an earlier turn elided]"
+)
+
+func LeanResume(hist []llm.Message, tokensPerChar float64) []llm.Message {
+	if len(hist) == 0 {
+		return hist
+	}
+	if tokensPerChar <= 0 {
+		tokensPerChar = 0.30
+	}
+	lastUser := -1
+	for i := len(hist) - 1; i >= 0; i-- {
+		if hist[i].Role == llm.RoleUser {
+			lastUser = i
+			break
+		}
+	}
+	out := make([]llm.Message, len(hist))
+	copy(out, hist)
+	for i := range out {
+		if n := len(out[i].ToolCalls); n > 0 {
+			tcs := make([]llm.ToolCall, n)
+			copy(tcs, out[i].ToolCalls)
+			out[i].ToolCalls = tcs
+		}
+	}
+	for i := range out {
+		if out[i].Role == llm.RoleAssistant {
+			for j := range out[i].ToolCalls {
+				args := out[i].ToolCalls[j].Function.Arguments
+				if len(args) > resumeArgMax {
+					out[i].ToolCalls[j].Function.Arguments = args[:resumeArgMax]
+				}
+			}
+		}
+		if i < lastUser && out[i].Role == llm.RoleTool {
+			out[i].Content = resumeToolElided
+		}
+	}
+	for resumeTokens(out, tokensPerChar) > resumeTokenCap && canDropPair(out) {
+		out = dropOldestPair(out)
+	}
+	return out
+}
+
+func resumeTokens(msgs []llm.Message, ratio float64) int {
+	return int(float64(llm.MessageChars(msgs)) * ratio)
+}
+
+func canDropPair(msgs []llm.Message) bool {
+	users := 0
+	for _, m := range msgs {
+		if m.Role == llm.RoleUser {
+			users++
+		}
+	}
+	if users >= 2 {
+		return true
+	}
+	return len(msgs) > 0 && msgs[0].Role != llm.RoleUser && users >= 1
+}
+
+func dropOldestPair(msgs []llm.Message) []llm.Message {
+	if len(msgs) == 0 {
+		return msgs
+	}
+	if msgs[0].Role != llm.RoleUser {
+		i := 0
+		for i < len(msgs) && msgs[i].Role != llm.RoleUser {
+			i++
+		}
+		if i > 0 {
+			return msgs[i:]
+		}
+	}
+	i := 1
+	for i < len(msgs) && msgs[i].Role != llm.RoleUser {
+		i++
+	}
+	return msgs[i:]
+}
+
+func toolProtocolValid(msgs []llm.Message) bool {
+	pending := map[string]bool{}
+	for _, m := range msgs {
+		switch m.Role {
+		case llm.RoleAssistant:
+			pending = map[string]bool{}
+			for _, c := range m.ToolCalls {
+				if c.ID != "" {
+					pending[c.ID] = true
+				}
+			}
+		case llm.RoleTool:
+			if m.ToolCallID == "" || !pending[m.ToolCallID] {
+				return false
+			}
+		}
+	}
+	return true
+}
