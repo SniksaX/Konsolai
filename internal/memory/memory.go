@@ -13,14 +13,29 @@ import (
 	"github.com/siraj/konsolai/internal/tools"
 )
 
+type Backend interface {
+	NextSeq(ctx context.Context, sessionID string) (int, error)
+	AppendMessage(ctx context.Context, sessionID string, seq int, m store.Message) error
+	TouchSession(ctx context.Context, id string) error
+	RecordAction(ctx context.Context, a store.ActionIn) error
+	RecordFileChange(ctx context.Context, c store.FileChangeIn) error
+	GetWebCache(ctx context.Context, url string) (title, text string, ok bool, err error)
+	PutWebCache(ctx context.Context, url, title, text string, ttl time.Duration) error
+	AddUserFact(ctx context.Context, profile, fact, source string) (int64, error)
+	AddProjectFact(ctx context.Context, projectID int64, fact string, sourceSession *string) (int64, error)
+	Close()
+}
+
+var _ Backend = (*store.Store)(nil)
+
 type Guard struct {
 	mu       sync.Mutex
-	store    *store.Store
+	store    Backend
 	disabled bool
 	onFail   func(error)
 }
 
-func NewGuard(s *store.Store, onFail func(error)) *Guard {
+func NewGuard(s Backend, onFail func(error)) *Guard {
 	return &Guard{store: s, onFail: onFail, disabled: s == nil}
 }
 
@@ -31,6 +46,19 @@ func (g *Guard) Disabled() bool {
 }
 
 func (g *Guard) Store() *store.Store {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.disabled || g.store == nil {
+		return nil
+	}
+	s, ok := g.store.(*store.Store)
+	if !ok {
+		return nil
+	}
+	return s
+}
+
+func (g *Guard) live() Backend {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.disabled {
@@ -57,8 +85,8 @@ func (g *Guard) disable(err error) {
 	}
 }
 
-func (g *Guard) Do(fn func(*store.Store) error) {
-	s := g.Store()
+func (g *Guard) Do(fn func(Backend) error) {
+	s := g.live()
 	if s == nil {
 		return
 	}
@@ -77,7 +105,7 @@ func NewRecorder(g *Guard, sessionID string) *Recorder {
 }
 
 func (r *Recorder) Message(ctx context.Context, m llm.Message) error {
-	r.g.Do(func(s *store.Store) error {
+	r.g.Do(func(s Backend) error {
 		seq, err := s.NextSeq(ctx, r.sessionID)
 		if err != nil {
 			return err
@@ -100,7 +128,7 @@ func (r *Recorder) Message(ctx context.Context, m llm.Message) error {
 }
 
 func (r *Recorder) Action(ctx context.Context, a agent.ActionRecord) error {
-	r.g.Do(func(s *store.Store) error {
+	r.g.Do(func(s Backend) error {
 		seq, err := s.NextSeq(ctx, r.sessionID)
 		if err != nil {
 			return err
@@ -118,7 +146,7 @@ func (r *Recorder) Action(ctx context.Context, a agent.ActionRecord) error {
 }
 
 func (r *Recorder) FileChange(ctx context.Context, c tools.FileChange) error {
-	r.g.Do(func(s *store.Store) error {
+	r.g.Do(func(s Backend) error {
 		seq, err := s.NextSeq(ctx, r.sessionID)
 		if err != nil {
 			return err
@@ -145,7 +173,7 @@ type WebCache struct{ g *Guard }
 func NewWebCache(g *Guard) *WebCache { return &WebCache{g: g} }
 
 func (w *WebCache) Get(ctx context.Context, url string) (title, text string, ok bool) {
-	s := w.g.Store()
+	s := w.g.live()
 	if s == nil {
 		return "", "", false
 	}
@@ -158,7 +186,7 @@ func (w *WebCache) Get(ctx context.Context, url string) (title, text string, ok 
 }
 
 func (w *WebCache) Put(ctx context.Context, url, title, text string, ttl time.Duration) error {
-	w.g.Do(func(s *store.Store) error {
+	w.g.Do(func(s Backend) error {
 		return s.PutWebCache(ctx, url, title, text, ttl)
 	})
 	return nil
@@ -176,7 +204,7 @@ func NewFactStore(g *Guard, profile string, projectID *int64, sessionID string) 
 }
 
 func (f *FactStore) Add(ctx context.Context, fact, scope string) error {
-	s := f.g.Store()
+	s := f.g.live()
 	if s == nil {
 		return nil
 	}
