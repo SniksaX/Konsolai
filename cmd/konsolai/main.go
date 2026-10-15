@@ -488,7 +488,7 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 		cfg.ExploreNote = agent.ExploreNoteLookup
 	case intent.Build:
 		cfg.Prompt = agent.CodePrompt + "\n" + lang + "\n" + agent.ScopeRule
-		cfg.Thinking = true
+		cfg.ThinkingPolicy = agent.ThinkUntilPlan
 		cfg.Temperature = 0.3
 		cfg.MaxSteps = 60
 		cfg.RequirePlan = true
