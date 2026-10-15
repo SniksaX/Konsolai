@@ -32,26 +32,29 @@ alwaysApply: true
 - internal/safety (command and path guard)
 - internal/diff (Myers unified diffs)
 - internal/repo (root, file listing, project detect)
-- internal/tools (run_shell, write_file, read_file, list_dir, search, find_files, edit_file, propose_plan, remember, web_fetch, export_doc, finish)
+- internal/intent (router)
+- internal/tools (run_shell, write_file, read_file, list_dir, search, find_files, edit_file, propose_plan, remember, web_fetch, export_doc, outline, finish)
 - internal/agent (tool-calling loop)
 - internal/ui (TTY prompt and ANSI)
 - New packages only when the architect specifies them.
 - Grammar:
-  konsolai [--yes] [--profile NAME] [new] [howto|do|code] "<request>"
+  konsolai [--yes] [--profile NAME] [--intent answer|lookup|act|build] [new] ["<request>"]
   konsolai [--profile NAME] history | undo | facts | prune
   konsolai [--profile NAME] remember [--project] "<fact>"
   konsolai [--profile NAME] forget user|project <id>
-  The optional mode is a separate argument; the request is exactly one argument.
-- do: cwd root, do prompt, no thinking, 15 steps, no plan gate, 60k token budget.
-- code: repo.Root, CodePrompt plus project context, thinking, temp 0.3, 60 steps,
-  RequirePlan, 60k token budget; then git diff --stat (no confirm), printed dimmed.
+  No request and a TTY: interactive raw input. No request and a pipe: stdin is the request.
+  A request and a pipe: stdin is attached as context.
+- answer: stream, no tools. lookup: read-only tools, ExploreBudget 6, MaxSteps 10.
+  act: all tools, no plan, ExploreBudget 6, MaxSteps 15.
+  build: plan gate, ExploreBudget 12, MaxSteps 60, thinking, temp 0.3.
 - Memory: $XDG_CONFIG_HOME/konsolai/config.json (default ~/.config/konsolai/config.json).
   --profile beats KONSOLAI_PROFILE beats default_profile beats built-in "default".
   KONSOLAI_DATABASE_URL / KONSOLAI_ENDPOINT / KONSOLAI_MODEL override profile fields.
-  Resume the latest active|finished session in the same mode family (howto+do vs code)
+  Resume the latest active|finished session (one family; mode ignored)
   within session_idle_minutes unless `new`. Title is set only at CreateSession.
-  Redact only what is persisted. On first store failure, one dim line
-  "memory disabled: cannot connect to <host:port>: <short cause>".
+  Store the intent in sessions.mode. Redact only what is persisted. On first
+  store failure, one dim line
+  "memory disabled: cannot connect to <host:port>: <innermost cause>".
 - Exit codes: 0 ok, 1 error, 2 usage, 3 aborted, 4 max steps, 130 cancelled.
 
 ## Server
