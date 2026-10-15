@@ -266,44 +266,49 @@ func TestResumeSessionLocalFallback(t *testing.T) {
 	}
 	mem := memory.NewGuard(nil, nil)
 	prof := config.Profile{Name: "default", SessionIdleMinutes: 30}
-	cand := findCandidate(context.Background(), mem, prof, nil, cwd, invocation{})
-	if cand.Title != "quel process" || len(cand.Messages) != 1 || cand.Messages[0].Content != "port 3000" {
-		t.Fatalf("%+v", cand)
+	cands := findCandidates(context.Background(), mem, prof, nil, cwd)
+	if len(cands) != 1 || cands[0].Title != "quel process" || len(cands[0].Messages) != 1 || cands[0].Messages[0].Content != "port 3000" {
+		t.Fatalf("%+v", cands)
 	}
-	id, hist := applyResume(invocation{}, intent.Decision{ContinuesPrevious: true}, cand)
-	if id != "" || len(hist) != 1 || hist[0].Content != "port 3000" {
-		t.Fatalf("%q %+v", id, hist)
+	got := applyResume(invocation{}, intent.Decision{ContinuesSession: 1}, cands)
+	if got.ID != "" || len(got.Messages) != 1 || got.Messages[0].Content != "port 3000" {
+		t.Fatalf("%+v", got)
 	}
-	id, hist = applyResume(invocation{New: true}, intent.Decision{ContinuesPrevious: true}, cand)
-	if id != "" || len(hist) != 0 {
-		t.Fatalf("new should ignore candidate: %q %+v", id, hist)
+	got = applyResume(invocation{New: true}, intent.Decision{ContinuesSession: 1}, cands)
+	if got.ID != "" || len(got.Messages) != 0 {
+		t.Fatalf("new should ignore candidate: %+v", got)
 	}
 }
 
 func TestTopicAwareResume(t *testing.T) {
-	cand := resumeCandidate{
-		ID:    "sess-1",
-		Title: "how do I list git branches?",
-		Messages: []llm.Message{
-			{Role: llm.RoleUser, Content: "how do I list git branches?"},
-			{Role: llm.RoleAssistant, Content: "git branch"},
+	cands := []resumeCandidate{
+		{
+			ID:       "pdf",
+			Title:    "read the current code and create docs/OVERVIEW.pdf explaining how it works with diagrams",
+			LastUser: "read the current code and create docs/OVERVIEW.pdf explaining how it works with diagrams",
+			Messages: []llm.Message{{Role: llm.RoleUser, Content: "create the pdf"}},
+		},
+		{
+			ID:       "git",
+			Title:    "how do I list git branches?",
+			LastUser: "how do I list git branches?",
+			Messages: []llm.Message{
+				{Role: llm.RoleUser, Content: "how do I list git branches?"},
+				{Role: llm.RoleAssistant, Content: "git branch"},
+			},
 		},
 	}
-	id, hist := applyResume(invocation{}, intent.Decision{ContinuesPrevious: false, Intent: intent.Build}, cand)
-	if id != "" || hist != nil {
-		t.Fatalf("unrelated should start new: %q %+v", id, hist)
+	got := applyResume(invocation{Request: "and how do I delete one?"}, intent.Decision{ContinuesSession: 2, Intent: intent.Answer}, cands)
+	if got.ID != "git" || got.Title != "how do I list git branches?" {
+		t.Fatalf("git follow-up %+v", got)
 	}
-	id, hist = applyResume(invocation{}, intent.Decision{ContinuesPrevious: true, Intent: intent.Answer}, cand)
-	if id != "sess-1" || len(hist) != 2 {
-		t.Fatalf("continue: %q %d", id, len(hist))
+	got = applyResume(invocation{Request: "what is rust?"}, intent.Decision{ContinuesSession: 0, Intent: intent.Answer}, cands)
+	if got.ID != "" || got.Title != "" {
+		t.Fatalf("unrelated should start new: %+v", got)
 	}
-	id, hist = applyResume(invocation{Request: "and port 3306?"}, intent.Decision{ContinuesPrevious: true}, cand)
-	if id != "sess-1" {
-		t.Fatalf("follow-up %q", id)
-	}
-	id, hist = applyResume(invocation{New: true}, intent.Decision{ContinuesPrevious: true}, cand)
-	if id != "" || hist != nil {
-		t.Fatalf("new flag: %q %+v", id, hist)
+	got = applyResume(invocation{New: true}, intent.Decision{ContinuesSession: 2}, cands)
+	if got.ID != "" {
+		t.Fatalf("new flag: %+v", got)
 	}
 }
 
