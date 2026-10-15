@@ -25,6 +25,7 @@ const (
 	defaultEndpoint    = "http://fatboy:11436/v1"
 	defaultIdleMinutes = 30
 	defaultRetention   = 90
+	defaultLLMIdle     = 120
 	builtinProfile     = "default"
 )
 
@@ -34,12 +35,13 @@ type File struct {
 }
 
 type Profile struct {
-	Name               string `json:"-"`
-	DatabaseURL        string `json:"database_url"`
-	Endpoint           string `json:"endpoint"`
-	Model              string `json:"model"`
-	SessionIdleMinutes int    `json:"session_idle_minutes"`
-	RetentionDays      int    `json:"retention_days"`
+	Name                  string `json:"-"`
+	DatabaseURL           string `json:"database_url"`
+	Endpoint              string `json:"endpoint"`
+	Model                 string `json:"model"`
+	SessionIdleMinutes    int    `json:"session_idle_minutes"`
+	RetentionDays         int    `json:"retention_days"`
+	LLMIdleTimeoutSeconds int    `json:"llm_idle_timeout_seconds"`
 }
 
 func DefaultPath() string {
@@ -99,6 +101,9 @@ func (f File) Resolve(name string) (Profile, error) {
 	}
 	if p.RetentionDays == 0 {
 		p.RetentionDays = defaultRetention
+	}
+	if p.LLMIdleTimeoutSeconds == 0 {
+		p.LLMIdleTimeoutSeconds = defaultLLMIdle
 	}
 	if v := os.Getenv("KONSOLAI_DATABASE_URL"); v != "" {
 		p.DatabaseURL = v
