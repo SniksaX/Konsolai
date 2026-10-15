@@ -132,6 +132,26 @@ func PrintSummary(w io.Writer, intent string, s Stats) {
 	fmt.Fprintln(w, ui.Current().Muted(FormatSummary(intent, s)))
 }
 
+func ExploreBudgetFor(intent, task string) int {
+	switch intent {
+	case "lookup":
+		if task == "analysis" {
+			return 10
+		}
+		return 6
+	case "build":
+		switch task {
+		case "docs":
+			return 16
+		case "analysis":
+			return 12
+		}
+		return 8
+	default:
+		return 6
+	}
+}
+
 func PrintTrace(w io.Writer, step int, think bool, d time.Duration, in, out int, names []string) {
 	if w == nil {
 		return
@@ -272,6 +292,10 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			fmt.Fprintln(cfg.Out, ui.Current().Muted(text))
 		}
 
+		noteWasSent := noteSent
+		stepReadOnly := 0
+		stepOther := 0
+		lastReadOnly := -1
 		for _, call := range msg.ToolCalls {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -302,11 +326,10 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				continue
 			}
 			kind := action.Kind()
-			if noteSent && kind == tools.ReadOnly {
-				readonlyAfterNote++
-				if readonlyAfterNote >= hardStopAfter(cfg, sourceReads) {
-					toolsGone = true
-				}
+			if kind == tools.ReadOnly {
+				stepReadOnly++
+			} else if kind != tools.Plan {
+				stepOther++
 			}
 			if kind == tools.Mutating && cfg.RequirePlan && !planApproved {
 				tm := llm.Message{
@@ -409,6 +432,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					}
 					msgs = append(msgs, tm)
 					_ = rec.Message(ctx, tm)
+					lastReadOnly = len(msgs) - 1
 					continue
 				}
 				seenRead[key] = struct{}{}
@@ -446,19 +470,8 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			}
 			fmt.Fprintf(cfg.Out, "%s %s · %s\n", mark, pal.Muted(displayMeta(result)), pal.Muted(formatDuration(elapsed)))
 			content := result.Output
-			if kind == tools.ReadOnly {
-				if !cfg.RequirePlan || !planApproved {
-					explore++
-				}
-			} else if kind != tools.Plan {
-				explore = 0
-			}
 			if cfg.Task == "analysis" && analysisSourceRead(call.Function.Name, call.Function.Arguments) && !result.IsError {
 				sourceReads++
-			}
-			if cfg.ExploreBudget > 0 && explore >= cfg.ExploreBudget && cfg.ExploreNote != "" {
-				content += "\n\n" + exploreNote(cfg, sourceReads)
-				noteSent = true
 			}
 			if result.IsError {
 				sum := sha256.Sum256([]byte(result.Output))
@@ -476,8 +489,26 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			}
 			msgs = append(msgs, tm)
 			_ = rec.Message(ctx, tm)
+			if kind == tools.ReadOnly {
+				lastReadOnly = len(msgs) - 1
+			}
 			if call.Function.Name == "run_shell" && result.IsError {
 				shellFail = true
+			}
+		}
+		if stepOther > 0 {
+			explore = 0
+		} else if stepReadOnly > 0 && (!cfg.RequirePlan || !planApproved) {
+			explore++
+			if cfg.ExploreBudget > 0 && explore >= cfg.ExploreBudget && cfg.ExploreNote != "" && lastReadOnly >= 0 {
+				msgs[lastReadOnly].Content += "\n\n" + exploreNote(cfg, sourceReads)
+				noteSent = true
+			}
+			if noteWasSent {
+				readonlyAfterNote++
+				if readonlyAfterNote >= hardStopAfter(cfg, sourceReads) {
+					toolsGone = true
+				}
 			}
 		}
 	}
