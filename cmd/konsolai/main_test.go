@@ -38,6 +38,11 @@ func TestParseArgs(t *testing.T) {
 			want: invocation{Request: "hello", New: true, Trace: true},
 		},
 		{
+			name: "plain",
+			args: []string{"--plain", "hello"},
+			want: invocation{Request: "hello", Plain: true},
+		},
+		{
 			name: "no request",
 			args: nil,
 			want: invocation{},
