@@ -82,7 +82,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				})
 				continue
 			}
-			if !action.ReadOnly() {
+			if action.Kind() != tools.ReadOnly && action.Kind() != tools.Final {
 				d, reason, err := cfg.Confirmer.Confirm(action.Summary(), action.Preview())
 				if err != nil {
 					return err
@@ -99,7 +99,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					return ErrAborted
 				}
 			}
-			finish := call.Function.Name == "finish"
+			finish := action.Kind() == tools.Final
 			if !finish {
 				fmt.Fprintln(cfg.Out, ui.Cyan("▸ ")+action.Summary())
 			}
