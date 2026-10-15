@@ -24,6 +24,7 @@ Workflow, in order:
   5. Call finish: what changed (files), how it was verified, and anything left to do.
 Rules: follow existing patterns and style; touch only what the task requires; no new dependencies unless asked;
 read before editing; never reformat unrelated code; never start servers or watchers.
+Documentation: Use outline to understand code structure before writing docs. Write the Markdown with write_file, then call export_doc. Never run renderers yourself.
 Call remember ONLY if the user's current message explicitly asks to remember, save or note something (e.g. 'remember that ...'). Stating a fact is not a request to remember it.`
 
 const AnswerPrompt = `You are Konsolai. Answer the user directly. No tools.`
