@@ -7,7 +7,14 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+)
+
+var (
+	urlUserinfo = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^:/?#\s]+:[^@/\s]+@`)
+	userKV      = regexp.MustCompile(`(?i)\buser=\S+`)
+	passKV      = regexp.MustCompile(`(?i)\bpassword=\S+`)
 )
 
 const (
@@ -112,6 +119,32 @@ func (p Profile) Location() string {
 	default:
 		return db
 	}
+}
+
+func DisableLine(databaseURL string, err error) string {
+	host, _ := hostDB(databaseURL)
+	if host == "" {
+		host = "database"
+	}
+	cause := ""
+	if err != nil {
+		cause = err.Error()
+	}
+	if i := strings.IndexByte(cause, '\n'); i >= 0 {
+		cause = cause[:i]
+	}
+	cause = stripConnectSecrets(cause)
+	if cause == "" {
+		cause = "unknown error"
+	}
+	return "memory disabled: cannot connect to " + host + ": " + cause
+}
+
+func stripConnectSecrets(s string) string {
+	s = urlUserinfo.ReplaceAllString(s, "://")
+	s = userKV.ReplaceAllString(s, "")
+	s = passKV.ReplaceAllString(s, "")
+	return strings.Join(strings.Fields(s), " ")
 }
 
 func hostDB(raw string) (host, dbname string) {
