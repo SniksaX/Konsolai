@@ -39,6 +39,7 @@ type replay struct {
 	mu      sync.Mutex
 	replies []llm.Message
 	reqs    [][]llm.Message
+	tools   [][]llm.ToolSpec
 	think   []bool
 }
 
@@ -54,7 +55,8 @@ func newReplay(t *testing.T, replies []llm.Message) (*llm.Client, *replay) {
 
 func (r *replay) serve(w http.ResponseWriter, req *http.Request) {
 	var body struct {
-		Messages           []llm.Message `json:"messages"`
+		Messages           []llm.Message  `json:"messages"`
+		Tools              []llm.ToolSpec `json:"tools"`
 		ChatTemplateKwargs struct {
 			EnableThinking bool `json:"enable_thinking"`
 		} `json:"chat_template_kwargs"`
@@ -65,6 +67,7 @@ func (r *replay) serve(w http.ResponseWriter, req *http.Request) {
 	}
 	r.mu.Lock()
 	r.reqs = append(r.reqs, body.Messages)
+	r.tools = append(r.tools, body.Tools)
 	r.think = append(r.think, body.ChatTemplateKwargs.EnableThinking)
 	i := len(r.reqs) - 1
 	r.mu.Unlock()
@@ -765,5 +768,82 @@ func TestAgentCompleteSpinner(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "planning") || !strings.Contains(buf.String(), "\033[?25l") {
 		t.Fatalf("spinner %q", buf.String())
+	}
+}
+
+func TestHardExploreStopDropsTools(t *testing.T) {
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "list_dir", `{"path":"."}`)),
+		assistant(call("2", "list_dir", `{"path":"."}`)),
+		assistant(call("3", "list_dir", `{"path":"."}`)),
+		{Role: llm.RoleAssistant, Content: "here is what I found"},
+	}, nil, Config{ExploreBudget: 1, ExploreNote: ExploreNoteLookup, MaxSteps: 6})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep.mu.Lock()
+	defer rep.mu.Unlock()
+	if len(rep.tools) < 4 {
+		t.Fatalf("reqs %d", len(rep.tools))
+	}
+	if len(rep.tools[3]) != 0 {
+		t.Fatalf("want no tools on forced call, got %d", len(rep.tools[3]))
+	}
+	found := false
+	for _, m := range rep.reqs[3] {
+		if m.Role == llm.RoleUser && m.Content == ToolsGoneNote {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("missing tools-gone note")
+	}
+}
+
+func TestHardExploreStopBuildKeepsProposePlan(t *testing.T) {
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "list_dir", `{"path":"."}`)),
+		assistant(call("2", "list_dir", `{"path":"."}`)),
+		assistant(call("3", "list_dir", `{"path":"."}`)),
+		assistant(call("4", "propose_plan", `{"summary":"x","steps":["y"],"files":["a.txt"]}`)),
+		assistant(call("5", "finish", `{"summary":"done"}`)),
+	}, stubConfirm{d: ui.Approve}, Config{RequirePlan: true, ExploreBudget: 1, ExploreNote: ExploreNoteBuild, MaxSteps: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep.mu.Lock()
+	defer rep.mu.Unlock()
+	if len(rep.tools) < 4 {
+		t.Fatalf("reqs %d", len(rep.tools))
+	}
+	if len(rep.tools[3]) != 1 || rep.tools[3][0].Function.Name != "propose_plan" {
+		t.Fatalf("forced build tools %+v", rep.tools[3])
+	}
+}
+
+func TestMaxStepsPrintsSummary(t *testing.T) {
+	var out bytes.Buffer
+	_, _, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "list_dir", `{"path":"."}`)),
+		assistant(call("2", "list_dir", `{"path":"."}`)),
+		{Role: llm.RoleAssistant, Content: "I listed twice; more remains"},
+	}, nil, Config{MaxSteps: 2, Out: &out})
+	if !errors.Is(err, ErrMaxSteps) {
+		t.Fatalf("%v", err)
+	}
+	if !strings.Contains(out.String(), "I listed twice") {
+		t.Fatalf("%q", out.String())
+	}
+}
+
+func TestPromptNotes(t *testing.T) {
+	if !strings.Contains(LookupPrompt, "never with web_fetch") {
+		t.Fatal("lookup web_fetch")
+	}
+	if !strings.Contains(LookupPrompt, "sudo ss -ltnp") {
+		t.Fatal("ss hint")
+	}
+	if !strings.Contains(AnswerPrompt, "Do not mention the user's project") {
+		t.Fatal("answer project")
 	}
 }
