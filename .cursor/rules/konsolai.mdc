@@ -32,7 +32,7 @@ alwaysApply: true
 - internal/safety (command and path guard)
 - internal/diff (Myers unified diffs)
 - internal/repo (root, file listing, project detect)
-- internal/tools (run_shell, write_file, read_file, list_dir, search, find_files, edit_file, propose_plan, remember, finish)
+- internal/tools (run_shell, write_file, read_file, list_dir, search, find_files, edit_file, propose_plan, remember, web_fetch, export_doc, finish)
 - internal/agent (tool-calling loop)
 - internal/ui (TTY prompt and ANSI)
 - New packages only when the architect specifies them.
@@ -48,8 +48,10 @@ alwaysApply: true
 - Memory: $XDG_CONFIG_HOME/konsolai/config.json (default ~/.config/konsolai/config.json).
   --profile beats KONSOLAI_PROFILE beats default_profile beats built-in "default".
   KONSOLAI_DATABASE_URL / KONSOLAI_ENDPOINT / KONSOLAI_MODEL override profile fields.
-  Resume the latest active|finished session within session_idle_minutes unless `new`.
-  Redact only what is persisted. On first store failure, dim "memory disabled" and continue.
+  Resume the latest active|finished session in the same mode family (howto+do vs code)
+  within session_idle_minutes unless `new`. Title is set only at CreateSession.
+  Redact only what is persisted. On first store failure, one dim line
+  "memory disabled: cannot connect to <host:port>: <short cause>".
 - Exit codes: 0 ok, 1 error, 2 usage, 3 aborted, 4 max steps, 130 cancelled.
 
 ## Server
