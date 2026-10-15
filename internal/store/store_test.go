@@ -122,14 +122,11 @@ func TestResumeModeFamily(t *testing.T) {
 	if err := s.EndSession(ctx, codeID, "finished"); err != nil {
 		t.Fatal(err)
 	}
-	got, ok, err := s.FindResumableSession(ctx, "home", nil, "/tmp/p", "howto", 30*time.Minute)
-	if err != nil || !ok || got.ID != doID {
-		t.Fatalf("howto should resume do: ok=%v id=%s want=%s err=%v", ok, got.ID, doID, err)
-	}
-	got, ok, err = s.FindResumableSession(ctx, "home", nil, "/tmp/p", "code", 30*time.Minute)
+	got, ok, err := s.FindResumableSession(ctx, "home", nil, "/tmp/p", "answer", 30*time.Minute)
 	if err != nil || !ok || got.ID != codeID {
-		t.Fatalf("code should resume code: ok=%v id=%s want=%s err=%v", ok, got.ID, codeID, err)
+		t.Fatalf("resume ignores mode: ok=%v id=%s want=%s err=%v", ok, got.ID, codeID, err)
 	}
+	_ = doID
 }
 
 func TestResumeAppendsNoNewRow(t *testing.T) {
