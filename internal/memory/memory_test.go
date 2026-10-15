@@ -157,3 +157,19 @@ func TestNopGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTypedNilStoreDisabled(t *testing.T) {
+	var s *store.Store
+	g := NewGuard(s, nil)
+	if !g.Disabled() {
+		t.Fatal("typed nil *store.Store must be disabled")
+	}
+	rec := NewRecorder(g, "")
+	if err := rec.Message(context.Background(), llm.Message{Role: llm.RoleUser, Content: "hey"}); err != nil {
+		t.Fatal(err)
+	}
+	c := NewWebCache(g)
+	if _, _, ok := c.Get(context.Background(), "https://x"); ok {
+		t.Fatal("disabled cache")
+	}
+}
