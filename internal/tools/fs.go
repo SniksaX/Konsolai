@@ -84,6 +84,8 @@ func (t *writeFileTool) Prepare(rawArgs string) (Action, error) {
 	return &writeFileAction{path: resolved, display: args.Path, content: args.Content, oldText: old, overwrite: overwrite}, nil
 }
 
+func (a *writeFileAction) FilePath() string { return a.display }
+
 func (a *writeFileAction) Summary() string {
 	kind := "new"
 	if a.overwrite {
