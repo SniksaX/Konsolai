@@ -143,3 +143,61 @@ func TestListDirSuffixAndSort(t *testing.T) {
 		}
 	}
 }
+
+func TestReadFileMasksEnvExample(t *testing.T) {
+	_, reg, root := fsRegistry(t)
+	hex := "26f789a3dde42ad6ec6a50fc258c2a59a9833069884e231b0081525ef87cbc301ba28e96d4e0f46c"
+	if err := os.WriteFile(filepath.Join(root, ".env.example"), []byte("ABUSEIPDB_KEY="+hex+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	tool, _ := reg.Get("read_file")
+	act, err := tool.Prepare(`{"path":".env.example"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := act.Run(context.Background())
+	if err != nil || res.IsError {
+		t.Fatalf("%v %s", err, res.Output)
+	}
+	if strings.Contains(res.Output, hex) {
+		t.Fatalf("secret leaked: %q", res.Output)
+	}
+	if !strings.Contains(res.Output, "ABUSEIPDB_KEY=26f7…[masked 80 chars]") {
+		t.Fatalf("mask: %q", res.Output)
+	}
+	if res.Meta != "masked 1 values" {
+		t.Fatalf("meta %q", res.Meta)
+	}
+}
+
+func TestSearchMasksEnv(t *testing.T) {
+	root := t.TempDir()
+	hex := "26f789a3dde42ad6ec6a50fc258c2a59a9833069884e231b0081525ef87cbc301ba28e96d4e0f46c"
+	if err := os.WriteFile(filepath.Join(root, ".env.example"), []byte("ABUSEIPDB_KEY="+hex+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := func(context.Context) ([]string, error) { return walkRel(root) }
+	reg := NewRegistry(g, os.Stdout, list, nil, nil)
+	st, _ := reg.Get("search")
+	act, err := st.Prepare(`{"pattern":"ABUSEIPDB_KEY"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := act.Run(context.Background())
+	if err != nil || res.IsError {
+		t.Fatalf("%v %s", err, res.Output)
+	}
+	if strings.Contains(res.Output, hex) {
+		t.Fatalf("secret leaked: %q", res.Output)
+	}
+	if !strings.Contains(res.Output, "26f7…[masked 80 chars]") {
+		t.Fatalf("mask: %q", res.Output)
+	}
+	if !strings.Contains(res.Meta, "masked 1 values") {
+		t.Fatalf("meta %q", res.Meta)
+	}
+}
