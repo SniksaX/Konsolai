@@ -25,3 +25,21 @@ func TestBriefOmitsRepoAndFacts(t *testing.T) {
 		}
 	}
 }
+
+func TestLocationLine(t *testing.T) {
+	got := LocationLine("/tmp/proj/svc", "/tmp/proj")
+	want := "Current directory: /tmp/proj/svc (repo root: /tmp/proj, you are in svc/)"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+	got = LocationLine("/tmp/proj", "/tmp/proj")
+	want = "Current directory: /tmp/proj (repo root: /tmp/proj, you are in ./)"
+	if got != want {
+		t.Fatalf("root: got %q want %q", got, want)
+	}
+	s := Snapshot{OS: "Arch Linux", Shell: "bash", User: "siraj", CWD: "/tmp/proj/svc", RepoRoot: "/tmp/proj"}
+	full := s.String()
+	if !strings.Contains(full, "you are in svc/") {
+		t.Fatalf("string missing location: %q", full)
+	}
+}
