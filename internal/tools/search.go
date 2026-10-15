@@ -37,7 +37,7 @@ func (t *searchTool) Spec() llm.ToolSpec {
 		Function: llm.FunctionSpec{
 			Name:        "search",
 			Description: "Search file contents with a RE2 regexp. Skips files over 1 MiB and binary files. Optional path prefix and glob limit the set.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string","description":"RE2 regular expression."},"path":{"type":"string","description":"Optional directory prefix relative to the root."},"glob":{"type":"string","description":"Optional glob; without a slash matches the base name."},"case_insensitive":{"type":"boolean"}},"required":["pattern"]}`),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string","description":"RE2 regular expression."},"path":{"type":"string","description":"Optional directory prefix relative to the current directory. Defaults to the current directory."},"glob":{"type":"string","description":"Optional glob; without a slash matches the base name."},"case_insensitive":{"type":"boolean"}},"required":["pattern"]}`),
 		},
 	}
 }
@@ -115,11 +115,11 @@ func (a *searchAction) Run(ctx context.Context) (Result, error) {
 		if a.globRe != nil && !matchGlob(a.globRe, a.glob, rel) {
 			continue
 		}
-		resolved, err := a.guard.ResolvePath(rel)
+		resolved, err := a.guard.ResolveFromRoot(rel)
 		if err != nil {
 			continue
 		}
-		n, skip, err := searchFile(resolved, rel, a.re, searchCap-len(hits))
+		n, skip, err := searchFile(resolved, a.guard.Display(rel), a.re, searchCap-len(hits))
 		if err != nil {
 			continue
 		}
