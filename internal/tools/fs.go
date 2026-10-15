@@ -228,7 +228,7 @@ func (a *readFileAction) Run(ctx context.Context) (Result, error) {
 		return Result{Output: err.Error(), IsError: true}, nil
 	}
 	if fi.IsDir() {
-		return Result{Output: "error: is a directory", IsError: true}, nil
+		return Result{Output: "error: is a directory", IsError: true, Meta: "is a directory"}, nil
 	}
 	allBytes, err := os.ReadFile(a.path)
 	if err != nil {
