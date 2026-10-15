@@ -213,6 +213,9 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	sourceReads := 0
 	toolsGone := false
 	goneNoteAdded := false
+	wroteFile := false
+	exportedDoc := false
+	docsNudged := false
 	shellFail := false
 	var st Stats
 	st.RouterTime = cfg.RouterTime
@@ -240,16 +243,22 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		} else if think {
 			label = "thinking"
 		}
+		forcingPlan := toolsGone && cfg.RequirePlan && !planApproved
 		if toolsGone && !goneNoteAdded {
-			gone := llm.Message{Role: llm.RoleUser, Content: ToolsGoneNote}
+			note := ToolsGoneNote
+			if forcingPlan {
+				note = ForcedPlanNote
+			}
+			gone := llm.Message{Role: llm.RoleUser, Content: note}
 			msgs = append(msgs, gone)
 			_ = rec.Message(ctx, gone)
 			goneNoteAdded = true
 		}
 		stepSpecs := specs
 		if toolsGone {
-			if cfg.RequirePlan && !planApproved {
+			if forcingPlan {
 				stepSpecs = planOnlySpecs(specs)
+				opts.ToolChoice = "propose_plan"
 			} else if !cfg.RequirePlan {
 				stepSpecs = nil
 			}
@@ -264,6 +273,9 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		live.Stop()
 		if err != nil {
 			return err
+		}
+		if forcingPlan {
+			msg.Content = ""
 		}
 		st.Steps++
 		st.ModelTime += modelElapsed
@@ -280,6 +292,13 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		_ = rec.Message(ctx, msg)
 
 		if len(msg.ToolCalls) == 0 {
+			if cfg.Task == "docs" && planApproved && !wroteFile && !exportedDoc && !docsNudged {
+				docsNudged = true
+				nudge := llm.Message{Role: llm.RoleUser, Content: DocsFileNote}
+				msgs = append(msgs, nudge)
+				_ = rec.Message(ctx, nudge)
+				continue
+			}
 			text := trimLeadingBlanks(msg.Content)
 			if strings.TrimSpace(text) == "" {
 				return ErrNoAnswer
@@ -453,6 +472,14 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			})
 			if result.Change != nil {
 				_ = rec.FileChange(ctx, *result.Change)
+			}
+			if !result.IsError {
+				switch call.Function.Name {
+				case "write_file":
+					wroteFile = true
+				case "export_doc":
+					exportedDoc = true
+				}
 			}
 			if result.Final {
 				text := trimLeadingBlanks(result.Output)
