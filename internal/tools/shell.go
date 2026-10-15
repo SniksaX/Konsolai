@@ -89,9 +89,9 @@ func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 	return &shellAction{cmd: args.Cmd, cwd: resolved, timeout: time.Duration(sec) * time.Second, out: t.out}, nil
 }
 
-func (a *shellAction) Summary() string { return "run: " + a.cmd }
-func (a *shellAction) Preview() string { return "" }
-func (a *shellAction) ReadOnly() bool  { return false }
+func (a *shellAction) Summary() string  { return "run: " + a.cmd }
+func (a *shellAction) Preview() string  { return "" }
+func (a *shellAction) Kind() ActionKind { return Mutating }
 
 func (a *shellAction) Run(ctx context.Context) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, a.timeout)
