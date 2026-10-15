@@ -2,6 +2,8 @@ package config
 
 import (
 	"errors"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -180,6 +182,46 @@ func TestDisableLine(t *testing.T) {
 	}
 	if !strings.HasPrefix(got, "memory disabled: cannot connect to 127.0.0.1:1:") {
 		t.Fatalf("prefix: %q", got)
+	}
+}
+
+func TestDisableLineInnermost(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "connection refused",
+			err:  fmt.Errorf("store: ping: %w", &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}),
+			want: "connection refused",
+		},
+		{
+			name: "no such host",
+			err:  fmt.Errorf("store: ping: %w", &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("no such host")}),
+			want: "no such host",
+		},
+		{
+			name: "timeout",
+			err:  fmt.Errorf("store: ping: %w", &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("i/o timeout")}),
+			want: "i/o timeout",
+		},
+		{
+			name: "password",
+			err:  fmt.Errorf("store: ping: %w", errors.New("password authentication failed")),
+			want: "password authentication failed",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DisableLine("postgres://u:p@127.0.0.1:1/x", tt.err)
+			if strings.Contains(got, "u:p") || strings.Contains(got, "\n") {
+				t.Fatalf("leaked: %q", got)
+			}
+			if !strings.Contains(got, tt.want) {
+				t.Fatalf("%q want %q", got, tt.want)
+			}
+		})
 	}
 }
 
