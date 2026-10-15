@@ -700,7 +700,20 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				shellFail = true
 			}
 		}
-		if stepOther > 0 {
+		prePlanEvery := !planApproved && (cfg.RequirePlan || cfg.Intent == "act" || cfg.Intent == "build")
+		if prePlanEvery {
+			explore++
+			if cfg.ExploreBudget > 0 && explore >= cfg.ExploreBudget && cfg.ExploreNote != "" && lastReadOnly >= 0 {
+				msgs[lastReadOnly].Content += "\n\n" + exploreNote(cfg, sourceReads)
+				noteSent = true
+			}
+			if noteWasSent {
+				readonlyAfterNote++
+				if readonlyAfterNote >= hardStopAfter(cfg, sourceReads) {
+					toolsGone = true
+				}
+			}
+		} else if stepOther > 0 {
 			explore = 0
 		} else if stepReadOnly > 0 && (!cfg.RequirePlan || !planApproved) {
 			explore++
