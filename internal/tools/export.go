@@ -26,7 +26,7 @@ func (t *exportDocTool) Spec() llm.ToolSpec {
 		Function: llm.FunctionSpec{
 			Name:        "export_doc",
 			Description: "Write an HTML or PDF document to path. Prefer this over write_file for rendered documents.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Output path relative to the project root."},"format":{"type":"string","enum":["html","pdf"]},"title":{"type":"string"},"content":{"type":"string","description":"Markdown or HTML body."}},"required":["path","format","content"]}`),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Output path relative to the current directory."},"format":{"type":"string","enum":["html","pdf"]},"title":{"type":"string"},"content":{"type":"string","description":"Markdown or HTML body."}},"required":["path","format","content"]}`),
 		},
 	}
 }

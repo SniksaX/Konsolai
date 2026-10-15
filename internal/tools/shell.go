@@ -34,10 +34,10 @@ func (t *shellTool) Spec() llm.ToolSpec {
 		Function: llm.FunctionSpec{
 			Name: "run_shell",
 			Description: "Run a bash command in a fresh process. Non-interactive only. " +
-				"Each call is a new process; do not use cd; set the cwd argument instead (relative to the project root). " +
+				"Each call is a new process; do not use cd; set the cwd argument instead (relative to the current directory). " +
 				"Never start servers or watchers. " +
 				"Avoid recursive listings (ls -R, find without -maxdepth, tree) over dependency dirs like node_modules, .git, dist, vendor.",
-			Parameters: json.RawMessage(`{"type":"object","properties":{"cmd":{"type":"string","description":"Bash command to execute."},"cwd":{"type":"string","description":"Working directory relative to the project root. Defaults to the root."},"timeout_sec":{"type":"integer","description":"Timeout in seconds. Default 120, maximum 600."}},"required":["cmd"]}`),
+			Parameters: json.RawMessage(`{"type":"object","properties":{"cmd":{"type":"string","description":"Bash command to execute."},"cwd":{"type":"string","description":"Working directory relative to the current directory. Defaults to the current directory."},"timeout_sec":{"type":"integer","description":"Timeout in seconds. Default 120, maximum 600."}},"required":["cmd"]}`),
 		},
 	}
 }
@@ -71,7 +71,7 @@ func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 		return nil, errors.New("tools: run_shell: cmd is required")
 	}
 	if reCD.MatchString(args.Cmd) {
-		return nil, errors.New("do not use cd; set the cwd argument instead (relative to the project root)")
+		return nil, errors.New("do not use cd; set the cwd argument instead (relative to the current directory)")
 	}
 	if err := t.guard.CheckCommand(args.Cmd); err != nil {
 		return nil, err

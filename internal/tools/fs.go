@@ -16,6 +16,7 @@ import (
 
 	"github.com/siraj/konsolai/internal/diff"
 	"github.com/siraj/konsolai/internal/llm"
+	"github.com/siraj/konsolai/internal/redact"
 	"github.com/siraj/konsolai/internal/safety"
 )
 
@@ -35,8 +36,8 @@ func (t *writeFileTool) Spec() llm.ToolSpec {
 		Type: "function",
 		Function: llm.FunctionSpec{
 			Name:        "write_file",
-			Description: "Create or overwrite a UTF-8 text file at path relative to the project root. Parent directories are created. Never use shell heredocs or echo redirection for file contents.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path relative to the project root. Use only for new files; prefer edit_file for existing files."},"content":{"type":"string","description":"Full file contents to write."}},"required":["path","content"]}`),
+			Description: "Create or overwrite a UTF-8 text file at path relative to the current directory. Parent directories are created. Never use shell heredocs or echo redirection for file contents.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path relative to the current directory. Use only for new files; prefer edit_file for existing files."},"content":{"type":"string","description":"Full file contents to write."}},"required":["path","content"]}`),
 		},
 	}
 }
@@ -239,7 +240,12 @@ func (a *readFileAction) Run(ctx context.Context) (Result, error) {
 	if !utf8.Valid(allBytes) {
 		return Result{Output: "error: binary content (not UTF-8)", IsError: true}, nil
 	}
-	lines := strings.Split(string(allBytes), "\n")
+	text := string(allBytes)
+	masked := 0
+	if redact.SensitivePath(a.path) || redact.SensitivePath(a.display) {
+		text, masked = redact.MaskValues(text)
+	}
+	lines := strings.Split(text, "\n")
 	if len(allBytes) > 0 && allBytes[len(allBytes)-1] == '\n' {
 		lines = lines[:len(lines)-1]
 	}
@@ -247,7 +253,11 @@ func (a *readFileAction) Run(ctx context.Context) (Result, error) {
 	if truncated {
 		out += "\n... [truncated; set start_line to read the rest]"
 	}
-	return Result{Output: out, Meta: formatSize(int64(len(allBytes)))}, nil
+	meta := formatSize(int64(len(allBytes)))
+	if masked > 0 {
+		meta = fmt.Sprintf("masked %d values", masked)
+	}
+	return Result{Output: out, Meta: meta}, nil
 }
 
 type listDirTool struct{ guard *safety.Guard }
@@ -260,7 +270,7 @@ func (t *listDirTool) Spec() llm.ToolSpec {
 		Function: llm.FunctionSpec{
 			Name:        "list_dir",
 			Description: "List a directory. Directories are suffixed with /. At most 200 entries, sorted by name.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Directory path relative to the project root. Defaults to the root."}}}`),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Directory path relative to the current directory. Defaults to the current directory."}}}`),
 		},
 	}
 }

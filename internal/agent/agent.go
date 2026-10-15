@@ -72,6 +72,7 @@ type Config struct {
 	ExploreNote         string
 	Trace               bool
 	Intent              string
+	Task                string
 	RouterTime          time.Duration
 	Err                 io.Writer
 	Stats               *Stats
@@ -171,6 +172,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	explore := 0
 	noteSent := false
 	readonlyAfterNote := 0
+	sourceReads := 0
 	toolsGone := false
 	goneNoteAdded := false
 	shellFail := false
@@ -189,7 +191,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		}
 	}()
 
-	for step := 0; step < cfg.MaxSteps; step++ {
+	for step := 0; step < analysisLimit(cfg, sourceReads); step++ {
 		elideToolOutputs(msgs, cfg.ContextBudgetTokens)
 		think := cfg.ThinkingPolicy.enabled(planApproved, shellFail)
 		opts := llm.ChatOptions{Thinking: think, Temperature: temp}
@@ -281,7 +283,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			kind := action.Kind()
 			if noteSent && kind == tools.ReadOnly {
 				readonlyAfterNote++
-				if readonlyAfterNote >= 2 {
+				if readonlyAfterNote >= hardStopAfter(cfg, sourceReads) {
 					toolsGone = true
 				}
 			}
@@ -430,8 +432,11 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			} else if kind != tools.Plan {
 				explore = 0
 			}
+			if cfg.Task == "analysis" && analysisSourceRead(call.Function.Name, call.Function.Arguments) && !result.IsError {
+				sourceReads++
+			}
 			if cfg.ExploreBudget > 0 && explore >= cfg.ExploreBudget && cfg.ExploreNote != "" {
-				content += "\n\n" + cfg.ExploreNote
+				content += "\n\n" + exploreNote(cfg, sourceReads)
 				noteSent = true
 			}
 			if result.IsError {
@@ -621,13 +626,54 @@ func inPlanCmd(cmds []string, cmd string) bool {
 }
 
 func matchDeclared(cmds []string, cmd string) bool {
-	want := normCmd(cmd)
+	want := equivCmd(cmd)
 	for _, c := range cmds {
-		if normCmd(c) == want {
+		if equivCmd(c) == want {
 			return true
 		}
 	}
 	return false
+}
+
+func equivCmd(s string) string {
+	return stripLauncher(normCmd(s))
+}
+
+var launcherPrefixes = []string{
+	"npx -y ",
+	"npx ",
+	"pnpm exec ",
+	"pnpm dlx ",
+	"npm exec -- ",
+}
+
+var yarnCommands = map[string]bool{
+	"install": true, "add": true, "remove": true, "run": true, "init": true,
+	"test": true, "build": true, "start": true, "dev": true, "workspace": true,
+	"workspaces": true, "dlx": true, "exec": true, "create": true, "global": true,
+	"upgrade": true, "outdated": true, "why": true, "info": true, "config": true,
+	"cache": true, "help": true, "version": true, "publish": true, "link": true,
+	"unlink": true, "pack": true,
+}
+
+func stripLauncher(s string) string {
+	lower := strings.ToLower(s)
+	for _, p := range launcherPrefixes {
+		if strings.HasPrefix(lower, p) {
+			return strings.TrimSpace(s[len(p):])
+		}
+	}
+	if strings.HasPrefix(lower, "yarn ") {
+		rest := strings.TrimSpace(s[5:])
+		first := rest
+		if i := strings.IndexByte(rest, ' '); i >= 0 {
+			first = rest[:i]
+		}
+		if first != "" && !yarnCommands[strings.ToLower(first)] {
+			return rest
+		}
+	}
+	return s
 }
 
 func splitPlanSegments(cmd string) []string {
@@ -684,4 +730,50 @@ func inPlan(files []string, path string) bool {
 		}
 	}
 	return false
+}
+
+func analysisLimit(cfg Config, sourceReads int) int {
+	n := cfg.MaxSteps
+	if n < 1 {
+		n = 15
+	}
+	if cfg.Task == "analysis" && sourceReads < 3 {
+		return n + 6
+	}
+	return n
+}
+
+func hardStopAfter(cfg Config, sourceReads int) int {
+	if cfg.Task == "analysis" && sourceReads < 3 {
+		return 8
+	}
+	return 2
+}
+
+func exploreNote(cfg Config, sourceReads int) string {
+	if cfg.Task == "analysis" && sourceReads < 3 {
+		return AnalysisExploreNote
+	}
+	return cfg.ExploreNote
+}
+
+func analysisSourceRead(name, args string) bool {
+	if name != "read_file" && name != "outline" {
+		return false
+	}
+	var p struct {
+		Path string `json:"path"`
+	}
+	if json.Unmarshal([]byte(args), &p) != nil {
+		return false
+	}
+	base := strings.ToLower(filepath.Base(p.Path))
+	switch base {
+	case "package.json", "go.mod", "go.sum", "pyproject.toml", "requirements.txt", "cargo.toml", "cargo.lock":
+		return false
+	}
+	if strings.HasPrefix(base, "readme") {
+		return false
+	}
+	return p.Path != ""
 }

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/siraj/konsolai/internal/llm"
+	"github.com/siraj/konsolai/internal/redact"
 	"github.com/siraj/konsolai/internal/safety"
 )
 
@@ -37,7 +38,7 @@ func (t *searchTool) Spec() llm.ToolSpec {
 		Function: llm.FunctionSpec{
 			Name:        "search",
 			Description: "Search file contents with a RE2 regexp. Skips files over 1 MiB and binary files. Optional path prefix and glob limit the set.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string","description":"RE2 regular expression."},"path":{"type":"string","description":"Optional directory prefix relative to the root."},"glob":{"type":"string","description":"Optional glob; without a slash matches the base name."},"case_insensitive":{"type":"boolean"}},"required":["pattern"]}`),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string","description":"RE2 regular expression."},"path":{"type":"string","description":"Optional directory prefix relative to the current directory. Defaults to the current directory."},"glob":{"type":"string","description":"Optional glob; without a slash matches the base name."},"case_insensitive":{"type":"boolean"}},"required":["pattern"]}`),
 		},
 	}
 }
@@ -105,6 +106,7 @@ func (a *searchAction) Run(ctx context.Context) (Result, error) {
 	}
 	var hits []string
 	total := 0
+	masked := 0
 	for _, rel := range files {
 		if err := ctx.Err(); err != nil {
 			return Result{}, err
@@ -115,11 +117,11 @@ func (a *searchAction) Run(ctx context.Context) (Result, error) {
 		if a.globRe != nil && !matchGlob(a.globRe, a.glob, rel) {
 			continue
 		}
-		resolved, err := a.guard.ResolvePath(rel)
+		resolved, err := a.guard.ResolveFromRoot(rel)
 		if err != nil {
 			continue
 		}
-		n, skip, err := searchFile(resolved, rel, a.re, searchCap-len(hits))
+		n, skip, err := searchFile(resolved, a.guard.Display(rel), rel, a.re, searchCap-len(hits))
 		if err != nil {
 			continue
 		}
@@ -127,6 +129,7 @@ func (a *searchAction) Run(ctx context.Context) (Result, error) {
 			continue
 		}
 		total += n.count
+		masked += n.masked
 		hits = append(hits, n.lines...)
 		if len(hits) >= searchCap {
 			break
@@ -140,15 +143,20 @@ func (a *searchAction) Run(ctx context.Context) (Result, error) {
 	if out == "" {
 		out = "(no matches)"
 	}
-	return Result{Output: out, Meta: fmt.Sprintf("%d matches", total)}, nil
+	meta := fmt.Sprintf("%d matches", total)
+	if masked > 0 {
+		meta = fmt.Sprintf("%d matches, masked %d values", total, masked)
+	}
+	return Result{Output: out, Meta: meta}, nil
 }
 
 type searchHits struct {
-	lines []string
-	count int
+	lines  []string
+	count  int
+	masked int
 }
 
-func searchFile(abs, rel string, re *regexp.Regexp, room int) (searchHits, bool, error) {
+func searchFile(abs, display, rel string, re *regexp.Regexp, room int) (searchHits, bool, error) {
 	fi, err := os.Stat(abs)
 	if err != nil {
 		return searchHits{}, true, err
@@ -181,10 +189,15 @@ func searchFile(abs, rel string, re *regexp.Regexp, room int) (searchHits, bool,
 			continue
 		}
 		text := line
+		if redact.SensitivePath(rel) || redact.SensitivePath(abs) {
+			masked, n := redact.MaskValues(text)
+			text = masked
+			hits.masked += n
+		}
 		if len(text) > searchTextCap {
 			text = text[:searchTextCap]
 		}
-		hits.lines = append(hits.lines, fmt.Sprintf("%s:%d: %s", rel, i+1, text))
+		hits.lines = append(hits.lines, fmt.Sprintf("%s:%d: %s", display, i+1, text))
 	}
 	return hits, false, nil
 }

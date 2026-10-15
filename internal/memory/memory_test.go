@@ -75,7 +75,7 @@ func TestRecorderBestEffort(t *testing.T) {
 	f := &fake{}
 	var disabled int
 	g := NewGuard(f, func(error) { disabled++ })
-	rec := NewRecorder(g, "sess")
+	rec := NewRecorder(g, "sess", "/tmp/p")
 	if err := rec.Message(context.Background(), llm.Message{Role: llm.RoleUser, Content: "hi"}); err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestNopGuard(t *testing.T) {
 	if !g.Disabled() {
 		t.Fatal("nil store is disabled")
 	}
-	rec := NewRecorder(g, "")
+	rec := NewRecorder(g, "", "")
 	if err := rec.Message(context.Background(), llm.Message{Content: "x"}); err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestFailIgnoresCancel(t *testing.T) {
 		t.Fatal("wrapped cancel")
 	}
 	f.failNext = true
-	rec := NewRecorder(g, "s")
+	rec := NewRecorder(g, "s", "")
 	_ = rec.Message(context.Background(), llm.Message{Content: "x"})
 	if n != 1 {
 		t.Fatalf("real error should disable, n=%d", n)
@@ -200,7 +200,7 @@ func TestTypedNilStoreDisabled(t *testing.T) {
 	if !g.Disabled() {
 		t.Fatal("typed nil *store.Store must be disabled")
 	}
-	rec := NewRecorder(g, "")
+	rec := NewRecorder(g, "", "")
 	if err := rec.Message(context.Background(), llm.Message{Role: llm.RoleUser, Content: "hey"}); err != nil {
 		t.Fatal(err)
 	}

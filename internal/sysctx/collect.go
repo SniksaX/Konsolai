@@ -12,12 +12,25 @@ const maxEntries = 40
 
 type Snapshot struct {
 	CWD       string
+	RepoRoot  string
 	OS        string
 	Shell     string
 	User      string
 	Entries   []string
 	Truncated bool
 	GitRepo   bool
+}
+
+func LocationLine(cwd, root string) string {
+	rel, err := filepath.Rel(root, cwd)
+	if err != nil {
+		rel = "."
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == "" {
+		rel = "."
+	}
+	return fmt.Sprintf("Current directory: %s (repo root: %s, you are in %s/)", cwd, root, rel)
 }
 
 func Collect() (Snapshot, error) {
@@ -56,6 +69,10 @@ func (s Snapshot) Brief() string {
 func (s Snapshot) String() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "OS: %s\nShell: %s\nUser: %s\nCWD: %s\nGit repo: %t\n", s.OS, s.Shell, s.User, s.CWD, s.GitRepo)
+	if s.RepoRoot != "" {
+		b.WriteString(LocationLine(s.CWD, s.RepoRoot))
+		b.WriteByte('\n')
+	}
 	b.WriteString("Directory entries: ")
 	if len(s.Entries) == 0 {
 		b.WriteString("(empty)")

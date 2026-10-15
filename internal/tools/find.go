@@ -29,7 +29,7 @@ func (t *findFilesTool) Spec() llm.ToolSpec {
 		Function: llm.FunctionSpec{
 			Name:        "find_files",
 			Description: "Find files by glob. ** matches any number of directories, * does not cross /, ? is one character. A glob without a slash matches the base name.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"glob":{"type":"string","description":"File glob."},"path":{"type":"string","description":"Optional directory prefix relative to the root."}},"required":["glob"]}`),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"glob":{"type":"string","description":"File glob."},"path":{"type":"string","description":"Optional directory prefix relative to the current directory. Defaults to the current directory."}},"required":["glob"]}`),
 		},
 	}
 }
@@ -40,6 +40,7 @@ type findFilesArgs struct {
 }
 
 type findFilesAction struct {
+	guard  *safety.Guard
 	files  FileLister
 	glob   string
 	prefix string
@@ -64,7 +65,7 @@ func (t *findFilesTool) Prepare(rawArgs string) (Action, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &findFilesAction{files: t.files, glob: args.Glob, prefix: prefix, re: re}, nil
+	return &findFilesAction{guard: t.guard, files: t.files, glob: args.Glob, prefix: prefix, re: re}, nil
 }
 
 func (a *findFilesAction) Summary() string  { return "find " + a.glob }
@@ -90,7 +91,7 @@ func (a *findFilesAction) Run(ctx context.Context) (Result, error) {
 		}
 		total++
 		if len(hits) < findCap {
-			hits = append(hits, rel)
+			hits = append(hits, a.guard.Display(rel))
 		}
 	}
 	out := strings.Join(hits, "\n")

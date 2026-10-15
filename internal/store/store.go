@@ -54,6 +54,7 @@ type Message struct {
 	ToolCalls     []byte
 	ToolCallID    string
 	TokenEstimate int
+	CWD           string
 }
 
 type ActionIn struct {
@@ -259,9 +260,9 @@ func (s *Store) AppendMessage(ctx context.Context, sessionID string, seq int, m 
 		toolCallID = &m.ToolCallID
 	}
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO messages (session_id, seq, role, content, tool_calls, tool_call_id, token_estimate)
-		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)`,
-		sessionID, seq, m.Role, content, nullableJSON(calls), toolCallID, tok)
+		INSERT INTO messages (session_id, seq, role, content, tool_calls, tool_call_id, token_estimate, cwd)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8)`,
+		sessionID, seq, m.Role, content, nullableJSON(calls), toolCallID, tok, m.CWD)
 	if err != nil {
 		return fmt.Errorf("store: append message: %w", err)
 	}
@@ -272,7 +273,7 @@ func (s *Store) LoadMessages(ctx context.Context, sessionID string) ([]Message, 
 	ctx, cancel := withTimeout(ctx)
 	defer cancel()
 	rows, err := s.pool.Query(ctx, `
-		SELECT seq, role, content, tool_calls, COALESCE(tool_call_id, ''), token_estimate
+		SELECT seq, role, content, tool_calls, COALESCE(tool_call_id, ''), token_estimate, COALESCE(cwd, '')
 		FROM messages WHERE session_id = $1::uuid ORDER BY seq`, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("store: load messages: %w", err)
@@ -281,7 +282,7 @@ func (s *Store) LoadMessages(ctx context.Context, sessionID string) ([]Message, 
 	var out []Message
 	for rows.Next() {
 		var m Message
-		if err := rows.Scan(&m.Seq, &m.Role, &m.Content, &m.ToolCalls, &m.ToolCallID, &m.TokenEstimate); err != nil {
+		if err := rows.Scan(&m.Seq, &m.Role, &m.Content, &m.ToolCalls, &m.ToolCallID, &m.TokenEstimate, &m.CWD); err != nil {
 			return nil, fmt.Errorf("store: scan message: %w", err)
 		}
 		out = append(out, m)

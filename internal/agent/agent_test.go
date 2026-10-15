@@ -760,6 +760,24 @@ func TestInPlanCmdSegments(t *testing.T) {
 	if !inPlanCmd([]string{"ss -ltnp | grep 80"}, "ss -ltnp | grep 80") {
 		t.Fatal("declared pipeline should match")
 	}
+	if !inPlanCmd([]string{"tsc --init"}, "npx tsc --init") {
+		t.Fatal("npx tsc --init should match tsc --init")
+	}
+	if !inPlanCmd([]string{"npx tsc --init"}, "tsc --init") {
+		t.Fatal("tsc --init should match npx tsc --init")
+	}
+	if !inPlanCmd([]string{"tsc --init"}, "npx -y tsc --init") {
+		t.Fatal("npx -y should match")
+	}
+	if !inPlanCmd([]string{"tsc --init"}, "pnpm exec tsc --init") {
+		t.Fatal("pnpm exec should match")
+	}
+	if !inPlanCmd([]string{"tsc --init"}, "yarn tsc --init") {
+		t.Fatal("yarn bin should match")
+	}
+	if inPlanCmd([]string{"tsc --init"}, "yarn install") {
+		t.Fatal("yarn install is not a bin wrapper")
+	}
 }
 
 func TestInPlanAndJoinAutoApprove(t *testing.T) {
@@ -884,10 +902,162 @@ func TestPromptNotes(t *testing.T) {
 	if !strings.Contains(LookupPrompt, "never with web_fetch") {
 		t.Fatal("lookup web_fetch")
 	}
+	if !strings.Contains(LookupPrompt, "Code analysis:") || !strings.Contains(LookupPrompt, "Observed") || !strings.Contains(LookupPrompt, "Inferred") || !strings.Contains(LookupPrompt, "Verdict") {
+		t.Fatal("lookup analysis section")
+	}
 	if !strings.Contains(LookupPrompt, "sudo ss -ltnp") {
 		t.Fatal("ss hint")
 	}
 	if !strings.Contains(AnswerPrompt, "Do not mention the user's project") {
 		t.Fatal("answer project")
+	}
+	if !strings.Contains(AnswerPrompt, "If the user refers to 'this' or 'here' without content, say you will look at the current folder.") {
+		t.Fatal("answer deictic fallback")
+	}
+	for _, p := range []string{ActPrompt, CodePrompt, AnswerPrompt, LookupPrompt} {
+		if !strings.Contains(p, SecretRule) {
+			t.Fatal("prompt missing secret rule")
+		}
+	}
+}
+
+func TestAnalysisExploreNoteBeforeSources(t *testing.T) {
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "list_dir", `{"path":"."}`)),
+		assistant(call("2", "finish", `{"summary":"ok"}`)),
+	}, nil, Config{ExploreBudget: 1, ExploreNote: ExploreNoteLookup, MaxSteps: 6, Task: "analysis", Intent: "lookup"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, msgs := range rep.reqs {
+		for _, m := range msgs {
+			if m.Role == llm.RoleTool && strings.Contains(m.Content, AnalysisExploreNote) {
+				found = true
+			}
+			if m.Role == llm.RoleTool && strings.Contains(m.Content, "Answer now") {
+				t.Fatal("want analysis note, got answer now")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing analysis explore note")
+	}
+}
+
+func TestAnalysisDefersHardStop(t *testing.T) {
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "list_dir", `{"path":"."}`)),
+		assistant(call("2", "list_dir", `{"path":"."}`)),
+		assistant(call("3", "list_dir", `{"path":"."}`)),
+		assistant(call("4", "list_dir", `{"path":"."}`)),
+		assistant(call("5", "finish", `{"summary":"ok"}`)),
+	}, nil, Config{ExploreBudget: 1, ExploreNote: ExploreNoteLookup, MaxSteps: 6, Task: "analysis", Intent: "lookup"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep.mu.Lock()
+	defer rep.mu.Unlock()
+	if len(rep.tools) < 4 {
+		t.Fatalf("reqs %d", len(rep.tools))
+	}
+	if len(rep.tools[3]) == 0 {
+		t.Fatal("hard stop should be deferred until source files are read")
+	}
+}
+
+func TestAnalysisReleasesAfterSourceReads(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"a.go", "b.go", "c.go"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("package p\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replies := []llm.Message{
+		assistant(call("1", "read_file", `{"path":"a.go"}`)),
+		assistant(call("2", "read_file", `{"path":"b.go"}`)),
+		assistant(call("3", "read_file", `{"path":"c.go"}`)),
+		assistant(call("4", "list_dir", `{"path":"."}`)),
+		assistant(call("5", "list_dir", `{"path":"."}`)),
+		{Role: llm.RoleAssistant, Content: "Observed / Inferred / Verdict"},
+	}
+	client, rep := newReplay(t, replies)
+	err = Run(context.Background(), Config{
+		Client: client, Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		Confirmer: stubConfirm{d: ui.Approve}, Out: io.Discard,
+		ExploreBudget: 3, ExploreNote: ExploreNoteLookup, MaxSteps: 8,
+		Task: "analysis", Intent: "lookup",
+	}, "sys", "analyse this")
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundNow := false
+	foundHold := false
+	for _, msgs := range rep.reqs {
+		for _, m := range msgs {
+			if m.Role == llm.RoleTool && strings.Contains(m.Content, "Answer now") {
+				foundNow = true
+			}
+			if m.Role == llm.RoleTool && strings.Contains(m.Content, AnalysisExploreNote) {
+				foundHold = true
+			}
+		}
+	}
+	if !foundNow {
+		t.Fatal("after 3 source reads want answer-now note")
+	}
+	if foundHold {
+		t.Fatal("analysis hold note after source reads")
+	}
+	rep.mu.Lock()
+	defer rep.mu.Unlock()
+	if len(rep.tools) < 6 {
+		t.Fatalf("reqs %d", len(rep.tools))
+	}
+	if len(rep.tools[5]) != 0 {
+		t.Fatalf("want tools dropped after source reads + hard stop, got %d", len(rep.tools[5]))
+	}
+}
+
+func TestAnalysisIgnoresManifestReads(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"name":"x"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("# x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, rep := newReplay(t, []llm.Message{
+		assistant(call("1", "read_file", `{"path":"package.json"}`)),
+		assistant(call("2", "read_file", `{"path":"README.md"}`)),
+		assistant(call("3", "finish", `{"summary":"ok"}`)),
+	})
+	err = Run(context.Background(), Config{
+		Client: client, Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		Confirmer: stubConfirm{d: ui.Approve}, Out: io.Discard,
+		ExploreBudget: 1, ExploreNote: ExploreNoteLookup, MaxSteps: 6,
+		Task: "analysis", Intent: "lookup",
+	}, "sys", "analyse this")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, msgs := range rep.reqs {
+		for _, m := range msgs {
+			if m.Role == llm.RoleTool && strings.Contains(m.Content, AnalysisExploreNote) {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("manifest/README reads must not release the analysis hold")
 	}
 }
