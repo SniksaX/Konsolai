@@ -126,10 +126,11 @@ func (g *Guard) Do(fn func(Backend) error) {
 type Recorder struct {
 	g         *Guard
 	sessionID string
+	cwd       string
 }
 
-func NewRecorder(g *Guard, sessionID string) *Recorder {
-	return &Recorder{g: g, sessionID: sessionID}
+func NewRecorder(g *Guard, sessionID, cwd string) *Recorder {
+	return &Recorder{g: g, sessionID: sessionID, cwd: cwd}
 }
 
 func (r *Recorder) Message(ctx context.Context, m llm.Message) error {
@@ -146,7 +147,7 @@ func (r *Recorder) Message(ctx context.Context, m llm.Message) error {
 			}
 		}
 		if err := s.AppendMessage(ctx, r.sessionID, seq, store.Message{
-			Role: string(m.Role), Content: m.Content, ToolCalls: calls, ToolCallID: m.ToolCallID,
+			Role: string(m.Role), Content: m.Content, ToolCalls: calls, ToolCallID: m.ToolCallID, CWD: r.cwd,
 		}); err != nil {
 			return err
 		}
