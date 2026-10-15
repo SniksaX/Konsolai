@@ -46,13 +46,21 @@ type Confirmer interface {
 	ConfirmForced(summary, preview string) (ui.Decision, string, error)
 }
 
+type ThinkingPolicy int
+
+const (
+	ThinkOff ThinkingPolicy = iota
+	ThinkOn
+	ThinkUntilPlan
+)
+
 type Config struct {
 	Client              *llm.Client
 	Tools               *tools.Registry
 	Confirmer           Confirmer
 	Out                 io.Writer
 	MaxSteps            int
-	Thinking            bool
+	ThinkingPolicy      ThinkingPolicy
 	RequirePlan         bool
 	ContextBudgetTokens int
 	Prompt              string
@@ -62,6 +70,20 @@ type Config struct {
 	AutoApprove         bool
 	ExploreBudget       int
 	ExploreNote         string
+}
+
+func (p ThinkingPolicy) enabled(planApproved, shellFail bool) bool {
+	switch p {
+	case ThinkOn:
+		return true
+	case ThinkUntilPlan:
+		if !planApproved {
+			return true
+		}
+		return shellFail
+	default:
+		return false
+	}
 }
 
 var (
@@ -92,16 +114,18 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	userMsg := llm.Message{Role: llm.RoleUser, Content: task}
 	msgs = append(msgs, userMsg)
 	_ = rec.Message(ctx, userMsg)
-	opts := llm.ChatOptions{Thinking: cfg.Thinking, Temperature: temp}
 	specs := cfg.Tools.Specs()
 	seenFail := make(map[string]struct{})
 	seenRead := make(map[string]struct{})
 	planApproved := false
 	var planFiles []string
 	explore := 0
+	shellFail := false
 
 	for step := 0; step < cfg.MaxSteps; step++ {
 		elideToolOutputs(msgs, cfg.ContextBudgetTokens)
+		opts := llm.ChatOptions{Thinking: cfg.ThinkingPolicy.enabled(planApproved, shellFail), Temperature: temp}
+		shellFail = false
 		clear := ui.Status(cfg.Out, "planning...")
 		msg, err := cfg.Client.Complete(ctx, msgs, specs, opts)
 		clear()
@@ -295,6 +319,9 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			}
 			msgs = append(msgs, tm)
 			_ = rec.Message(ctx, tm)
+			if call.Function.Name == "run_shell" && result.IsError {
+				shellFail = true
+			}
 		}
 	}
 	return ErrMaxSteps
