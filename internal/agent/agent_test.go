@@ -104,7 +104,7 @@ func setup(t *testing.T, replies []llm.Message, confirm Confirmer, maxSteps int)
 	}
 	err = Run(context.Background(), Config{
 		Client:    client,
-		Tools:     tools.NewRegistry(g, io.Discard),
+		Tools:     tools.NewRegistry(g, io.Discard, nil),
 		Confirmer: confirm,
 		Out:       io.Discard,
 		MaxSteps:  maxSteps,
