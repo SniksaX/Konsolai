@@ -70,6 +70,53 @@ type Config struct {
 	AutoApprove         bool
 	ExploreBudget       int
 	ExploreNote         string
+	Trace               bool
+	Intent              string
+	RouterTime          time.Duration
+	Err                 io.Writer
+	Stats               *Stats
+}
+
+type Stats struct {
+	Steps            int
+	ModelTime        time.Duration
+	ToolTime         time.Duration
+	PromptTokens     int
+	CompletionTokens int
+	RouterTime       time.Duration
+}
+
+func FormatTokens(n int) string {
+	return fmt.Sprintf("%.1fk", float64(n)/1000)
+}
+
+func FormatSummary(intent string, s Stats) string {
+	return fmt.Sprintf("· %s · %d steps · model %s · tools %s · %s in / %s out",
+		intent, s.Steps, formatDuration(s.ModelTime), formatDuration(s.ToolTime),
+		FormatTokens(s.PromptTokens), FormatTokens(s.CompletionTokens))
+}
+
+func FormatTrace(step int, think bool, d time.Duration, in, out int, names []string) string {
+	th := "off"
+	if think {
+		th = "on"
+	}
+	return fmt.Sprintf("  [step %d] think=%s  %s  in=%s out=%s  -> %s",
+		step, th, formatDuration(d), FormatTokens(in), FormatTokens(out), strings.Join(names, ", "))
+}
+
+func PrintSummary(w io.Writer, intent string, s Stats) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintln(w, ui.Dim(FormatSummary(intent, s)))
+}
+
+func PrintTrace(w io.Writer, step int, think bool, d time.Duration, in, out int, names []string) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintln(w, FormatTrace(step, think, d, in, out, names))
 }
 
 func (p ThinkingPolicy) enabled(planApproved, shellFail bool) bool {
@@ -121,16 +168,44 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	var planFiles []string
 	explore := 0
 	shellFail := false
+	var st Stats
+	st.RouterTime = cfg.RouterTime
+	defer func() {
+		if cfg.Stats != nil {
+			*cfg.Stats = st
+		}
+		if cfg.Intent != "" || cfg.Err != nil {
+			intent := cfg.Intent
+			if intent == "" {
+				intent = "act"
+			}
+			PrintSummary(cfg.Err, intent, st)
+		}
+	}()
 
 	for step := 0; step < cfg.MaxSteps; step++ {
 		elideToolOutputs(msgs, cfg.ContextBudgetTokens)
-		opts := llm.ChatOptions{Thinking: cfg.ThinkingPolicy.enabled(planApproved, shellFail), Temperature: temp}
+		think := cfg.ThinkingPolicy.enabled(planApproved, shellFail)
+		opts := llm.ChatOptions{Thinking: think, Temperature: temp}
 		shellFail = false
 		clear := ui.Status(cfg.Out, "planning...")
-		msg, err := cfg.Client.Complete(ctx, msgs, specs, opts)
+		t0 := time.Now()
+		msg, usage, err := cfg.Client.Complete(ctx, msgs, specs, opts)
+		modelElapsed := time.Since(t0)
 		clear()
 		if err != nil {
 			return err
+		}
+		st.Steps++
+		st.ModelTime += modelElapsed
+		st.PromptTokens += usage.PromptTokens
+		st.CompletionTokens += usage.CompletionTokens
+		var names []string
+		for _, c := range msg.ToolCalls {
+			names = append(names, c.Function.Name)
+		}
+		if cfg.Trace {
+			PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, names)
 		}
 		msgs = append(msgs, msg)
 		_ = rec.Message(ctx, msg)
@@ -268,6 +343,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			start := time.Now()
 			result, err := action.Run(ctx)
 			elapsed := time.Since(start)
+			st.ToolTime += elapsed
 			if err != nil {
 				return err
 			}
