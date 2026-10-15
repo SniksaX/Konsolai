@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -61,6 +63,7 @@ type invocation struct {
 	FactScope string
 	FactID    int64
 	Fact      string
+	Endpoint  string
 }
 
 var errRequest = errors.New(`request must be a single argument in double quotes, e.g. konsolai code "add a /health endpoint"`)
@@ -183,6 +186,7 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "konsolai:", err)
 		return 1
 	}
+	inv.Endpoint = prof.Endpoint
 
 	needMem := inv.Cmd != cmdRequest
 	var st *store.Store
@@ -250,6 +254,7 @@ func run() int {
 		return 1
 	}
 	client := llm.New(prof.Endpoint, prof.Model)
+	client.SetIdleTimeout(time.Duration(prof.LLMIdleTimeoutSeconds) * time.Second)
 	facts := loadFactsBlock(ctx, mem, prof.Name, projectID)
 
 	prompter, err := ui.OpenPrompter(inv.Yes)
@@ -489,7 +494,7 @@ func runAnswer(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, hi
 		if errors.Is(streamErr, context.Canceled) {
 			return 130
 		}
-		fmt.Fprintln(os.Stderr, "konsolai:", streamErr)
+		fmt.Fprintln(os.Stderr, modelErrorLine(inv.Endpoint, streamErr, inv.Trace))
 		return 1
 	}
 	if strings.TrimSpace(out) == "" {
@@ -523,13 +528,16 @@ func sanitizeAnswerHistory(hist []llm.Message) []llm.Message {
 func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, think, plain bool) (string, llm.Usage, error) {
 	var filter llm.ThinkFilter
 	var collected strings.Builder
-	stopThink := ui.Start("thinking")
+	live := ui.StartLive("thinking")
 	first := true
 	rend := ui.NewRenderer(os.Stdout, plain)
-	usage, err := client.Stream(ctx, msgs, llm.ChatOptions{Thinking: think, Temperature: 0.3}, func(delta string) error {
+	usage, err := client.Stream(ctx, msgs, llm.ChatOptions{
+		Thinking: think, Temperature: 0.3,
+		OnProgress: func(p llm.Progress) { live.SetLabel(agent.ProgressLabel("thinking", p)) },
+	}, func(delta string) error {
 		s := filter.Write(delta)
 		if first && s != "" {
-			stopThink()
+			live.Stop()
 			first = false
 			_, _ = io.WriteString(os.Stdout, "\n")
 		}
@@ -538,7 +546,7 @@ func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 		return werr
 	})
 	if first {
-		stopThink()
+		live.Stop()
 	}
 	rest := filter.Flush()
 	collected.WriteString(rest)
@@ -677,7 +685,7 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 		fmt.Fprintln(os.Stderr, "konsolai: the model returned no answer")
 		return 1
 	}
-	fmt.Fprintln(os.Stderr, "konsolai:", err)
+	fmt.Fprintln(os.Stderr, modelErrorLine(inv.Endpoint, err, inv.Trace))
 	return 1
 }
 
@@ -743,4 +751,60 @@ func printDiffStat(root string) {
 		return
 	}
 	fmt.Fprintln(os.Stdout, ui.Dim(s))
+}
+
+func modelErrorLine(endpoint string, err error, trace bool) string {
+	if err == nil {
+		return "konsolai: unknown error"
+	}
+	if trace {
+		return "konsolai: " + err.Error()
+	}
+	host := endpointHost(endpoint)
+	if errors.Is(err, llm.ErrIdleTimeout) {
+		return "konsolai: the model server stopped responding (" + host + "). Try again, or check the server."
+	}
+	if errors.Is(err, llm.ErrTruncated) {
+		return "konsolai: the model's answer was cut off; try a narrower request."
+	}
+	var he *llm.HTTPError
+	if errors.As(err, &he) && he.Status >= 400 && he.Status < 500 {
+		return "konsolai: the model server rejected the request: " + firstErrLine(he.Body)
+	}
+	if isDialErr(err) {
+		return "konsolai: cannot reach the model server at " + host + "."
+	}
+	return "konsolai: " + err.Error()
+}
+
+func endpointHost(endpoint string) string {
+	u, err := url.Parse(endpoint)
+	if err == nil && u.Host != "" {
+		return u.Host
+	}
+	s := strings.TrimPrefix(strings.TrimPrefix(endpoint, "http://"), "https://")
+	if i := strings.IndexByte(s, '/'); i >= 0 {
+		s = s[:i]
+	}
+	if s == "" {
+		return "the model server"
+	}
+	return s
+}
+
+func firstErrLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
+}
+
+func isDialErr(err error) bool {
+	var op *net.OpError
+	if errors.As(err, &op) {
+		return true
+	}
+	s := err.Error()
+	return strings.Contains(s, "connection refused") || strings.Contains(s, "no such host") || strings.Contains(s, "dial tcp")
 }
