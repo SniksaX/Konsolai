@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/siraj/konsolai/internal/llm"
 )
@@ -18,23 +19,20 @@ func TestClassifySchemaAndRecent(t *testing.T) {
 		gotBody, _ = io.ReadAll(r.Body)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{{"message": map[string]any{
-				"role": "assistant", "content": `{"intent":"act","language":"en","reason":"do it","reasoning":true}`,
+				"role": "assistant", "content": `{"intent":"act","language":"en","reason":"do it","reasoning":true,"task":"other","continues_session":1}`,
 			}}},
 		})
 	}))
 	t.Cleanup(srv.Close)
 	c := llm.New(srv.URL+"/v1", "qwen")
-	recent := []llm.Message{
-		{Role: llm.RoleUser, Content: "add a Subtract function"},
-		{Role: llm.RoleAssistant, Content: "I can do that"},
-		{Role: llm.RoleTool, Content: "ignored"},
-		{Role: llm.RoleUser, Content: "do it"},
+	cands := []Candidate{
+		{Title: "add a Subtract function", LastUser: "do it", Age: time.Minute},
 	}
-	d, err := Classify(context.Background(), c, "do it", recent, true)
+	d, err := Classify(context.Background(), c, "do it", cands, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Intent != Act || !d.Reasoning {
+	if d.Intent != Act || !d.Reasoning || d.ContinuesSession != 1 {
 		t.Fatalf("%+v", d)
 	}
 	var raw map[string]json.RawMessage
@@ -56,11 +54,8 @@ func TestClassifySchemaAndRecent(t *testing.T) {
 	for _, m := range msgs {
 		joined += m.Content + "\n"
 	}
-	if !strings.Contains(joined, "add a Subtract function") || !strings.Contains(joined, "do it") {
-		t.Fatalf("recent not included: %q", joined)
-	}
-	if strings.Contains(joined, "ignored") {
-		t.Fatal("tool message included")
+	if !strings.Contains(joined, "add a Subtract function") || !strings.Contains(joined, "1.") {
+		t.Fatalf("candidates not included: %q", joined)
 	}
 	if !strings.Contains(joined, "reasoning=true when the request needs multi-step analysis") {
 		t.Fatal("router prompt missing reasoning rule")
@@ -90,8 +85,11 @@ func TestClassifySchemaAndRecent(t *testing.T) {
 	if _, ok := wrap.JSONSchema.Schema.Properties["task"]; !ok {
 		t.Fatal("schema missing task")
 	}
-	if _, ok := wrap.JSONSchema.Schema.Properties["continues_previous"]; !ok {
-		t.Fatal("schema missing continues_previous")
+	if _, ok := wrap.JSONSchema.Schema.Properties["continues_session"]; !ok {
+		t.Fatal("schema missing continues_session")
+	}
+	if _, ok := wrap.JSONSchema.Schema.Properties["continues_previous"]; ok {
+		t.Fatal("continues_previous should be gone")
 	}
 	found := false
 	taskReq := false
@@ -103,7 +101,7 @@ func TestClassifySchemaAndRecent(t *testing.T) {
 		if r == "task" {
 			taskReq = true
 		}
-		if r == "continues_previous" {
+		if r == "continues_session" {
 			contReq = true
 		}
 	}
@@ -116,21 +114,24 @@ func TestClassifySchemaAndRecent(t *testing.T) {
 	if !strings.Contains(string(wrap.JSONSchema.Schema.Properties["task"]), `"docs"`) {
 		t.Fatal("schema missing docs task")
 	}
-	if !strings.Contains(joined, "continues_previous=true only if") {
-		t.Fatal("router prompt missing continues_previous rule")
+	if !strings.Contains(joined, "Pick the conversation this message follows up") {
+		t.Fatal("router prompt missing continues_session rule")
+	}
+	if !strings.Contains(joined, "Prefer 0 when unsure") {
+		t.Fatal("router prompt missing prefer-0 rule")
 	}
 }
 
 func TestParseDecision(t *testing.T) {
 	d, ok := parseDecision(`{"intent":"build","language":"fr","reason":"code","reasoning":false}`)
-	if !ok || d.Intent != Build || d.Language != "fr" || d.Reasoning || d.Task != TaskOther {
+	if !ok || d.Intent != Build || d.Language != "fr" || d.Reasoning || d.Task != TaskOther || d.ContinuesSession != 0 {
 		t.Fatalf("%+v %v", d, ok)
 	}
-	d, ok = parseDecision(`{"intent":"lookup","language":"en","reason":"review","reasoning":true,"task":"analysis","continues_previous":true}`)
-	if !ok || d.Task != TaskAnalysis || !d.ContinuesPrevious {
+	d, ok = parseDecision(`{"intent":"lookup","language":"en","reason":"review","reasoning":true,"task":"analysis","continues_session":2}`)
+	if !ok || d.Task != TaskAnalysis || d.ContinuesSession != 2 {
 		t.Fatalf("task %+v %v", d, ok)
 	}
-	d, ok = parseDecision(`{"intent":"build","language":"en","reason":"readme","reasoning":false,"task":"docs","continues_previous":false}`)
+	d, ok = parseDecision(`{"intent":"build","language":"en","reason":"readme","reasoning":false,"task":"docs","continues_session":0}`)
 	if !ok || d.Task != TaskDocs {
 		t.Fatalf("docs %+v %v", d, ok)
 	}
@@ -155,13 +156,13 @@ func TestDeicticRoutingPhrases(t *testing.T) {
 }
 
 func TestFallback(t *testing.T) {
-	if g := fallback("what is go?", true, false); g.Intent != Lookup || g.ContinuesPrevious {
+	if g := fallback("what is go?", true); g.Intent != Lookup || g.ContinuesSession != 0 {
 		t.Fatalf("%+v", g)
 	}
-	if g := fallback("what is go?", false, true); g.Intent != Answer || !g.ContinuesPrevious {
+	if g := fallback("what is go?", false); g.Intent != Answer || g.ContinuesSession != 0 {
 		t.Fatalf("%+v", g)
 	}
-	if g := fallback("create a folder", false, false); g.Intent != Act {
+	if g := fallback("create a folder", false); g.Intent != Act {
 		t.Fatalf("%+v", g)
 	}
 }
@@ -172,7 +173,7 @@ func TestClassifyTellsNoPrevious(t *testing.T) {
 		gotBody, _ = io.ReadAll(r.Body)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{{"message": map[string]any{
-				"role": "assistant", "content": `{"intent":"answer","language":"en","reason":"q","reasoning":false,"task":"other","continues_previous":false}`,
+				"role": "assistant", "content": `{"intent":"answer","language":"en","reason":"q","reasoning":false,"task":"other","continues_session":0}`,
 			}}},
 		})
 	}))
@@ -196,7 +197,17 @@ func TestClassifyFallbackOnError(t *testing.T) {
 	if err == nil {
 		t.Fatal("want error")
 	}
-	if d.Intent != Lookup {
+	if d.Intent != Lookup || d.ContinuesSession != 0 {
 		t.Fatalf("fallback %+v", d)
+	}
+}
+
+func TestFormatCandidates(t *testing.T) {
+	got := FormatCandidates([]Candidate{
+		{Title: "pdf build", LastUser: "create docs/OVERVIEW.pdf", Age: time.Minute},
+		{Title: "how do I list git branches?", LastUser: "how do I list git branches?", Age: 5 * time.Minute},
+	})
+	if !strings.Contains(got, "1. [1m ago] pdf build") || !strings.Contains(got, "2. [5m ago] how do I list git branches?") {
+		t.Fatalf("%q", got)
 	}
 }
