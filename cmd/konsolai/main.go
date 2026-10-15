@@ -51,11 +51,11 @@ func run() int {
 	client := llm.New(envOr("KONSOLAI_ENDPOINT", defaultEndpoint), os.Getenv("KONSOLAI_MODEL"))
 	msgs := []llm.Message{
 		{Role: llm.RoleSystem, Content: howtoSystemPrompt + "\n\n" + snap.String()},
-		{Role: llm.RoleUser, Content: query + " /no_think"},
+		{Role: llm.RoleUser, Content: query},
 	}
 
 	var filter llm.ThinkFilter
-	streamErr := client.Stream(ctx, msgs, func(delta string) error {
+	streamErr := client.Stream(ctx, msgs, llm.ChatOptions{Thinking: false, Temperature: 0.2}, func(delta string) error {
 		_, err := io.WriteString(os.Stdout, filter.Write(delta))
 		return err
 	})
