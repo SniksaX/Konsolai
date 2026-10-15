@@ -35,19 +35,32 @@ func (s stubConfirm) ConfirmForced(summary, preview string) (ui.Decision, string
 }
 
 type replay struct {
-	t           *testing.T
-	mu          sync.Mutex
-	replies     []llm.Message
-	reqs        [][]llm.Message
-	tools       [][]llm.ToolSpec
-	think       []bool
-	toolChoices []json.RawMessage
+	t            *testing.T
+	mu           sync.Mutex
+	replies      []llm.Message
+	reqs         [][]llm.Message
+	tools        [][]llm.ToolSpec
+	think        []bool
+	toolChoices  []json.RawMessage
+	maxTokens    []int
+	promptTokens []int
 }
 
 func newReplay(t *testing.T, replies []llm.Message) (*llm.Client, *replay) {
 	t.Helper()
 	r := &replay{t: t, replies: replies}
 	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, req *http.Request) {
+		_ = json.NewEncoder(w).Encode(struct {
+			Data []struct {
+				ID          string `json:"id"`
+				MaxModelLen int    `json:"max_model_len"`
+			} `json:"data"`
+		}{Data: []struct {
+			ID          string `json:"id"`
+			MaxModelLen int    `json:"max_model_len"`
+		}{{ID: "test", MaxModelLen: 94208}}})
+	})
 	mux.HandleFunc("/v1/chat/completions", r.serve)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -59,6 +72,7 @@ func (r *replay) serve(w http.ResponseWriter, req *http.Request) {
 		Messages           []llm.Message   `json:"messages"`
 		Tools              []llm.ToolSpec  `json:"tools"`
 		ToolChoice         json.RawMessage `json:"tool_choice"`
+		MaxTokens          int             `json:"max_tokens"`
 		ChatTemplateKwargs struct {
 			EnableThinking bool `json:"enable_thinking"`
 		} `json:"chat_template_kwargs"`
@@ -72,7 +86,12 @@ func (r *replay) serve(w http.ResponseWriter, req *http.Request) {
 	r.tools = append(r.tools, body.Tools)
 	r.toolChoices = append(r.toolChoices, body.ToolChoice)
 	r.think = append(r.think, body.ChatTemplateKwargs.EnableThinking)
+	r.maxTokens = append(r.maxTokens, body.MaxTokens)
 	i := len(r.reqs) - 1
+	pt := 1000
+	if i < len(r.promptTokens) && r.promptTokens[i] > 0 {
+		pt = r.promptTokens[i]
+	}
 	r.mu.Unlock()
 	if i >= len(r.replies) {
 		http.Error(w, "no more replies", http.StatusInternalServerError)
@@ -91,7 +110,7 @@ func (r *replay) serve(w http.ResponseWriter, req *http.Request) {
 	}{{Message: r.replies[i]}}, Usage: struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
-	}{PromptTokens: 1000, CompletionTokens: 200}})
+	}{PromptTokens: pt, CompletionTokens: 200}})
 }
 
 func (r *replay) lastTool() llm.Message {
@@ -304,13 +323,13 @@ func TestContextElision(t *testing.T) {
 	}
 	replies = append(replies, llm.Message{Role: llm.RoleAssistant, Content: "done"})
 	client, rep := newReplay(t, replies)
+	rep.promptTokens = []int{25000, 25000, 25000, 25000, 25000, 25000, 25000, 25000, 25000}
 	err = Run(context.Background(), Config{
-		Client:              client,
-		Tools:               tools.NewRegistry(g, io.Discard, list, nil, nil),
-		Confirmer:           stubConfirm{d: ui.Approve},
-		Out:                 io.Discard,
-		MaxSteps:            15,
-		ContextBudgetTokens: 80,
+		Client:    client,
+		Tools:     tools.NewRegistry(g, io.Discard, list, nil, nil),
+		Confirmer: stubConfirm{d: ui.Approve},
+		Out:       io.Discard,
+		MaxSteps:  15,
 	}, "sys", "task")
 	if err != nil {
 		t.Fatal(err)
@@ -325,6 +344,50 @@ func TestContextElision(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected an elided tool message")
+	}
+}
+
+func TestMaxTokensComputation(t *testing.T) {
+	if ProfileCap("answer") != 4096 || ProfileCap("lookup") != 4096 || ProfileCap("act") != 4096 {
+		t.Fatal("small caps")
+	}
+	if ProfileCap("build") != 12288 {
+		t.Fatal("build cap")
+	}
+	if MaxTokensFor(94208, 50000, 4096) != 4096 {
+		t.Fatalf("capped %d", MaxTokensFor(94208, 50000, 4096))
+	}
+	if MaxTokensFor(32768, 30000, 4096) != 1744 {
+		t.Fatalf("room %d", MaxTokensFor(32768, 30000, 4096))
+	}
+	_, rep, err := setupCfg(t, []llm.Message{
+		{Role: llm.RoleAssistant, Content: "ok"},
+	}, nil, Config{Intent: "act"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.maxTokens) == 0 || rep.maxTokens[0] <= 0 || rep.maxTokens[0] > 4096 {
+		t.Fatalf("max_tokens %v", rep.maxTokens)
+	}
+}
+
+func TestContextOverflowError(t *testing.T) {
+	huge := strings.Repeat("word ", 80000)
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, _ := newReplay(t, []llm.Message{{Role: llm.RoleAssistant, Content: "ok"}})
+	err = Run(context.Background(), Config{
+		Client: client, Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		Confirmer: stubConfirm{d: ui.Approve}, Out: io.Discard, MaxSteps: 3, Intent: "act",
+	}, huge, huge)
+	if !errors.Is(err, ErrContextOverflow) {
+		t.Fatalf("got %v", err)
+	}
+	if err.Error() != "konsolai: the conversation no longer fits the model's context; start a new session with `new`." {
+		t.Fatalf("msg %q", err.Error())
 	}
 }
 
@@ -640,13 +703,13 @@ func TestFormatSummaryAndTrace(t *testing.T) {
 	if got != want {
 		t.Fatalf("summary %q want %q", got, want)
 	}
-	tr := FormatTrace(2, true, 12300*time.Millisecond, 4100, 300, []string{"tool_a", "tool_b"})
-	want = "  [step 2] think=on  12.3s  in=4.1k out=0.3k  -> tool_a, tool_b"
+	tr := FormatTrace(2, true, 12300*time.Millisecond, 58400, 300, 94200, []string{"tool_a", "tool_b"})
+	want = "  [step 2] think=on  12.3s  in=58.4k out=0.3k  ctx 62% (58.4k/94.2k)  -> tool_a, tool_b"
 	if tr != want {
 		t.Fatalf("trace %q want %q", tr, want)
 	}
-	tr = FormatTrace(1, false, time.Second, 0, 0, nil)
-	if !strings.Contains(tr, "think=off") || !strings.Contains(tr, "->") {
+	tr = FormatTrace(1, false, time.Second, 0, 0, 32768, nil)
+	if !strings.Contains(tr, "think=off") || !strings.Contains(tr, "ctx 0%") || !strings.Contains(tr, "->") {
 		t.Fatalf("off %q", tr)
 	}
 }
