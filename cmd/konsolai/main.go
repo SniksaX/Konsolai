@@ -466,7 +466,7 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 	lister := func(ctx context.Context) ([]string, error) {
 		return repo.Files(ctx, root)
 	}
-	reg := tools.NewRegistry(sg, os.Stdout, lister, memory.NewWebCache(mem), memory.NewFactStore(mem, profile, projectID, sessionID))
+	reg := tools.NewRegistry(sg, os.Stdout, lister, memory.NewWebCache(mem), memory.NewFactStore(mem, profile, projectID, sessionID), tools.Options{ReadOnlyShell: dec.Intent == intent.Lookup})
 	cfg := agent.Config{
 		Client:              client,
 		Tools:               reg,
@@ -481,7 +481,7 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 	sys := snap.String() + facts
 	switch dec.Intent {
 	case intent.Lookup:
-		cfg.Tools = reg.Named("list_dir", "read_file", "outline", "search", "find_files", "web_fetch", "finish")
+		cfg.Tools = reg.Named("list_dir", "read_file", "outline", "search", "find_files", "web_fetch", "run_shell", "finish")
 		cfg.Prompt = agent.LookupPrompt + "\n" + lang
 		cfg.MaxSteps = 10
 		cfg.ExploreBudget = 6
