@@ -104,12 +104,12 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		_ = rec.Message(ctx, msg)
 
 		if len(msg.ToolCalls) == 0 {
-			if text := strings.TrimSpace(msg.Content); text != "" {
+			if text := trimLeadingBlanks(msg.Content); strings.TrimSpace(text) != "" {
 				fmt.Fprintln(cfg.Out, text)
 			}
 			return nil
 		}
-		if text := strings.TrimSpace(msg.Content); text != "" {
+		if text := trimLeadingBlanks(msg.Content); strings.TrimSpace(text) != "" {
 			fmt.Fprintln(cfg.Out, ui.Dim(text))
 		}
 
@@ -210,14 +210,14 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			}
 			if result.Final {
 				fmt.Fprintln(cfg.Out)
-				fmt.Fprintln(cfg.Out, ui.Bold(result.Output))
+				fmt.Fprintln(cfg.Out, ui.Bold(trimLeadingBlanks(result.Output)))
 				return nil
 			}
 			mark := ui.Green("✓")
 			if result.IsError {
 				mark = ui.Red("✗")
 			}
-			fmt.Fprintf(cfg.Out, "%s %s · %s\n", mark, result.Meta, formatDuration(elapsed))
+			fmt.Fprintf(cfg.Out, "%s %s · %s\n", mark, displayMeta(result), formatDuration(elapsed))
 			content := result.Output
 			if result.IsError {
 				sum := sha256.Sum256([]byte(result.Output))
@@ -242,6 +242,22 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 
 func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%.1fs", d.Seconds())
+}
+
+func trimLeadingBlanks(s string) string {
+	return strings.TrimLeft(s, "\r\n")
+}
+
+func displayMeta(r tools.Result) string {
+	if r.Meta != "" {
+		return r.Meta
+	}
+	s := strings.TrimSpace(r.Output)
+	s = strings.TrimPrefix(s, "error: ")
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	return s
 }
 
 func tokenEstimate(msgs []llm.Message) int {
