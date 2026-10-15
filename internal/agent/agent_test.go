@@ -1067,3 +1067,55 @@ func TestAnalysisIgnoresManifestReads(t *testing.T) {
 		t.Fatal("manifest/README reads must not release the analysis hold")
 	}
 }
+
+func TestExploreBudgetCountsStepsNotCalls(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"a.txt", "b.txt", "c.txt", "d.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(name), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, rep := newReplay(t, []llm.Message{
+		assistant(
+			call("1", "read_file", `{"path":"a.txt"}`),
+			call("2", "read_file", `{"path":"b.txt"}`),
+			call("3", "read_file", `{"path":"c.txt"}`),
+			call("4", "read_file", `{"path":"d.txt"}`),
+		),
+		assistant(call("5", "finish", `{"summary":"ok"}`)),
+	})
+	err = Run(context.Background(), Config{
+		Client: client, Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		Confirmer: stubConfirm{d: ui.Approve}, Out: io.Discard,
+		ExploreBudget: 2, ExploreNote: ExploreNoteLookup, MaxSteps: 6,
+	}, "sys", "read them")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, msgs := range rep.reqs {
+		for _, m := range msgs {
+			if m.Role == llm.RoleTool && strings.Contains(m.Content, ExploreNoteLookup) {
+				t.Fatal("4 parallel reads are one step; budget 2 must not fire")
+			}
+		}
+	}
+}
+
+func TestExploreBudgetForDocs(t *testing.T) {
+	if ExploreBudgetFor("lookup", "other") != 6 || ExploreBudgetFor("lookup", "analysis") != 10 {
+		t.Fatal("lookup budgets")
+	}
+	if ExploreBudgetFor("act", "other") != 6 {
+		t.Fatal("act budget")
+	}
+	if ExploreBudgetFor("build", "other") != 8 || ExploreBudgetFor("build", "analysis") != 12 {
+		t.Fatal("build budgets")
+	}
+	if ExploreBudgetFor("build", "docs") != 16 {
+		t.Fatal("docs budget")
+	}
+}
