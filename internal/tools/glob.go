@@ -9,10 +9,17 @@ import (
 )
 
 // relPrefix maps a user path (relative, absolute, or empty) to a slash-separated
-// prefix relative to the guard root. Empty or "." means the whole tree.
+// prefix relative to the guard root. Empty or "." means Base's subtree.
 func relPrefix(g *safety.Guard, path string) (string, error) {
 	if path == "" || path == "." {
-		return "", nil
+		rel, err := filepath.Rel(g.Root(), g.Base())
+		if err != nil {
+			return "", err
+		}
+		if rel == "." {
+			return "", nil
+		}
+		return filepath.ToSlash(rel), nil
 	}
 	resolved, err := g.ResolvePath(path)
 	if err != nil {
