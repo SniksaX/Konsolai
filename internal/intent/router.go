@@ -43,7 +43,8 @@ References to the current location or its contents ('this', 'this one', 'here', 
 When unsure between answer and anything else, choose answer if the message is a question.
 language is the ISO 639-1 code of the user's message.
 reasoning=true when the request needs multi-step analysis: debugging an error or a pasted command, comparing approaches, non-trivial code questions. false for greetings, simple facts and simple commands.
-task is "analysis" when the user asks to analyse, review or give an opinion on code; otherwise "other".`
+task is "analysis" when the user asks to analyse, review or give an opinion on code; otherwise "other".
+Never print a secret value in full. Refer to it by name and its first 4 characters.`
 
 var decisionSchema = json.RawMessage(`{"type":"object","properties":{"intent":{"type":"string","enum":["answer","lookup","act","build"]},"language":{"type":"string"},"reason":{"type":"string"},"reasoning":{"type":"boolean"},"task":{"type":"string","enum":["analysis","other"]}},"required":["intent","language","reason","reasoning","task"],"additionalProperties":false}`)
 
