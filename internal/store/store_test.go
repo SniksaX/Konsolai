@@ -204,7 +204,23 @@ func TestSeqOrderingAndRedaction(t *testing.T) {
 			t.Fatalf("want redaction: %q", m.Content)
 		}
 	}
+	hex := "26f789a3dde42ad6ec6a50fc258c2a59a9833069884e231b0081525ef87cbc301ba28e96d4e0f46c"
 	seq, err := s.NextSeq(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendMessage(ctx, id, seq, Message{Role: "assistant", Content: "key ABUSEIPDB_KEY=" + hex}); err != nil {
+		t.Fatal(err)
+	}
+	msgs, err = s.LoadMessages(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := msgs[len(msgs)-1]
+	if strings.Contains(last.Content, hex) || strings.Contains(last.Content, "9833069884e231b0") {
+		t.Fatalf("abuse key stored: %q", last.Content)
+	}
+	seq, err = s.NextSeq(ctx, id)
 	if err != nil {
 		t.Fatal(err)
 	}
