@@ -56,28 +56,27 @@ const (
 )
 
 type Config struct {
-	Client              *llm.Client
-	Tools               *tools.Registry
-	Confirmer           Confirmer
-	Out                 io.Writer
-	MaxSteps            int
-	ThinkingPolicy      ThinkingPolicy
-	RequirePlan         bool
-	ContextBudgetTokens int
-	Prompt              string
-	Temperature         float64
-	Recorder            Recorder
-	History             []llm.Message
-	AutoApprove         bool
-	ExploreBudget       int
-	ExploreNote         string
-	Trace               bool
-	Intent              string
-	Task                string
-	RouterTime          time.Duration
-	Err                 io.Writer
-	Stats               *Stats
-	Plain               bool
+	Client         *llm.Client
+	Tools          *tools.Registry
+	Confirmer      Confirmer
+	Out            io.Writer
+	MaxSteps       int
+	ThinkingPolicy ThinkingPolicy
+	RequirePlan    bool
+	Prompt         string
+	Temperature    float64
+	Recorder       Recorder
+	History        []llm.Message
+	AutoApprove    bool
+	ExploreBudget  int
+	ExploreNote    string
+	Trace          bool
+	Intent         string
+	Task           string
+	RouterTime     time.Duration
+	Err            io.Writer
+	Stats          *Stats
+	Plain          bool
 }
 
 type Stats struct {
@@ -116,13 +115,18 @@ func FormatSummary(intent string, s Stats) string {
 		FormatTokens(s.PromptTokens), FormatTokens(s.CompletionTokens))
 }
 
-func FormatTrace(step int, think bool, d time.Duration, in, out int, names []string) string {
+func FormatTrace(step int, think bool, d time.Duration, in, out, window int, names []string) string {
 	th := "off"
 	if think {
 		th = "on"
 	}
-	return fmt.Sprintf("  [step %d] think=%s  %s  in=%s out=%s  -> %s",
-		step, th, formatDuration(d), FormatTokens(in), FormatTokens(out), strings.Join(names, ", "))
+	pct := 0
+	if window > 0 {
+		pct = int(float64(in)*100/float64(window) + 0.5)
+	}
+	return fmt.Sprintf("  [step %d] think=%s  %s  in=%s out=%s  ctx %d%% (%s/%s)  -> %s",
+		step, th, formatDuration(d), FormatTokens(in), FormatTokens(out),
+		pct, FormatTokens(in), FormatTokens(window), strings.Join(names, ", "))
 }
 
 func PrintSummary(w io.Writer, intent string, s Stats) {
@@ -152,11 +156,11 @@ func ExploreBudgetFor(intent, task string) int {
 	}
 }
 
-func PrintTrace(w io.Writer, step int, think bool, d time.Duration, in, out int, names []string) {
+func PrintTrace(w io.Writer, step int, think bool, d time.Duration, in, out, window int, names []string) {
 	if w == nil {
 		return
 	}
-	fmt.Fprintln(w, FormatTrace(step, think, d, in, out, names))
+	fmt.Fprintln(w, FormatTrace(step, think, d, in, out, window, names))
 }
 
 func (p ThinkingPolicy) enabled(planApproved, shellFail bool) bool {
@@ -174,12 +178,102 @@ func (p ThinkingPolicy) enabled(planApproved, shellFail bool) bool {
 }
 
 var (
-	ErrAborted  = errors.New("agent: aborted")
-	ErrMaxSteps = errors.New("agent: max steps exceeded")
-	ErrNoAnswer = errors.New("agent: no answer")
+	ErrAborted         = errors.New("agent: aborted")
+	ErrMaxSteps        = errors.New("agent: max steps exceeded")
+	ErrNoAnswer        = errors.New("agent: no answer")
+	ErrContextOverflow = errors.New("konsolai: the conversation no longer fits the model's context; start a new session with `new`.")
 )
 
-const elidedOutput = "[output elided to save context]"
+const (
+	elidedOutput     = "[output elided to save context]"
+	contextSafety    = 1024
+	contextElideFrac = 0.55
+	minOutputTokens  = 2048
+	protectLastMsgs  = 6
+)
+
+func ProfileCap(intent string) int {
+	if intent == "build" {
+		return 12288
+	}
+	return 4096
+}
+
+func MaxTokensFor(window, estimate, cap int) int {
+	room := window - estimate - contextSafety
+	if room < 1 {
+		return 0
+	}
+	if room < cap {
+		return room
+	}
+	return cap
+}
+
+func shouldElide(estimate, window, cap int) bool {
+	if window <= 0 {
+		return false
+	}
+	if float64(estimate) > contextElideFrac*float64(window) {
+		return true
+	}
+	return window-estimate-contextSafety < cap/2
+}
+
+func isPlanTool(msgs []llm.Message, i int) bool {
+	id := msgs[i].ToolCallID
+	if id == "" {
+		return false
+	}
+	for j := i - 1; j >= 0; j-- {
+		if msgs[j].Role != llm.RoleAssistant {
+			continue
+		}
+		for _, c := range msgs[j].ToolCalls {
+			if c.ID == id && c.Function.Name == "propose_plan" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func elideOneTool(msgs []llm.Message) bool {
+	limit := len(msgs) - protectLastMsgs
+	if limit <= 0 {
+		return false
+	}
+	for i := 0; i < limit; i++ {
+		if msgs[i].Role != llm.RoleTool || msgs[i].Content == elidedOutput {
+			continue
+		}
+		if isPlanTool(msgs, i) {
+			continue
+		}
+		msgs[i].Content = elidedOutput
+		return true
+	}
+	return false
+}
+
+func PrepareCall(client *llm.Client, msgs []llm.Message, tools []llm.ToolSpec, intent string) (estimate, maxTokens int, err error) {
+	window := client.ContextWindow()
+	cap := ProfileCap(intent)
+	for {
+		estimate = client.EstimatePromptTokens(msgs, tools)
+		if !shouldElide(estimate, window, cap) {
+			break
+		}
+		if !elideOneTool(msgs) {
+			break
+		}
+	}
+	estimate = client.EstimatePromptTokens(msgs, tools)
+	if window-estimate-contextSafety < minOutputTokens {
+		return estimate, 0, ErrContextOverflow
+	}
+	return estimate, MaxTokensFor(window, estimate, cap), nil
+}
 
 func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	prompt := cfg.Prompt
@@ -193,6 +287,9 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	rec := cfg.Recorder
 	if rec == nil {
 		rec = NopRecorder{}
+	}
+	if _, err := cfg.Client.ResolveModel(ctx); err != nil {
+		return err
 	}
 	msgs := []llm.Message{
 		{Role: llm.RoleSystem, Content: prompt + "\n\n" + systemContext},
@@ -233,7 +330,6 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	}()
 
 	for step := 0; step < analysisLimit(cfg, sourceReads); step++ {
-		elideToolOutputs(msgs, cfg.ContextBudgetTokens)
 		think := cfg.ThinkingPolicy.enabled(planApproved, shellFail)
 		opts := llm.ChatOptions{Thinking: think, Temperature: temp}
 		shellFail = false
@@ -263,6 +359,11 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				stepSpecs = nil
 			}
 		}
+		_, maxTok, err := PrepareCall(cfg.Client, msgs, stepSpecs, cfg.Intent)
+		if err != nil {
+			return err
+		}
+		opts.MaxTokens = maxTok
 		live := ui.StartLive(label)
 		opts.OnProgress = func(p llm.Progress) {
 			live.SetLabel(ProgressLabel(label, p))
@@ -286,7 +387,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			names = append(names, c.Function.Name)
 		}
 		if cfg.Trace {
-			PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, names)
+			PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, cfg.Client.ContextWindow(), names)
 		}
 		msgs = append(msgs, msg)
 		_ = rec.Message(ctx, msg)
@@ -542,10 +643,14 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	note := llm.Message{Role: llm.RoleUser, Content: MaxStepsNote}
 	msgs = append(msgs, note)
 	_ = rec.Message(ctx, note)
+	_, maxTok, prepErr := PrepareCall(cfg.Client, msgs, nil, cfg.Intent)
+	if prepErr != nil {
+		return prepErr
+	}
 	live := ui.StartLive("thinking")
 	t0 := time.Now()
 	msg, usage, err := cfg.Client.Complete(ctx, msgs, nil, llm.ChatOptions{
-		Thinking: false, Temperature: temp,
+		Thinking: false, Temperature: temp, MaxTokens: maxTok,
 		OnProgress: func(p llm.Progress) { live.SetLabel(ProgressLabel("thinking", p)) },
 	})
 	live.Stop()
@@ -603,40 +708,6 @@ func displayMeta(r tools.Result) string {
 		s = s[:i]
 	}
 	return s
-}
-
-func tokenEstimate(msgs []llm.Message) int {
-	n := 0
-	for _, m := range msgs {
-		n += len(m.Content)
-		for _, c := range m.ToolCalls {
-			n += len(c.Function.Name) + len(c.Function.Arguments)
-		}
-	}
-	return n / 4
-}
-
-func elideToolOutputs(msgs []llm.Message, budget int) {
-	if budget <= 0 {
-		return
-	}
-	for tokenEstimate(msgs) > budget {
-		limit := len(msgs) - 6
-		if limit <= 0 {
-			return
-		}
-		idx := -1
-		for i := 0; i < limit; i++ {
-			if msgs[i].Role == llm.RoleTool && msgs[i].Content != elidedOutput {
-				idx = i
-				break
-			}
-		}
-		if idx < 0 {
-			return
-		}
-		msgs[idx].Content = elidedOutput
-	}
 }
 
 func canonicalJSON(raw string) string {
