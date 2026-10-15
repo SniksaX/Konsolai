@@ -11,8 +11,10 @@ import (
 	"testing"
 
 	"github.com/siraj/konsolai/internal/agent"
+	"github.com/siraj/konsolai/internal/config"
 	"github.com/siraj/konsolai/internal/intent"
 	"github.com/siraj/konsolai/internal/llm"
+	"github.com/siraj/konsolai/internal/memory"
 )
 
 func TestParseArgs(t *testing.T) {
@@ -248,5 +250,28 @@ func TestStreamAnswerRetryThenEmpty(t *testing.T) {
 	out, _, err = streamAnswer(context.Background(), c, []llm.Message{{Role: llm.RoleUser, Content: "q"}}, false, true)
 	if err != nil || out != "hi" {
 		t.Fatalf("retry %q %v", out, err)
+	}
+}
+
+func TestResumeSessionLocalFallback(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	cwd := "/tmp/kf"
+	if err := memory.SaveLast(memory.LastSession{
+		Profile:  "default",
+		CWD:      cwd,
+		Title:    "quel process",
+		Messages: []llm.Message{{Role: llm.RoleUser, Content: "port 3000"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mem := memory.NewGuard(nil, nil)
+	prof := config.Profile{Name: "default", SessionIdleMinutes: 30}
+	id, hist := resumeSession(context.Background(), mem, prof, nil, cwd, invocation{})
+	if id != "" || len(hist) != 1 || hist[0].Content != "port 3000" {
+		t.Fatalf("%q %+v", id, hist)
+	}
+	_, hist = resumeSession(context.Background(), mem, prof, nil, cwd, invocation{New: true})
+	if len(hist) != 0 {
+		t.Fatalf("new should ignore local: %+v", hist)
 	}
 }
