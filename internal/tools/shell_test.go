@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/siraj/konsolai/internal/safety"
+	"github.com/siraj/konsolai/internal/ui"
 )
 
 func shellToolFor(t *testing.T) Tool {
@@ -154,5 +156,24 @@ func TestShellCancelKillsGrandchild(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("cancel did not return quickly")
+	}
+}
+
+func TestShellRunningSpinner(t *testing.T) {
+	var buf bytes.Buffer
+	restore := ui.TestHook(&buf, true, 5*time.Millisecond, nil)
+	defer restore()
+	old := shellQuietFor
+	shellQuietFor = 20 * time.Millisecond
+	defer func() { shellQuietFor = old }()
+	act, err := shellToolFor(t).Prepare(`{"cmd":"sleep 0.08"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := act.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "running") || !strings.Contains(buf.String(), "\033[?25l") {
+		t.Fatalf("spinner %q", buf.String())
 	}
 }
