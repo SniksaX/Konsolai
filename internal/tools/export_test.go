@@ -3,8 +3,11 @@ package tools
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -97,4 +100,92 @@ func TestExportDocSpinner(t *testing.T) {
 	if !strings.Contains(buf.String(), "exporting") || !strings.Contains(buf.String(), "\033[?25l") {
 		t.Fatalf("spinner %q", buf.String())
 	}
+}
+
+func TestExportPrepareDoesNotRender(t *testing.T) {
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool, _ := NewRegistry(g, nil, nil, nil, nil).Get("export_doc")
+	act, err := tool.Prepare(`{"path":"out.html","format":"html","title":"T","content":"<p>Hi</p>"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ea := act.(*exportDocAction)
+	if ea.newBytes != nil {
+		t.Fatal("render must happen in Run, not Prepare")
+	}
+}
+
+func TestExportDocMermaidRenders(t *testing.T) {
+	if _, err := exec.LookPath("mmdc"); err != nil {
+		t.Skip("mmdc not installed")
+	}
+	if _, err := exec.LookPath("pdftotext"); err != nil {
+		t.Skip("pdftotext not installed")
+	}
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const body = "Architecture\n\n```mermaid\nflowchart TD\n  A[Agent] --> B[Tools]\n```\n\nDone.\n"
+	tool, _ := NewRegistry(g, nil, nil, nil, nil).Get("export_doc")
+	htmlAct, err := tool.Prepare(`{"path":"out.html","format":"html","title":"Arch","content":` + quoteJSON(body) + `}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := htmlAct.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	html, err := os.ReadFile(filepath.Join(root, "out.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(html), "<svg") {
+		t.Fatalf("html missing svg: %s", html[:min(len(html), 400)])
+	}
+	pdfAct, err := tool.Prepare(`{"path":"out.pdf","format":"pdf","title":"Arch","content":` + quoteJSON(body) + `}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pdfAct.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	pdf := filepath.Join(root, "out.pdf")
+	out, err := exec.Command("pdftotext", pdf, "-").CombinedOutput()
+	if err != nil {
+		t.Fatalf("pdftotext: %s %v", out, err)
+	}
+	if !strings.Contains(string(out), "Arch") && !strings.Contains(string(out), "Architecture") {
+		t.Fatalf("pdftotext %q", out)
+	}
+	if _, err := exec.LookPath("pdfimages"); err == nil {
+		list, err := exec.Command("pdfimages", "-list", pdf).CombinedOutput()
+		if err != nil {
+			t.Fatalf("pdfimages: %s %v", list, err)
+		}
+		if !strings.Contains(string(list), "image") && !strings.Contains(string(list), "smask") && !hasPDFImageRow(string(list)) {
+			t.Fatalf("pdfimages -list has no image:\n%s", list)
+		}
+	}
+}
+
+func quoteJSON(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
+func hasPDFImageRow(s string) bool {
+	for _, line := range strings.Split(s, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 2 && fields[0] != "page" {
+			if _, err := strconv.Atoi(fields[0]); err == nil {
+				return true
+			}
+		}
+	}
+	return false
 }
