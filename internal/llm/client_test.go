@@ -45,7 +45,7 @@ func TestCompleteParsesToolCallsAndSendsTools(t *testing.T) {
 			Parameters:  json.RawMessage(`{"type":"object"}`),
 		},
 	}}
-	msg, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, specs, ChatOptions{Thinking: true, Temperature: 0.2})
+	msg, _, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, specs, ChatOptions{Thinking: true, Temperature: 0.2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestCompleteOmitsToolsWhenEmpty(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	c := New(srv.URL+"/v1", "qwen")
-	_, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{})
+	_, _, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestCompleteHTTPError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	c := New(srv.URL+"/v1", "qwen")
-	_, err := c.Complete(context.Background(), nil, nil, ChatOptions{})
+	_, _, err := c.Complete(context.Background(), nil, nil, ChatOptions{})
 	if err == nil || !strings.Contains(err.Error(), "500") {
 		t.Fatalf("got %v", err)
 	}
@@ -120,7 +120,7 @@ func TestCompleteErrorObject(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	c := New(srv.URL+"/v1", "qwen")
-	_, err := c.Complete(context.Background(), nil, nil, ChatOptions{})
+	_, _, err := c.Complete(context.Background(), nil, nil, ChatOptions{})
 	if err == nil || !strings.Contains(err.Error(), "bad model") {
 		t.Fatalf("got %v", err)
 	}
@@ -132,7 +132,7 @@ func TestCompleteEmptyChoices(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	c := New(srv.URL+"/v1", "qwen")
-	_, err := c.Complete(context.Background(), nil, nil, ChatOptions{})
+	_, _, err := c.Complete(context.Background(), nil, nil, ChatOptions{})
 	if err == nil || !strings.Contains(err.Error(), "no choices") {
 		t.Fatalf("got %v", err)
 	}
@@ -152,7 +152,7 @@ func TestStreamDeltasAndDone(t *testing.T) {
 	t.Cleanup(srv.Close)
 	c := New(srv.URL+"/v1", "qwen")
 	var got string
-	err := c.Stream(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, ChatOptions{}, func(d string) error {
+	_, err := c.Stream(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, ChatOptions{}, func(d string) error {
 		got += d
 		return nil
 	})
@@ -171,7 +171,7 @@ func TestStreamErrorChunk(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	c := New(srv.URL+"/v1", "qwen")
-	err := c.Stream(context.Background(), nil, ChatOptions{}, func(string) error { return nil })
+	_, err := c.Stream(context.Background(), nil, ChatOptions{}, func(string) error { return nil })
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("got %v", err)
 	}
@@ -221,7 +221,7 @@ func TestResponseSchemaShape(t *testing.T) {
 	t.Cleanup(srv.Close)
 	schema := json.RawMessage(`{"type":"object","properties":{"intent":{"type":"string"}}}`)
 	c := New(srv.URL+"/v1", "qwen")
-	_, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{
+	_, _, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{
 		ResponseSchema: schema, MaxTokens: 120,
 	})
 	if err != nil {
@@ -251,5 +251,55 @@ func TestResponseSchemaShape(t *testing.T) {
 	var max int
 	if err := json.Unmarshal(raw["max_tokens"], &max); err != nil || max != 120 {
 		t.Fatalf("max_tokens %s", raw["max_tokens"])
+	}
+}
+
+func TestCompleteUsage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(completeResponse{
+			Choices: []struct {
+				Message Message `json:"message"`
+			}{{Message: Message{Role: RoleAssistant, Content: "ok"}}},
+			Usage: &usageJSON{PromptTokens: 1200, CompletionTokens: 80},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL+"/v1", "qwen")
+	_, u, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.PromptTokens != 1200 || u.CompletionTokens != 80 {
+		t.Fatalf("%+v", u)
+	}
+}
+
+func TestStreamUsageAndOptions(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":4100,\"completion_tokens\":300}}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL+"/v1", "qwen")
+	u, err := c.Stream(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, ChatOptions{}, func(string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.PromptTokens != 4100 || u.CompletionTokens != 300 {
+		t.Fatalf("%+v", u)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(gotBody, &raw); err != nil {
+		t.Fatal(err)
+	}
+	var so struct {
+		IncludeUsage bool `json:"include_usage"`
+	}
+	if err := json.Unmarshal(raw["stream_options"], &so); err != nil || !so.IncludeUsage {
+		t.Fatalf("stream_options %s %v", raw["stream_options"], err)
 	}
 }
