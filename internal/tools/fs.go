@@ -35,8 +35,8 @@ func (t *writeFileTool) Spec() llm.ToolSpec {
 		Type: "function",
 		Function: llm.FunctionSpec{
 			Name:        "write_file",
-			Description: "Create or overwrite a UTF-8 text file at path relative to the project root. Parent directories are created. Never use shell heredocs or echo redirection for file contents.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path relative to the project root. Use only for new files; prefer edit_file for existing files."},"content":{"type":"string","description":"Full file contents to write."}},"required":["path","content"]}`),
+			Description: "Create or overwrite a UTF-8 text file at path relative to the current directory. Parent directories are created. Never use shell heredocs or echo redirection for file contents.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path relative to the current directory. Use only for new files; prefer edit_file for existing files."},"content":{"type":"string","description":"Full file contents to write."}},"required":["path","content"]}`),
 		},
 	}
 }
@@ -260,7 +260,7 @@ func (t *listDirTool) Spec() llm.ToolSpec {
 		Function: llm.FunctionSpec{
 			Name:        "list_dir",
 			Description: "List a directory. Directories are suffixed with /. At most 200 entries, sorted by name.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Directory path relative to the project root. Defaults to the root."}}}`),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Directory path relative to the current directory. Defaults to the current directory."}}}`),
 		},
 	}
 }
