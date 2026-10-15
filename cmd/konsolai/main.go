@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
 	"github.com/siraj/konsolai/internal/agent"
 	"github.com/siraj/konsolai/internal/llm"
+	"github.com/siraj/konsolai/internal/repo"
 	"github.com/siraj/konsolai/internal/safety"
 	"github.com/siraj/konsolai/internal/sysctx"
 	"github.com/siraj/konsolai/internal/tools"
@@ -111,7 +114,7 @@ func run() int {
 	if inv.Mode == modeHowto {
 		return runHowto(ctx, client, snap, inv.Request)
 	}
-	return runAgent(ctx, client, snap, inv.Request, inv.Yes)
+	return runAgent(ctx, client, snap, inv)
 }
 
 func runHowto(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, query string) int {
@@ -137,32 +140,55 @@ func runHowto(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, que
 	return 0
 }
 
-func runAgent(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, task string, yes bool) int {
+func runAgent(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, inv invocation) int {
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "konsolai:", err)
 		return 1
 	}
-	guard, err := safety.New(cwd)
+	root := cwd
+	if inv.Mode == modeCode {
+		root = repo.Root(cwd)
+	}
+	guard, err := safety.New(root)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "konsolai:", err)
 		return 1
 	}
-	prompter, err := ui.OpenPrompter(yes)
+	prompter, err := ui.OpenPrompter(inv.Yes)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "konsolai:", err)
 		return 1
 	}
 	defer prompter.Close()
 
-	err = agent.Run(ctx, agent.Config{
-		Client:    client,
-		Tools:     tools.NewRegistry(guard, os.Stdout, nil),
-		Confirmer: prompter,
-		Out:       os.Stdout,
-		MaxSteps:  15,
-		Thinking:  false,
-	}, snap.String(), task)
+	lister := func(ctx context.Context) ([]string, error) {
+		return repo.Files(ctx, root)
+	}
+	cfg := agent.Config{
+		Client:              client,
+		Tools:               tools.NewRegistry(guard, os.Stdout, lister),
+		Confirmer:           prompter,
+		Out:                 os.Stdout,
+		ContextBudgetTokens: 60000,
+	}
+	sys := snap.String()
+	if inv.Mode == modeCode {
+		cfg.Prompt = agent.CodePrompt
+		cfg.Thinking = true
+		cfg.Temperature = 0.3
+		cfg.MaxSteps = 60
+		cfg.RequirePlan = true
+		sys = codeContext(ctx, snap, root)
+	} else {
+		cfg.Thinking = false
+		cfg.MaxSteps = 15
+	}
+
+	err = agent.Run(ctx, cfg, sys, inv.Request)
+	if inv.Mode == modeCode {
+		printDiffStat(root)
+	}
 	if err == nil {
 		return 0
 	}
@@ -177,6 +203,58 @@ func runAgent(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, tas
 	}
 	fmt.Fprintln(os.Stderr, "konsolai:", err)
 	return 1
+}
+
+func codeContext(ctx context.Context, snap sysctx.Snapshot, root string) string {
+	var b strings.Builder
+	b.WriteString(snap.String())
+	b.WriteString("\n\nrepo root: ")
+	b.WriteString(root)
+	proj := repo.Detect(root)
+	if len(proj.Kinds) > 0 {
+		b.WriteString("\nproject kinds: ")
+		b.WriteString(strings.Join(proj.Kinds, ", "))
+	}
+	if len(proj.Commands) > 0 {
+		b.WriteString("\nproject commands:\n")
+		for _, c := range proj.Commands {
+			b.WriteString("- ")
+			b.WriteString(c)
+			b.WriteByte('\n')
+		}
+	}
+	files, err := repo.Files(ctx, root)
+	if err == nil {
+		if m := repo.Map(files, 120); m != "" {
+			b.WriteString("\nrepo map:\n")
+			b.WriteString(m)
+			b.WriteByte('\n')
+		}
+	}
+	instr, err := repo.Instructions(root)
+	if err == nil && instr != "" {
+		b.WriteString("\nproject instructions:\n")
+		b.WriteString(instr)
+		if !strings.HasSuffix(instr, "\n") {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
+func printDiffStat(root string) {
+	if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
+		return
+	}
+	out, err := exec.Command("git", "-C", root, "diff", "--stat").Output()
+	if err != nil {
+		return
+	}
+	s := strings.TrimRight(string(out), "\n")
+	if s == "" {
+		return
+	}
+	fmt.Fprintln(os.Stdout, ui.Dim(s))
 }
 
 func envOr(key, fallback string) string {
