@@ -760,6 +760,24 @@ func TestInPlanCmdSegments(t *testing.T) {
 	if !inPlanCmd([]string{"ss -ltnp | grep 80"}, "ss -ltnp | grep 80") {
 		t.Fatal("declared pipeline should match")
 	}
+	if !inPlanCmd([]string{"tsc --init"}, "npx tsc --init") {
+		t.Fatal("npx tsc --init should match tsc --init")
+	}
+	if !inPlanCmd([]string{"npx tsc --init"}, "tsc --init") {
+		t.Fatal("tsc --init should match npx tsc --init")
+	}
+	if !inPlanCmd([]string{"tsc --init"}, "npx -y tsc --init") {
+		t.Fatal("npx -y should match")
+	}
+	if !inPlanCmd([]string{"tsc --init"}, "pnpm exec tsc --init") {
+		t.Fatal("pnpm exec should match")
+	}
+	if !inPlanCmd([]string{"tsc --init"}, "yarn tsc --init") {
+		t.Fatal("yarn bin should match")
+	}
+	if inPlanCmd([]string{"tsc --init"}, "yarn install") {
+		t.Fatal("yarn install is not a bin wrapper")
+	}
 }
 
 func TestInPlanAndJoinAutoApprove(t *testing.T) {
