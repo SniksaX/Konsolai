@@ -256,6 +256,59 @@ func elideOneTool(msgs []llm.Message) bool {
 	return false
 }
 
+func lastUserTask(msgs []llm.Message, task string) int {
+	idx := -1
+	for i, m := range msgs {
+		if m.Role == llm.RoleUser && m.Content == task {
+			idx = i
+		}
+	}
+	return idx
+}
+
+func aggressiveTrim(msgs []llm.Message, userIdx int) []llm.Message {
+	if len(msgs) == 0 {
+		return msgs
+	}
+	keep := make([]bool, len(msgs))
+	if msgs[0].Role == llm.RoleSystem {
+		keep[0] = true
+	}
+	if userIdx >= 0 && userIdx < len(msgs) {
+		keep[userIdx] = true
+	}
+	for i, m := range msgs {
+		if m.Role != llm.RoleTool || !isPlanTool(msgs, i) {
+			continue
+		}
+		keep[i] = true
+		for j := i - 1; j >= 0; j-- {
+			if msgs[j].Role == llm.RoleAssistant {
+				keep[j] = true
+				break
+			}
+		}
+	}
+	start := len(msgs) - 4
+	if start < 0 {
+		start = 0
+	}
+	for i := start; i < len(msgs); i++ {
+		keep[i] = true
+	}
+	out := make([]llm.Message, 0, len(msgs))
+	for i, m := range msgs {
+		if !keep[i] {
+			continue
+		}
+		if m.Role == llm.RoleTool && len(m.Content) > 400 {
+			m.Content = m.Content[:400]
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
 func PrepareCall(client *llm.Client, msgs []llm.Message, tools []llm.ToolSpec, intent string) (estimate, maxTokens int, err error) {
 	window := client.ContextWindow()
 	cap := ProfileCap(intent)
@@ -297,6 +350,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	msgs = append(msgs, cfg.History...)
 	userMsg := llm.Message{Role: llm.RoleUser, Content: task}
 	msgs = append(msgs, userMsg)
+	userIdx := len(msgs) - 1
 	_ = rec.Message(ctx, userMsg)
 	specs := cfg.Tools.Specs()
 	seenFail := make(map[string]struct{})
@@ -372,6 +426,28 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		msg, usage, err := cfg.Client.Complete(ctx, msgs, stepSpecs, opts)
 		modelElapsed := time.Since(t0)
 		live.Stop()
+		if errors.Is(err, llm.ErrTruncated) {
+			msgs = aggressiveTrim(msgs, userIdx)
+			userIdx = lastUserTask(msgs, task)
+			est := cfg.Client.EstimatePromptTokens(msgs, stepSpecs)
+			window := cfg.Client.ContextWindow()
+			room := window - est - contextSafety
+			if room < minOutputTokens {
+				return ErrContextOverflow
+			}
+			opts.MaxTokens = room
+			live = ui.StartLive(label)
+			opts.OnProgress = func(p llm.Progress) {
+				live.SetLabel(ProgressLabel(label, p))
+			}
+			t0 = time.Now()
+			msg, usage, err = cfg.Client.Complete(ctx, msgs, stepSpecs, opts)
+			modelElapsed += time.Since(t0)
+			live.Stop()
+			if errors.Is(err, llm.ErrTruncated) {
+				return ErrContextOverflow
+			}
+		}
 		if err != nil {
 			return err
 		}
