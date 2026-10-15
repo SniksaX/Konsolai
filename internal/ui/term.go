@@ -1,14 +1,9 @@
 package ui
 
 import (
-	"fmt"
 	"io"
 	"os"
-	"sync"
-	"time"
 )
-
-const statusDelay = 300 * time.Millisecond
 
 func stdoutTTY() bool {
 	fi, err := os.Stdout.Stat()
@@ -33,37 +28,6 @@ func Yellow(s string) string { return wrap("33", s) }
 func Cyan(s string) string   { return wrap("36", s) }
 
 func Status(w io.Writer, msg string) (clear func()) {
-	if !stdoutTTY() {
-		return func() {}
-	}
-	var (
-		mu    sync.Mutex
-		shown bool
-		once  sync.Once
-	)
-	stop := make(chan struct{})
-	go func() {
-		t := time.NewTimer(statusDelay)
-		defer t.Stop()
-		select {
-		case <-t.C:
-			mu.Lock()
-			if !shown {
-				fmt.Fprint(w, Dim(msg))
-				shown = true
-			}
-			mu.Unlock()
-		case <-stop:
-		}
-	}()
-	return func() {
-		once.Do(func() {
-			close(stop)
-			mu.Lock()
-			if shown {
-				fmt.Fprint(w, "\r\033[K")
-			}
-			mu.Unlock()
-		})
-	}
+	_ = w
+	return Start(msg)
 }
