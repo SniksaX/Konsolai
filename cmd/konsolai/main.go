@@ -19,6 +19,8 @@ import (
 	"github.com/siraj/konsolai/internal/ui"
 )
 
+var _ agent.Confirmer = (*ui.Prompter)(nil)
+
 const (
 	defaultEndpoint = "http://fatboy:11436/v1"
 
@@ -114,12 +116,12 @@ func runAgent(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, tas
 	defer prompter.Close()
 
 	err = agent.Run(ctx, agent.Config{
-		Client:   client,
-		Tools:    tools.NewRegistry(guard, os.Stdout),
-		Prompter: prompter,
-		Out:      os.Stdout,
-		MaxSteps: 15,
-		Thinking: false,
+		Client:    client,
+		Tools:     tools.NewRegistry(guard, os.Stdout),
+		Confirmer: prompter,
+		Out:       os.Stdout,
+		MaxSteps:  15,
+		Thinking:  false,
 	}, snap.String(), task)
 	if err == nil {
 		return 0
