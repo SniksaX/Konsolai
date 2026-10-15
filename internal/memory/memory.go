@@ -35,8 +35,19 @@ type Guard struct {
 	onFail   func(error)
 }
 
+func isNilBackend(s Backend) bool {
+	if s == nil {
+		return true
+	}
+	st, ok := s.(*store.Store)
+	return ok && st == nil
+}
+
 func NewGuard(s Backend, onFail func(error)) *Guard {
-	return &Guard{store: s, onFail: onFail, disabled: s == nil}
+	if isNilBackend(s) {
+		return &Guard{onFail: onFail, disabled: true}
+	}
+	return &Guard{store: s, onFail: onFail}
 }
 
 func (g *Guard) Disabled() bool {
@@ -61,7 +72,7 @@ func (g *Guard) Store() *store.Store {
 func (g *Guard) live() Backend {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.disabled {
+	if g.disabled || isNilBackend(g.store) {
 		return nil
 	}
 	return g.store
