@@ -105,5 +105,12 @@ func (a *editFileAction) Run(ctx context.Context) (Result, error) {
 	return Result{
 		Output: fmt.Sprintf("edited %s (+%d -%d)", a.display, add, rem),
 		Meta:   fmt.Sprintf("+%d -%d", add, rem),
+		Change: &FileChange{
+			Path:          a.display,
+			ExistedBefore: true,
+			Before:        []byte(a.oldText),
+			AfterHash:     fileSHA256([]byte(a.newText)),
+			Diff:          diff.Unified(a.display, a.oldText, a.newText, 3),
+		},
 	}, nil
 }
