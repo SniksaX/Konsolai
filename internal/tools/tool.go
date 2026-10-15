@@ -104,7 +104,7 @@ func NewRegistry(g *safety.Guard, out io.Writer, files FileLister, cache WebCach
 		newReadFile(g),
 		newListDir(g),
 		newSearch(g, files),
-		newFindFiles(files),
+		newFindFiles(g, files),
 		newEditFile(g),
 		newProposePlan(),
 		newRemember(facts),
