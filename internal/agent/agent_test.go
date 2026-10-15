@@ -37,6 +37,7 @@ type replay struct {
 	mu      sync.Mutex
 	replies []llm.Message
 	reqs    [][]llm.Message
+	think   []bool
 }
 
 func newReplay(t *testing.T, replies []llm.Message) (*llm.Client, *replay) {
@@ -51,7 +52,10 @@ func newReplay(t *testing.T, replies []llm.Message) (*llm.Client, *replay) {
 
 func (r *replay) serve(w http.ResponseWriter, req *http.Request) {
 	var body struct {
-		Messages []llm.Message `json:"messages"`
+		Messages           []llm.Message `json:"messages"`
+		ChatTemplateKwargs struct {
+			EnableThinking bool `json:"enable_thinking"`
+		} `json:"chat_template_kwargs"`
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -59,6 +63,7 @@ func (r *replay) serve(w http.ResponseWriter, req *http.Request) {
 	}
 	r.mu.Lock()
 	r.reqs = append(r.reqs, body.Messages)
+	r.think = append(r.think, body.ChatTemplateKwargs.EnableThinking)
 	i := len(r.reqs) - 1
 	r.mu.Unlock()
 	if i >= len(r.replies) {
@@ -577,5 +582,32 @@ func TestFailedReadDirShowsMeta(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "is a directory") {
 		t.Fatalf("want meta, got %q", buf.String())
+	}
+}
+
+func TestUntilPlanThinkingSchedule(t *testing.T) {
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "list_dir", `{"path":"."}`)),
+		assistant(call("2", "propose_plan", `{"summary":"add a.txt","steps":["write","test"],"files":["a.txt"]}`)),
+		assistant(call("3", "write_file", `{"path":"a.txt","content":"x"}`)),
+		assistant(call("4", "run_shell", `{"cmd":"false"}`)),
+		assistant(call("5", "write_file", `{"path":"a.txt","content":"y"}`)),
+		assistant(call("6", "finish", `{"summary":"done"}`)),
+	}, stubConfirm{d: ui.Approve}, Config{
+		RequirePlan:    true,
+		AutoApprove:    true,
+		ThinkingPolicy: ThinkUntilPlan,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []bool{true, true, false, false, true, false}
+	if len(rep.think) != len(want) {
+		t.Fatalf("think calls %v want %v", rep.think, want)
+	}
+	for i, g := range rep.think {
+		if g != want[i] {
+			t.Fatalf("think[%d]=%v want %v (%v)", i, g, want[i], rep.think)
+		}
 	}
 }
