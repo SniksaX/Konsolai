@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -42,6 +43,7 @@ func (NopRecorder) FileChange(context.Context, tools.FileChange) error { return 
 
 type Confirmer interface {
 	Confirm(summary, preview string) (ui.Decision, string, error)
+	ConfirmForced(summary, preview string) (ui.Decision, string, error)
 }
 
 type Config struct {
@@ -58,11 +60,14 @@ type Config struct {
 	Recorder            Recorder
 	History             []llm.Message
 	AutoApprove         bool
+	ExploreBudget       int
+	ExploreNote         string
 }
 
 var (
 	ErrAborted  = errors.New("agent: aborted")
 	ErrMaxSteps = errors.New("agent: max steps exceeded")
+	ErrNoAnswer = errors.New("agent: no answer")
 )
 
 const elidedOutput = "[output elided to save context]"
@@ -70,7 +75,7 @@ const elidedOutput = "[output elided to save context]"
 func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	prompt := cfg.Prompt
 	if prompt == "" {
-		prompt = systemPrompt
+		prompt = ActPrompt
 	}
 	temp := cfg.Temperature
 	if temp == 0 {
@@ -90,7 +95,10 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	opts := llm.ChatOptions{Thinking: cfg.Thinking, Temperature: temp}
 	specs := cfg.Tools.Specs()
 	seenFail := make(map[string]struct{})
+	seenRead := make(map[string]struct{})
 	planApproved := false
+	var planFiles []string
+	explore := 0
 
 	for step := 0; step < cfg.MaxSteps; step++ {
 		elideToolOutputs(msgs, cfg.ContextBudgetTokens)
@@ -104,9 +112,11 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		_ = rec.Message(ctx, msg)
 
 		if len(msg.ToolCalls) == 0 {
-			if text := trimLeadingBlanks(msg.Content); strings.TrimSpace(text) != "" {
-				fmt.Fprintln(cfg.Out, text)
+			text := trimLeadingBlanks(msg.Content)
+			if strings.TrimSpace(text) == "" {
+				return ErrNoAnswer
 			}
+			fmt.Fprintln(cfg.Out, text)
 			return nil
 		}
 		if text := trimLeadingBlanks(msg.Content); strings.TrimSpace(text) != "" {
@@ -155,8 +165,26 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				continue
 			}
 			decision := "auto"
+			summary := action.Summary()
+			outside := false
+			if kind == tools.Mutating && cfg.RequirePlan && planApproved {
+				if p, ok := filePathOf(action); ok && !inPlan(planFiles, p) {
+					outside = true
+					summary = "⚠ outside plan: " + summary
+				}
+			}
 			if kind != tools.ReadOnly && kind != tools.Final {
-				d, reason, err := cfg.Confirmer.Confirm(action.Summary(), action.Preview())
+				var d ui.Decision
+				var reason string
+				var err error
+				if outside && !cfg.AutoApprove {
+					d, reason, err = cfg.Confirmer.ConfirmForced(summary, action.Preview())
+				} else {
+					if outside && cfg.AutoApprove {
+						fmt.Fprintln(cfg.Out, ui.Yellow(summary))
+					}
+					d, reason, err = cfg.Confirmer.Confirm(summary, action.Preview())
+				}
 				if err != nil {
 					return err
 				}
@@ -180,6 +208,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					}
 					if kind == tools.Plan {
 						planApproved = true
+						planFiles = planFilesOf(action)
 					}
 				case ui.ApproveAll:
 					decision = "approved_all"
@@ -188,12 +217,29 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					}
 					if kind == tools.Plan {
 						planApproved = true
+						planFiles = planFilesOf(action)
 					}
 				}
 			}
 			finish := action.Kind() == tools.Final
+			if kind == tools.ReadOnly {
+				key := call.Function.Name + "\x00" + canonicalJSON(call.Function.Arguments)
+				if _, dup := seenRead[key]; dup {
+					if !finish {
+						fmt.Fprintln(cfg.Out, ui.Cyan("▸ ")+summary+" (duplicate, skipped)")
+					}
+					tm := llm.Message{
+						Role: llm.RoleTool, Content: "note: you already made this exact call; its result is above.",
+						ToolCallID: call.ID,
+					}
+					msgs = append(msgs, tm)
+					_ = rec.Message(ctx, tm)
+					continue
+				}
+				seenRead[key] = struct{}{}
+			}
 			if !finish {
-				fmt.Fprintln(cfg.Out, ui.Cyan("▸ ")+action.Summary())
+				fmt.Fprintln(cfg.Out, ui.Cyan("▸ ")+summary)
 			}
 			start := time.Now()
 			result, err := action.Run(ctx)
@@ -209,8 +255,12 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				_ = rec.FileChange(ctx, *result.Change)
 			}
 			if result.Final {
+				text := trimLeadingBlanks(result.Output)
+				if strings.TrimSpace(text) == "" {
+					return ErrNoAnswer
+				}
 				fmt.Fprintln(cfg.Out)
-				fmt.Fprintln(cfg.Out, ui.Bold(trimLeadingBlanks(result.Output)))
+				fmt.Fprintln(cfg.Out, ui.Bold(text))
 				return nil
 			}
 			mark := ui.Green("✓")
@@ -219,6 +269,16 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			}
 			fmt.Fprintf(cfg.Out, "%s %s · %s\n", mark, displayMeta(result), formatDuration(elapsed))
 			content := result.Output
+			if kind == tools.ReadOnly {
+				if !cfg.RequirePlan || !planApproved {
+					explore++
+				}
+			} else if kind != tools.Plan {
+				explore = 0
+			}
+			if cfg.ExploreBudget > 0 && explore >= cfg.ExploreBudget && cfg.ExploreNote != "" {
+				content += "\n\n" + cfg.ExploreNote
+			}
 			if result.IsError {
 				sum := sha256.Sum256([]byte(result.Output))
 				key := call.Function.Name + call.Function.Arguments + string(sum[:])
@@ -292,4 +352,44 @@ func elideToolOutputs(msgs []llm.Message, budget int) {
 		}
 		msgs[idx].Content = elidedOutput
 	}
+}
+
+func canonicalJSON(raw string) string {
+	var v any
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		return raw
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return raw
+	}
+	return string(b)
+}
+
+func filePathOf(a tools.Action) (string, bool) {
+	type hasPath interface{ FilePath() string }
+	p, ok := a.(hasPath)
+	if !ok {
+		return "", false
+	}
+	return p.FilePath(), true
+}
+
+func planFilesOf(a tools.Action) []string {
+	type hasFiles interface{ PlanFiles() []string }
+	p, ok := a.(hasFiles)
+	if !ok {
+		return nil
+	}
+	return p.PlanFiles()
+}
+
+func inPlan(files []string, path string) bool {
+	path = strings.TrimPrefix(filepath.ToSlash(path), "./")
+	for _, f := range files {
+		if strings.TrimPrefix(filepath.ToSlash(f), "./") == path {
+			return true
+		}
+	}
+	return false
 }
