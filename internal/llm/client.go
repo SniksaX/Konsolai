@@ -102,8 +102,21 @@ func (c *Client) ResolveModel(ctx context.Context) (string, error) {
 }
 
 type ChatOptions struct {
-	Thinking    bool
-	Temperature float64
+	Thinking       bool
+	Temperature    float64
+	MaxTokens      int
+	ResponseSchema json.RawMessage
+}
+
+type responseFormat struct {
+	Type       string         `json:"type"`
+	JSONSchema jsonSchemaSpec `json:"json_schema"`
+}
+
+type jsonSchemaSpec struct {
+	Name   string          `json:"name"`
+	Schema json.RawMessage `json:"schema"`
+	Strict bool            `json:"strict"`
 }
 
 type chatRequest struct {
@@ -111,9 +124,11 @@ type chatRequest struct {
 	Messages           []Message          `json:"messages"`
 	Stream             bool               `json:"stream"`
 	Temperature        float64            `json:"temperature"`
+	MaxTokens          int                `json:"max_tokens,omitempty"`
 	ChatTemplateKwargs chatTemplateKwargs `json:"chat_template_kwargs"`
 	Tools              []ToolSpec         `json:"tools,omitempty"`
 	ToolChoice         string             `json:"tool_choice,omitempty"`
+	ResponseFormat     *responseFormat    `json:"response_format,omitempty"`
 }
 
 type completeResponse struct {
@@ -151,11 +166,22 @@ func (c *Client) Complete(ctx context.Context, msgs []Message, tools []ToolSpec,
 		Messages:           msgs,
 		Stream:             false,
 		Temperature:        opts.Temperature,
+		MaxTokens:          opts.MaxTokens,
 		ChatTemplateKwargs: chatTemplateKwargs{EnableThinking: opts.Thinking},
 	}
 	if len(tools) > 0 {
 		reqBody.Tools = tools
 		reqBody.ToolChoice = "auto"
+	}
+	if len(opts.ResponseSchema) > 0 {
+		reqBody.ResponseFormat = &responseFormat{
+			Type: "json_schema",
+			JSONSchema: jsonSchemaSpec{
+				Name:   "out",
+				Schema: opts.ResponseSchema,
+				Strict: true,
+			},
+		}
 	}
 	payload, err := json.Marshal(reqBody)
 	if err != nil {
