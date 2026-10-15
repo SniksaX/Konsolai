@@ -35,12 +35,13 @@ func (s stubConfirm) ConfirmForced(summary, preview string) (ui.Decision, string
 }
 
 type replay struct {
-	t       *testing.T
-	mu      sync.Mutex
-	replies []llm.Message
-	reqs    [][]llm.Message
-	tools   [][]llm.ToolSpec
-	think   []bool
+	t           *testing.T
+	mu          sync.Mutex
+	replies     []llm.Message
+	reqs        [][]llm.Message
+	tools       [][]llm.ToolSpec
+	think       []bool
+	toolChoices []json.RawMessage
 }
 
 func newReplay(t *testing.T, replies []llm.Message) (*llm.Client, *replay) {
@@ -55,8 +56,9 @@ func newReplay(t *testing.T, replies []llm.Message) (*llm.Client, *replay) {
 
 func (r *replay) serve(w http.ResponseWriter, req *http.Request) {
 	var body struct {
-		Messages           []llm.Message  `json:"messages"`
-		Tools              []llm.ToolSpec `json:"tools"`
+		Messages           []llm.Message   `json:"messages"`
+		Tools              []llm.ToolSpec  `json:"tools"`
+		ToolChoice         json.RawMessage `json:"tool_choice"`
 		ChatTemplateKwargs struct {
 			EnableThinking bool `json:"enable_thinking"`
 		} `json:"chat_template_kwargs"`
@@ -68,6 +70,7 @@ func (r *replay) serve(w http.ResponseWriter, req *http.Request) {
 	r.mu.Lock()
 	r.reqs = append(r.reqs, body.Messages)
 	r.tools = append(r.tools, body.Tools)
+	r.toolChoices = append(r.toolChoices, body.ToolChoice)
 	r.think = append(r.think, body.ChatTemplateKwargs.EnableThinking)
 	i := len(r.reqs) - 1
 	r.mu.Unlock()
@@ -881,6 +884,43 @@ func TestHardExploreStopBuildKeepsProposePlan(t *testing.T) {
 	if len(rep.tools[3]) != 1 || rep.tools[3][0].Function.Name != "propose_plan" {
 		t.Fatalf("forced build tools %+v", rep.tools[3])
 	}
+	var choice struct {
+		Type     string `json:"type"`
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(rep.toolChoices[3], &choice); err != nil || choice.Type != "function" || choice.Function.Name != "propose_plan" {
+		t.Fatalf("tool_choice %s", rep.toolChoices[3])
+	}
+	found := false
+	for _, m := range rep.reqs[3] {
+		if m.Role == llm.RoleUser && m.Content == ForcedPlanNote {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("missing forced plan note")
+	}
+}
+
+func TestForcedPlanDiscardsText(t *testing.T) {
+	var out bytes.Buffer
+	_, _, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "list_dir", `{"path":"."}`)),
+		assistant(call("2", "list_dir", `{"path":"."}`)),
+		assistant(call("3", "list_dir", `{"path":"."}`)),
+		{Role: llm.RoleAssistant, Content: "I will now plan", ToolCalls: []llm.ToolCall{
+			call("4", "propose_plan", `{"summary":"x","steps":["y"],"files":["a.txt"]}`),
+		}},
+		assistant(call("5", "finish", `{"summary":"done"}`)),
+	}, stubConfirm{d: ui.Approve}, Config{RequirePlan: true, ExploreBudget: 1, ExploreNote: ExploreNoteBuild, MaxSteps: 8, Out: &out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "I will now plan") {
+		t.Fatalf("forced plan text should be discarded: %q", out.String())
+	}
 }
 
 func TestMaxStepsPrintsSummary(t *testing.T) {
@@ -1117,5 +1157,36 @@ func TestExploreBudgetForDocs(t *testing.T) {
 	}
 	if ExploreBudgetFor("build", "docs") != 16 {
 		t.Fatal("docs budget")
+	}
+}
+
+func TestDocsNudgeFiresOnce(t *testing.T) {
+	var out bytes.Buffer
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "propose_plan", `{"summary":"write overview","steps":["write docs/OVERVIEW.md"],"files":["docs/OVERVIEW.md"]}`)),
+		{Role: llm.RoleAssistant, Content: "Here is the overview in chat."},
+		assistant(call("2", "write_file", `{"path":"docs/OVERVIEW.md","content":"# Overview\n"}`)),
+		{Role: llm.RoleAssistant, Content: "wrote the file"},
+	}, stubConfirm{d: ui.Approve}, Config{RequirePlan: true, Task: "docs", Out: &out, MaxSteps: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	if len(rep.reqs) == 0 {
+		t.Fatal("no requests")
+	}
+	for _, m := range rep.reqs[len(rep.reqs)-1] {
+		if m.Role == llm.RoleUser && m.Content == DocsFileNote {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("nudge count %d in last request", n)
+	}
+	if !strings.Contains(out.String(), "wrote the file") {
+		t.Fatalf("want final answer after nudge: %q", out.String())
+	}
+	if strings.Contains(out.String(), "Here is the overview in chat") {
+		t.Fatalf("pre-nudge text should not finish: %q", out.String())
 	}
 }
