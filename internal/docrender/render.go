@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -170,11 +171,32 @@ func renderMermaid(ctx context.Context, dir string, index int, src string) ([]by
 	return svg, nil
 }
 
+var (
+	reSVGComment  = regexp.MustCompile(`(?s)<!--.*?-->`)
+	reSVGMeta     = regexp.MustCompile(`(?is)<metadata\b[^>]*>.*?</metadata>`)
+	reSVGTitle    = regexp.MustCompile(`(?is)<title\b[^>]*>.*?</title>`)
+	reSVGDesc     = regexp.MustCompile(`(?is)<desc\b[^>]*>.*?</desc>`)
+	reSVGStyle    = regexp.MustCompile(`(?is)<style\b[^>]*>.*?</style>`)
+	reSVGFontFam  = regexp.MustCompile(`font-family\s*:\s*[^;}"']+`)
+	svgFontFamily = `font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif`
+)
+
 func inlineSVG(raw []byte) string {
 	s := string(raw)
 	if i := strings.Index(s, "<svg"); i >= 0 {
 		s = s[i:]
 	}
+	s = reSVGComment.ReplaceAllString(s, "")
+	s = reSVGMeta.ReplaceAllString(s, "")
+	s = reSVGTitle.ReplaceAllString(s, "")
+	s = reSVGDesc.ReplaceAllString(s, "")
+	s = reSVGStyle.ReplaceAllStringFunc(s, func(block string) string {
+		if strings.Contains(strings.ToLower(block), "@font-face") {
+			return ""
+		}
+		return reSVGFontFam.ReplaceAllString(block, svgFontFamily)
+	})
+	s = reSVGFontFam.ReplaceAllString(s, svgFontFamily)
 	return s
 }
 
