@@ -652,6 +652,7 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 		RouterTime:          routerTime,
 		Err:                 os.Stderr,
 		Plain:               inv.Plain,
+		Task:                string(dec.Task),
 	}
 	sys := snap.String() + facts
 	sub := ""
@@ -663,22 +664,21 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 		cfg.Tools = reg.Named("list_dir", "read_file", "outline", "search", "find_files", "web_fetch", "run_shell", "finish")
 		cfg.Prompt = agent.LookupPrompt + "\n" + lang + sub
 		cfg.MaxSteps = 10
-		cfg.ExploreBudget = 6
+		cfg.ExploreBudget = agent.ExploreBudgetFor("lookup", string(dec.Task))
 		cfg.ExploreNote = agent.ExploreNoteLookup
-		cfg.Task = string(dec.Task)
 	case intent.Build:
 		cfg.Prompt = agent.CodePrompt + "\n" + lang + "\n" + agent.ScopeRule + sub
 		cfg.Temperature = 0.3
 		cfg.MaxSteps = 60
 		cfg.RequirePlan = true
-		cfg.ExploreBudget = 12
+		cfg.ExploreBudget = agent.ExploreBudgetFor("build", string(dec.Task))
 		cfg.ExploreNote = agent.ExploreNoteBuild
 		sys = codeContext(ctx, snap, root) + facts
 	default:
 		cfg.Prompt = agent.ActPrompt + "\n" + lang + "\n" + agent.ScopeRule + sub
 		cfg.RequirePlan = true
 		cfg.MaxSteps = 15
-		cfg.ExploreBudget = 6
+		cfg.ExploreBudget = agent.ExploreBudgetFor("act", string(dec.Task))
 		cfg.ExploreNote = agent.ExploreNoteLookup
 	}
 
