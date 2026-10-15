@@ -23,6 +23,7 @@ var _ agent.Confirmer = (*ui.Prompter)(nil)
 
 const (
 	defaultEndpoint = "http://fatboy:11436/v1"
+	usageText       = `usage: konsolai [--yes] [howto|do|code] "<request>"`
 
 	howtoSystemPrompt = `You are Konsolai, a terminal assistant running inside the user's shell.
 Answer with the exact command(s) that accomplish the request in a single bash code block,
@@ -31,30 +32,69 @@ Prefer tools present on a default install of the user's OS. Use paths relative t
 If the request is destructive or ambiguous, say so in one line. No preamble, no closing remarks.`
 )
 
+type mode int
+
+const (
+	modeDo mode = iota
+	modeHowto
+	modeCode
+)
+
+type invocation struct {
+	Mode    mode
+	Request string
+	Yes     bool
+}
+
+var errRequest = errors.New(`request must be a single argument in double quotes, e.g. konsolai code "add a /health endpoint"`)
+
+func parseArgs(args []string) (invocation, error) {
+	if len(args) > 0 && args[0] == "--" {
+		args = args[1:]
+	}
+	fs := flag.NewFlagSet("konsolai", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	yes := fs.Bool("yes", false, "auto-approve non-denylisted actions")
+	if err := fs.Parse(args); err != nil {
+		return invocation{}, err
+	}
+	rest := fs.Args()
+	if len(rest) == 0 {
+		return invocation{}, errRequest
+	}
+	inv := invocation{Mode: modeDo, Yes: *yes}
+	switch rest[0] {
+	case "howto":
+		inv.Mode = modeHowto
+		rest = rest[1:]
+	case "do":
+		inv.Mode = modeDo
+		rest = rest[1:]
+	case "code":
+		inv.Mode = modeCode
+		rest = rest[1:]
+	}
+	if len(rest) != 1 {
+		return invocation{}, errRequest
+	}
+	if strings.TrimSpace(rest[0]) == "" {
+		return invocation{}, errRequest
+	}
+	inv.Request = rest[0]
+	return inv, nil
+}
+
 func main() {
 	os.Exit(run())
 }
 
 func run() int {
-	args := os.Args[1:]
-	if len(args) > 0 && args[0] == "--" {
-		args = args[1:]
-	}
-	fs := flag.NewFlagSet("konsolai", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	yes := fs.Bool("yes", false, "auto-approve non-denylisted actions")
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	query := strings.TrimSpace(strings.Join(fs.Args(), " "))
-	if query == "" {
-		fmt.Fprintln(os.Stderr, "usage: konsolai [--yes] -- <task>")
-		return 2
-	}
-
-	howto, rest := splitMode(query)
-	if rest == "" {
-		fmt.Fprintln(os.Stderr, "usage: konsolai [--yes] -- <task>")
+	inv, err := parseArgs(os.Args[1:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, usageText)
+		if !errors.Is(err, flag.ErrHelp) {
+			fmt.Fprintln(os.Stderr, err)
+		}
 		return 2
 	}
 
@@ -68,10 +108,10 @@ func run() int {
 	}
 	client := llm.New(envOr("KONSOLAI_ENDPOINT", defaultEndpoint), os.Getenv("KONSOLAI_MODEL"))
 
-	if howto {
-		return runHowto(ctx, client, snap, rest)
+	if inv.Mode == modeHowto {
+		return runHowto(ctx, client, snap, inv.Request)
 	}
-	return runAgent(ctx, client, snap, rest, *yes)
+	return runAgent(ctx, client, snap, inv.Request, inv.Yes)
 }
 
 func runHowto(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, query string) int {
@@ -137,21 +177,6 @@ func runAgent(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, tas
 	}
 	fmt.Fprintln(os.Stderr, "konsolai:", err)
 	return 1
-}
-
-// splitMode reports whether q is a howto query and the remaining text.
-// "howto ..." and "?..." are howto. "do ..." strips the prefix and is agent. Anything else is agent.
-func splitMode(q string) (howto bool, rest string) {
-	if rest, ok := strings.CutPrefix(q, "?"); ok {
-		return true, strings.TrimSpace(rest)
-	}
-	if rest, ok := strings.CutPrefix(q, "howto"); ok && (rest == "" || rest[0] == ' ') {
-		return true, strings.TrimSpace(rest)
-	}
-	if rest, ok := strings.CutPrefix(q, "do"); ok && (rest == "" || rest[0] == ' ') {
-		return false, strings.TrimSpace(rest)
-	}
-	return false, q
 }
 
 func envOr(key, fallback string) string {
