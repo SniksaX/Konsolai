@@ -896,6 +896,11 @@ func TestPromptNotes(t *testing.T) {
 	if !strings.Contains(AnswerPrompt, "If the user refers to 'this' or 'here' without content, say you will look at the current folder.") {
 		t.Fatal("answer deictic fallback")
 	}
+	for _, p := range []string{ActPrompt, CodePrompt, AnswerPrompt, LookupPrompt} {
+		if !strings.Contains(p, SecretRule) {
+			t.Fatal("prompt missing secret rule")
+		}
+	}
 }
 
 func TestAnalysisExploreNoteBeforeSources(t *testing.T) {
