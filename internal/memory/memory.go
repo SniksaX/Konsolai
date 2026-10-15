@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -78,7 +79,20 @@ func (g *Guard) live() Backend {
 	return g.store
 }
 
-func (g *Guard) Fail(err error) { g.disable(err) }
+func Isolated(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+}
+
+func CausedByCancel(err error) bool {
+	return err != nil && errors.Is(err, context.Canceled)
+}
+
+func (g *Guard) Fail(err error) {
+	if CausedByCancel(err) {
+		return
+	}
+	g.disable(err)
+}
 
 func (g *Guard) disable(err error) {
 	g.mu.Lock()
@@ -102,6 +116,9 @@ func (g *Guard) Do(fn func(Backend) error) {
 		return
 	}
 	if err := fn(s); err != nil {
+		if CausedByCancel(err) {
+			return
+		}
 		g.disable(err)
 	}
 }
