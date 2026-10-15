@@ -914,6 +914,12 @@ func TestPromptNotes(t *testing.T) {
 	if !strings.Contains(AnswerPrompt, "If the user refers to 'this' or 'here' without content, say you will look at the current folder.") {
 		t.Fatal("answer deictic fallback")
 	}
+	if ProgressLabel("working", llm.Progress{ReasoningTokens: 1200}) != "thinking · 1.2k tok" {
+		t.Fatal("reasoning label")
+	}
+	if ProgressLabel("working", llm.Progress{ContentTokens: 300}) != "writing · 300 tok" {
+		t.Fatal("content label")
+	}
 	for _, p := range []string{ActPrompt, CodePrompt, AnswerPrompt, LookupPrompt} {
 		if !strings.Contains(p, SecretRule) {
 			t.Fatal("prompt missing secret rule")
