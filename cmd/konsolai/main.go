@@ -405,7 +405,17 @@ func langLine(d intent.Decision) string {
 	return "Reply in the user's language (" + lang + ")."
 }
 
-func runAnswer(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, query, extra string) int {
+func thinkingFor(dec intent.Decision) agent.ThinkingPolicy {
+	if dec.Intent == intent.Build {
+		return agent.ThinkUntilPlan
+	}
+	if dec.Reasoning {
+		return agent.ThinkOn
+	}
+	return agent.ThinkOff
+}
+
+func runAnswer(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, query, extra string, think bool) int {
 	if rec == nil {
 		rec = agent.NopRecorder{}
 	}
@@ -419,7 +429,7 @@ func runAnswer(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, fa
 
 	var filter llm.ThinkFilter
 	var collected strings.Builder
-	streamErr := client.Stream(ctx, msgs, llm.ChatOptions{Thinking: false, Temperature: 0.3}, func(delta string) error {
+	streamErr := client.Stream(ctx, msgs, llm.ChatOptions{Thinking: think, Temperature: 0.3}, func(delta string) error {
 		s := filter.Write(delta)
 		collected.WriteString(s)
 		_, err := io.WriteString(os.Stdout, s)
@@ -454,7 +464,7 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 	defer prompter.Close()
 	lang := langLine(dec)
 	if dec.Intent == intent.Answer {
-		return runAnswer(ctx, client, snap, facts, history, rec, inv.Request, agent.AnswerPrompt+"\n"+lang)
+		return runAnswer(ctx, client, snap, facts, history, rec, inv.Request, agent.AnswerPrompt+"\n"+lang, dec.Reasoning)
 	}
 
 	root := repo.Root(cwd)
@@ -477,6 +487,7 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 		History:             history,
 		AutoApprove:         inv.Yes,
 		Prompt:              agent.ActPrompt + "\n" + lang,
+		ThinkingPolicy:      thinkingFor(dec),
 	}
 	sys := snap.String() + facts
 	switch dec.Intent {
@@ -488,7 +499,6 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 		cfg.ExploreNote = agent.ExploreNoteLookup
 	case intent.Build:
 		cfg.Prompt = agent.CodePrompt + "\n" + lang + "\n" + agent.ScopeRule
-		cfg.ThinkingPolicy = agent.ThinkUntilPlan
 		cfg.Temperature = 0.3
 		cfg.MaxSteps = 60
 		cfg.RequirePlan = true
