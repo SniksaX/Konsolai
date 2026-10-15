@@ -28,8 +28,9 @@ alwaysApply: true
 - internal/tools (run_shell, write_file, read_file, list_dir, finish)
 - internal/agent (tool-calling loop)
 - internal/ui (TTY prompt and ANSI)
-- shell/ (bash integration)
 - New packages only when the architect specifies them.
+- Grammar: konsolai [--yes] [howto|do|code] "<request>"
+  The optional mode is a separate argument; the request is exactly one argument.
 - Exit codes: 0 ok, 1 error, 2 usage, 3 aborted, 4 max steps, 130 cancelled.
 
 ## Server
