@@ -17,13 +17,39 @@ import (
 type Role string
 
 const (
-	RoleSystem Role = "system"
-	RoleUser   Role = "user"
+	RoleSystem    Role = "system"
+	RoleUser      Role = "user"
+	RoleAssistant Role = "assistant"
+	RoleTool      Role = "tool"
 )
 
 type Message struct {
-	Role    Role   `json:"role"`
-	Content string `json:"content"`
+	Role       Role       `json:"role"`
+	Content    string     `json:"content"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+}
+
+type ToolSpec struct {
+	Type     string       `json:"type"`
+	Function FunctionSpec `json:"function"`
+}
+
+type FunctionSpec struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Parameters  json.RawMessage `json:"parameters"`
+}
+
+type ToolCall struct {
+	ID       string       `json:"id"`
+	Type     string       `json:"type"`
+	Function FunctionCall `json:"function"`
+}
+
+type FunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 type Client struct {
@@ -86,6 +112,17 @@ type chatRequest struct {
 	Stream             bool               `json:"stream"`
 	Temperature        float64            `json:"temperature"`
 	ChatTemplateKwargs chatTemplateKwargs `json:"chat_template_kwargs"`
+	Tools              []ToolSpec         `json:"tools,omitempty"`
+	ToolChoice         string             `json:"tool_choice,omitempty"`
+}
+
+type completeResponse struct {
+	Choices []struct {
+		Message Message `json:"message"`
+	} `json:"choices"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
 }
 
 type chatTemplateKwargs struct {
@@ -101,6 +138,56 @@ type streamChunk struct {
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
+}
+
+// Complete sends a non-streaming chat completion request and returns the assistant message.
+func (c *Client) Complete(ctx context.Context, msgs []Message, tools []ToolSpec, opts ChatOptions) (Message, error) {
+	model, err := c.ResolveModel(ctx)
+	if err != nil {
+		return Message{}, err
+	}
+	reqBody := chatRequest{
+		Model:              model,
+		Messages:           msgs,
+		Stream:             false,
+		Temperature:        opts.Temperature,
+		ChatTemplateKwargs: chatTemplateKwargs{EnableThinking: opts.Thinking},
+	}
+	if len(tools) > 0 {
+		reqBody.Tools = tools
+		reqBody.ToolChoice = "auto"
+	}
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		return Message{}, fmt.Errorf("llm: encode request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(payload))
+	if err != nil {
+		return Message{}, fmt.Errorf("llm: build chat request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return Message{}, fmt.Errorf("llm: chat: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return Message{}, httpError(resp)
+	}
+	var body completeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return Message{}, fmt.Errorf("llm: decode completion: %w", err)
+	}
+	if body.Error != nil {
+		return Message{}, fmt.Errorf("llm: server error: %s", body.Error.Message)
+	}
+	if len(body.Choices) == 0 {
+		return Message{}, errors.New("llm: no choices")
+	}
+	msg := body.Choices[0].Message
+	msg.Role = RoleAssistant
+	return msg, nil
 }
 
 // Stream sends a chat completion request and invokes onDelta for each content token.
