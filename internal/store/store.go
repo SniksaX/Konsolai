@@ -156,14 +156,8 @@ func (s *Store) UpsertProject(ctx context.Context, root string, kinds, commands 
 	return id, nil
 }
 
-func ModeFamily(mode string) string {
-	if mode == "code" {
-		return "code"
-	}
-	return "chat"
-}
-
 func (s *Store) FindResumableSession(ctx context.Context, profile string, projectID *int64, cwd, mode string, idle time.Duration) (Session, bool, error) {
+	_ = mode
 	ctx, cancel := withTimeout(ctx)
 	defer cancel()
 	mins := int(idle / time.Minute)
@@ -182,12 +176,8 @@ func (s *Store) FindResumableSession(ctx context.Context, profile string, projec
 		    ($3::bigint IS NOT NULL AND project_id = $3)
 		    OR ($3::bigint IS NULL AND cwd = $4)
 		  )
-		  AND (
-		    ($5 = 'code' AND mode = 'code')
-		    OR ($5 <> 'code' AND mode IN ('howto', 'do'))
-		  )
 		ORDER BY last_activity_at DESC
-		LIMIT 1`, profile, mins, projectID, cwd, ModeFamily(mode)).Scan(
+		LIMIT 1`, profile, mins, projectID, cwd).Scan(
 		&sess.ID, &sess.Profile, &sess.ProjectID, &sess.CWD, &sess.Mode, &sess.Model, &sess.Title, &sess.Status,
 		&sess.StartedAt, &sess.LastActivity, &sess.EndedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
