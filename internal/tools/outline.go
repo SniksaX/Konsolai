@@ -34,7 +34,7 @@ func (t *outlineTool) Spec() llm.ToolSpec {
 		Function: llm.FunctionSpec{
 			Name:        "outline",
 			Description: "Outline the structure of a Go, TypeScript, JavaScript or Python file or directory (non-recursive). Returns declarations with line numbers.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File or directory path relative to the project root."}},"required":["path"]}`),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File or directory path relative to the current directory."}},"required":["path"]}`),
 		},
 	}
 }
