@@ -1,0 +1,43 @@
+---
+description: Konsolai git convention, stack, layout, server, and coding rules
+alwaysApply: true
+---
+
+# Konsolai
+
+## GIT CONVENTION (applies to every commit, now and in future tasks)
+- Branch: dev. One commit per file changed.
+- Message format:
+    [TYPE|SIZE] Title in imperative mood, max 72 chars
+    <blank line>
+    Body: what changed and why, as short lines or "- " bullets.
+- TYPE is one of: ADD, UPDATE, FIX, DELETE, MOVE, REFACTOR
+- SIZE: MINOR (<20 changed lines), MEDIUM (20-100), MAJOR (>100, or a public API or behavior change)
+- Use: git commit -F <msgfile>   (do not cram the body into -m)
+- Never commit secrets, binaries or files outside the repo (~/.bashrc and similar are not part of the repo).
+
+## Stack
+- Go 1.27, stdlib only unless the architect approves a dependency.
+- Module github.com/siraj/konsolai.
+
+## Layout
+- cmd/konsolai (entrypoint)
+- internal/llm (model client)
+- internal/sysctx (environment context)
+- shell/ (bash integration)
+- New packages only when the architect specifies them.
+
+## Server
+- vLLM at http://fatboy:11436/v1, model qwen38.nvfp4, max_model_len 94208.
+- Thinking is controlled by chat_template_kwargs.enable_thinking.
+- Reasoning arrives in delta.reasoning.
+
+## Code rules
+- Strict types, no interface{}/any unless unavoidable.
+- Wrap errors with a "pkg: context: %w" prefix.
+- No debug logging, no unrequested features.
+- Do not touch files outside the task scope.
+
+## Workflow
+- After every task run gofmt -l ., go vet ./..., go build -o ~/.local/bin/konsolai ./cmd/konsolai.
+- If anything fails, stop and report it. Do not improvise fixes.
