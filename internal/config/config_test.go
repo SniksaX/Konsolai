@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -165,6 +166,20 @@ func TestLocationOmitsURL(t *testing.T) {
 	}
 	if loc != "localhost:5432/konsolai" {
 		t.Fatalf("got %q", loc)
+	}
+}
+
+func TestDisableLine(t *testing.T) {
+	err := errors.New("store: ping: failed to connect to `user=x database=x`:\n\t127.0.0.1:1 dial tcp: connection refused")
+	got := DisableLine("postgres://secret:hunter2@127.0.0.1:1/konsolai", err)
+	if strings.Contains(got, "secret") || strings.Contains(got, "hunter2") || strings.Contains(got, "user=x") {
+		t.Fatalf("leaked: %q", got)
+	}
+	if strings.Contains(got, "\n") {
+		t.Fatalf("want one line: %q", got)
+	}
+	if !strings.HasPrefix(got, "memory disabled: cannot connect to 127.0.0.1:1:") {
+		t.Fatalf("prefix: %q", got)
 	}
 }
 
