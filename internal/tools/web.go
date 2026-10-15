@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/siraj/konsolai/internal/llm"
+	"github.com/siraj/konsolai/internal/ui"
 )
 
 const (
@@ -73,6 +74,8 @@ func (a *webFetchAction) Preview() string  { return "" }
 func (a *webFetchAction) Kind() ActionKind { return ReadOnly }
 
 func (a *webFetchAction) Run(ctx context.Context) (Result, error) {
+	stop := ui.Start("fetching")
+	defer stop()
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
