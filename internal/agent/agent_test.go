@@ -890,4 +890,7 @@ func TestPromptNotes(t *testing.T) {
 	if !strings.Contains(AnswerPrompt, "Do not mention the user's project") {
 		t.Fatal("answer project")
 	}
+	if !strings.Contains(AnswerPrompt, "If the user refers to 'this' or 'here' without content, say you will look at the current folder.") {
+		t.Fatal("answer deictic fallback")
+	}
 }
