@@ -143,6 +143,8 @@ type ChatOptions struct {
 	ResponseSchema json.RawMessage
 	OnProgress     func(Progress)
 	IdleTimeout    time.Duration
+	// ToolChoice is "" (auto), "required", or a function name sent as a named tool_choice.
+	ToolChoice string
 }
 
 type Usage struct {
@@ -178,7 +180,7 @@ type chatRequest struct {
 	MaxTokens          int                `json:"max_tokens,omitempty"`
 	ChatTemplateKwargs chatTemplateKwargs `json:"chat_template_kwargs"`
 	Tools              []ToolSpec         `json:"tools,omitempty"`
-	ToolChoice         string             `json:"tool_choice,omitempty"`
+	ToolChoice         json.RawMessage    `json:"tool_choice,omitempty"`
 	ResponseFormat     *responseFormat    `json:"response_format,omitempty"`
 	StreamOptions      *streamOptions     `json:"stream_options,omitempty"`
 }
@@ -261,6 +263,24 @@ func (c *Client) complete(ctx context.Context, msgs []Message, tools []ToolSpec,
 	return msg, usage, err
 }
 
+func encodeToolChoice(s string) json.RawMessage {
+	switch s {
+	case "", "auto":
+		return json.RawMessage(`"auto"`)
+	case "required":
+		return json.RawMessage(`"required"`)
+	default:
+		b, err := json.Marshal(map[string]any{
+			"type":     "function",
+			"function": map[string]string{"name": s},
+		})
+		if err != nil {
+			return json.RawMessage(`"auto"`)
+		}
+		return b
+	}
+}
+
 func (c *Client) completeAttempt(ctx context.Context, msgs []Message, tools []ToolSpec, opts ChatOptions, onDelta func(string) error) (Message, Usage, error, bool) {
 	model, err := c.ResolveModel(ctx)
 	if err != nil {
@@ -277,7 +297,7 @@ func (c *Client) completeAttempt(ctx context.Context, msgs []Message, tools []To
 	}
 	if len(tools) > 0 {
 		reqBody.Tools = tools
-		reqBody.ToolChoice = "auto"
+		reqBody.ToolChoice = encodeToolChoice(opts.ToolChoice)
 	}
 	if len(opts.ResponseSchema) > 0 {
 		reqBody.ResponseFormat = &responseFormat{
