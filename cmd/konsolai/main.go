@@ -291,6 +291,7 @@ func run() int {
 	}
 	sessionID, history := picked.ID, picked.Messages
 	if len(history) > 0 {
+		history = agent.LeanResume(history, client.TokensPerChar())
 		fmt.Fprintln(os.Stdout, ui.Dim("↻ continuing session: "+picked.Title))
 	}
 	if inv.Plain {
