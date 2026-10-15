@@ -964,6 +964,9 @@ func TestPromptNotes(t *testing.T) {
 		if !strings.Contains(p, SecretRule) {
 			t.Fatal("prompt missing secret rule")
 		}
+		if !strings.Contains(p, FenceRule) {
+			t.Fatal("prompt missing fence rule")
+		}
 	}
 }
 
