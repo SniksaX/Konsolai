@@ -105,9 +105,10 @@ func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 	return &shellAction{cmd: args.Cmd, cwd: resolved, timeout: time.Duration(sec) * time.Second, out: t.out, kind: kind}, nil
 }
 
-func (a *shellAction) Summary() string  { return "run: " + a.cmd }
-func (a *shellAction) Preview() string  { return "" }
-func (a *shellAction) Kind() ActionKind { return a.kind }
+func (a *shellAction) Summary() string     { return "run: " + a.cmd }
+func (a *shellAction) Preview() string     { return "" }
+func (a *shellAction) Kind() ActionKind    { return a.kind }
+func (a *shellAction) PlanCommand() string { return a.cmd }
 
 func (a *shellAction) Run(ctx context.Context) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, a.timeout)
