@@ -5,6 +5,9 @@ import (
 	"flag"
 	"strings"
 	"testing"
+
+	"github.com/siraj/konsolai/internal/agent"
+	"github.com/siraj/konsolai/internal/intent"
 )
 
 func TestParseArgs(t *testing.T) {
@@ -163,5 +166,20 @@ func TestConfirmUsesTTYNotStdin(t *testing.T) {
 	}
 	if !strings.Contains(got.Request, "<stdin>") {
 		t.Fatalf("%q", got.Request)
+	}
+}
+
+func TestThinkingFor(t *testing.T) {
+	if g := thinkingFor(intent.Decision{Intent: intent.Build}); g != agent.ThinkUntilPlan {
+		t.Fatalf("build %v", g)
+	}
+	if g := thinkingFor(intent.Decision{Intent: intent.Answer, Reasoning: true}); g != agent.ThinkOn {
+		t.Fatalf("answer+reason %v", g)
+	}
+	if g := thinkingFor(intent.Decision{Intent: intent.Lookup, Reasoning: false}); g != agent.ThinkOff {
+		t.Fatalf("lookup %v", g)
+	}
+	if g := thinkingFor(intent.Decision{Intent: intent.Act, Reasoning: true}); g != agent.ThinkOn {
+		t.Fatalf("act+reason %v", g)
 	}
 }
