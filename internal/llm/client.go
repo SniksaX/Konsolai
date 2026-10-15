@@ -75,11 +75,21 @@ func (c *Client) ResolveModel(ctx context.Context) (string, error) {
 	return c.model, nil
 }
 
+type ChatOptions struct {
+	Thinking    bool
+	Temperature float64
+}
+
 type chatRequest struct {
-	Model       string    `json:"model"`
-	Messages    []Message `json:"messages"`
-	Stream      bool      `json:"stream"`
-	Temperature float64   `json:"temperature"`
+	Model              string             `json:"model"`
+	Messages           []Message          `json:"messages"`
+	Stream             bool               `json:"stream"`
+	Temperature        float64            `json:"temperature"`
+	ChatTemplateKwargs chatTemplateKwargs `json:"chat_template_kwargs"`
+}
+
+type chatTemplateKwargs struct {
+	EnableThinking bool `json:"enable_thinking"`
 }
 
 type streamChunk struct {
@@ -94,12 +104,18 @@ type streamChunk struct {
 }
 
 // Stream sends a chat completion request and invokes onDelta for each content token.
-func (c *Client) Stream(ctx context.Context, msgs []Message, onDelta func(string) error) error {
+func (c *Client) Stream(ctx context.Context, msgs []Message, opts ChatOptions, onDelta func(string) error) error {
 	model, err := c.ResolveModel(ctx)
 	if err != nil {
 		return err
 	}
-	payload, err := json.Marshal(chatRequest{Model: model, Messages: msgs, Stream: true, Temperature: 0.2})
+	payload, err := json.Marshal(chatRequest{
+		Model:              model,
+		Messages:           msgs,
+		Stream:             true,
+		Temperature:        opts.Temperature,
+		ChatTemplateKwargs: chatTemplateKwargs{EnableThinking: opts.Thinking},
+	})
 	if err != nil {
 		return fmt.Errorf("llm: encode request: %w", err)
 	}
