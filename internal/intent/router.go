@@ -3,6 +3,7 @@ package intent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -26,13 +27,19 @@ const (
 	TaskOther    Task = "other"
 )
 
+type Candidate struct {
+	Title    string
+	LastUser string
+	Age      time.Duration
+}
+
 type Decision struct {
-	Intent            Intent `json:"intent"`
-	Language          string `json:"language"`
-	Reason            string `json:"reason"`
-	Reasoning         bool   `json:"reasoning"`
-	Task              Task   `json:"task"`
-	ContinuesPrevious bool   `json:"continues_previous"`
+	Intent           Intent `json:"intent"`
+	Language         string `json:"language"`
+	Reason           string `json:"reason"`
+	Reasoning        bool   `json:"reasoning"`
+	Task             Task   `json:"task"`
+	ContinuesSession int    `json:"continues_session"`
 }
 
 const routerPrompt = `Classify the user's request into exactly one intent.
@@ -46,48 +53,61 @@ When unsure between answer and anything else, choose answer if the message is a 
 language is the ISO 639-1 code of the user's message.
 reasoning=true when the request needs multi-step analysis: debugging an error or a pasted command, comparing approaches, non-trivial code questions. false for greetings, simple facts and simple commands.
 task is "analysis" when the user asks to analyse, review or give an opinion on code; "docs" when they ask to generate documentation, READMEs, diagrams or reports about code; otherwise "other".
-continues_previous=true only if the message depends on or follows up the recent conversation (references to 'it', 'that', 'continue', answers to a question you asked, same task). A new unrelated request -> false.
+continues_session: Pick the conversation this message follows up, or 0 if it starts a new topic. Prefer 0 when unsure.
 Never print a secret value in full. Refer to it by name and its first 4 characters.`
 
-var decisionSchema = json.RawMessage(`{"type":"object","properties":{"intent":{"type":"string","enum":["answer","lookup","act","build"]},"language":{"type":"string"},"reason":{"type":"string"},"reasoning":{"type":"boolean"},"task":{"type":"string","enum":["analysis","docs","other"]},"continues_previous":{"type":"boolean"}},"required":["intent","language","reason","reasoning","task","continues_previous"],"additionalProperties":false}`)
+var decisionSchema = json.RawMessage(`{"type":"object","properties":{"intent":{"type":"string","enum":["answer","lookup","act","build"]},"language":{"type":"string"},"reason":{"type":"string"},"reasoning":{"type":"boolean"},"task":{"type":"string","enum":["analysis","docs","other"]},"continues_session":{"type":"integer"}},"required":["intent","language","reason","reasoning","task","continues_session"],"additionalProperties":false}`)
 
-func Classify(ctx context.Context, client *llm.Client, request string, recent []llm.Message, inRepo bool) (Decision, error) {
+func Classify(ctx context.Context, client *llm.Client, request string, candidates []Candidate, inRepo bool) (Decision, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	sys := routerPrompt
-	if len(recent) == 0 {
+	if len(candidates) == 0 {
 		sys += "\nThere is no previous conversation."
+	} else {
+		sys += "\n" + FormatCandidates(candidates)
 	}
-	msgs := []llm.Message{{Role: llm.RoleSystem, Content: sys}}
-	for _, m := range lastNonTool(recent, 4) {
-		msgs = append(msgs, m)
+	msgs := []llm.Message{
+		{Role: llm.RoleSystem, Content: sys},
+		{Role: llm.RoleUser, Content: request},
 	}
-	msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: request})
 	msg, _, err := client.Complete(ctx, msgs, nil, llm.ChatOptions{
 		Thinking: false, Temperature: 0, MaxTokens: 160, ResponseSchema: decisionSchema,
 	})
 	if err != nil {
-		return fallback(request, inRepo, len(recent) > 0), err
+		return fallback(request, inRepo), err
 	}
 	d, ok := parseDecision(msg.Content)
 	if !ok {
-		return fallback(request, inRepo, len(recent) > 0), nil
+		return fallback(request, inRepo), nil
+	}
+	if d.ContinuesSession < 0 || d.ContinuesSession > len(candidates) {
+		d.ContinuesSession = 0
 	}
 	return d, nil
 }
 
-func lastNonTool(msgs []llm.Message, n int) []llm.Message {
-	var out []llm.Message
-	for i := len(msgs) - 1; i >= 0 && len(out) < n; i-- {
-		if msgs[i].Role == llm.RoleTool {
-			continue
+func FormatCandidates(cands []Candidate) string {
+	var b strings.Builder
+	b.WriteString("Recent conversations (most recent first):")
+	for i, c := range cands {
+		last := c.LastUser
+		if last == "" {
+			last = c.Title
 		}
-		out = append(out, msgs[i])
+		fmt.Fprintf(&b, "\n%d. [%s] %s — last: %s", i+1, formatAge(c.Age), c.Title, last)
 	}
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
+	return b.String()
+}
+
+func formatAge(d time.Duration) string {
+	if d < time.Minute {
+		return "just now"
 	}
-	return out
+	if d < time.Hour {
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	}
+	return fmt.Sprintf("%dh ago", int(d.Hours()))
 }
 
 func parseDecision(raw string) (Decision, bool) {
@@ -116,12 +136,15 @@ func parseDecision(raw string) (Decision, bool) {
 	default:
 		return Decision{}, false
 	}
+	if d.ContinuesSession < 0 {
+		d.ContinuesSession = 0
+	}
 	return d, true
 }
 
-func fallback(request string, inRepo bool, hasRecent bool) Decision {
+func fallback(request string, inRepo bool) Decision {
 	q := strings.HasSuffix(strings.TrimSpace(request), "?")
-	d := Decision{Language: "en", Reason: "fallback", Task: TaskOther, ContinuesPrevious: hasRecent}
+	d := Decision{Language: "en", Reason: "fallback", Task: TaskOther, ContinuesSession: 0}
 	switch {
 	case q && inRepo:
 		d.Intent = Lookup
