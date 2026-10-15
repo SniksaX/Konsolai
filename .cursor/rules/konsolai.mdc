@@ -35,6 +35,7 @@ alwaysApply: true
 - internal/diff (Myers unified diffs)
 - internal/repo (root, file listing, project detect)
 - internal/intent (router)
+- internal/docrender (markdown/mermaid/HTML/PDF for export_doc)
 - internal/tools (run_shell, write_file, read_file, list_dir, search, find_files, edit_file, propose_plan, remember, web_fetch, export_doc, outline, finish)
 - internal/agent (tool-calling loop)
 - internal/ui (TTY prompt and ANSI)
