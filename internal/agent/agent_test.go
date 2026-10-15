@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/siraj/konsolai/internal/llm"
 	"github.com/siraj/konsolai/internal/safety"
@@ -74,9 +75,16 @@ func (r *replay) serve(w http.ResponseWriter, req *http.Request) {
 		Choices []struct {
 			Message llm.Message `json:"message"`
 		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
 	}{Choices: []struct {
 		Message llm.Message `json:"message"`
-	}{{Message: r.replies[i]}}})
+	}{{Message: r.replies[i]}}, Usage: struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+	}{PromptTokens: 1000, CompletionTokens: 200}})
 }
 
 func (r *replay) lastTool() llm.Message {
@@ -609,5 +617,71 @@ func TestUntilPlanThinkingSchedule(t *testing.T) {
 		if g != want[i] {
 			t.Fatalf("think[%d]=%v want %v (%v)", i, g, want[i], rep.think)
 		}
+	}
+}
+
+func TestFormatSummaryAndTrace(t *testing.T) {
+	s := Stats{
+		Steps:            12,
+		ModelTime:        41200 * time.Millisecond,
+		ToolTime:         3100 * time.Millisecond,
+		PromptTokens:     23400,
+		CompletionTokens: 2100,
+	}
+	got := FormatSummary("build", s)
+	want := "· build · 12 steps · model 41.2s · tools 3.1s · 23.4k in / 2.1k out"
+	if got != want {
+		t.Fatalf("summary %q want %q", got, want)
+	}
+	tr := FormatTrace(2, true, 12300*time.Millisecond, 4100, 300, []string{"tool_a", "tool_b"})
+	want = "  [step 2] think=on  12.3s  in=4.1k out=0.3k  -> tool_a, tool_b"
+	if tr != want {
+		t.Fatalf("trace %q want %q", tr, want)
+	}
+	tr = FormatTrace(1, false, time.Second, 0, 0, nil)
+	if !strings.Contains(tr, "think=off") || !strings.Contains(tr, "->") {
+		t.Fatalf("off %q", tr)
+	}
+}
+
+func TestRunAccumulatesStats(t *testing.T) {
+	var st Stats
+	var errW strings.Builder
+	_, _, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "list_dir", `{"path":"."}`)),
+		assistant(call("2", "finish", `{"summary":"ok"}`)),
+	}, nil, Config{
+		Stats:      &st,
+		Err:        &errW,
+		Intent:     "lookup",
+		Trace:      true,
+		RouterTime: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Steps != 2 {
+		t.Fatalf("steps %d", st.Steps)
+	}
+	if st.PromptTokens != 2000 || st.CompletionTokens != 400 {
+		t.Fatalf("tokens %+v", st)
+	}
+	if st.RouterTime != time.Second {
+		t.Fatalf("router %s", st.RouterTime)
+	}
+	if st.ModelTime <= 0 || st.ToolTime <= 0 {
+		t.Fatalf("times %+v", st)
+	}
+	if !strings.Contains(errW.String(), "· lookup · 2 steps") {
+		t.Fatalf("summary %q", errW.String())
+	}
+	if !strings.Contains(errW.String(), "[step 1]") || !strings.Contains(errW.String(), "list_dir") {
+		t.Fatalf("trace %q", errW.String())
+	}
+	if !strings.Contains(errW.String(), "in=1.0k out=0.2k") {
+		t.Fatalf("per-call tokens %q", errW.String())
+	}
+	if !strings.Contains(errW.String(), "2.0k in / 0.4k out") {
+		t.Fatalf("totals %q", errW.String())
 	}
 }
