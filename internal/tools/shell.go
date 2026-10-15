@@ -15,6 +15,7 @@ import (
 
 	"github.com/siraj/konsolai/internal/llm"
 	"github.com/siraj/konsolai/internal/safety"
+	"github.com/siraj/konsolai/internal/ui"
 )
 
 type shellTool struct {
@@ -56,6 +57,8 @@ type shellAction struct {
 }
 
 var reCD = regexp.MustCompile(`(^|[;&|(]\s*)cd(\s|$)`)
+
+var shellQuietFor = time.Second
 
 func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 	var args shellArgs
@@ -133,7 +136,9 @@ func (a *shellAction) Run(ctx context.Context) (Result, error) {
 	var cap Capture
 	lim := NewLineLimiter(a.out)
 	defer lim.Close(a.out)
-	mw := io.MultiWriter(lim, &cap)
+	quiet := ui.NewQuiet("running", shellQuietFor)
+	defer quiet.Stop()
+	mw := io.MultiWriter(lim, &cap, quiet)
 	cmd.Stdout = mw
 	cmd.Stderr = mw
 
