@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/siraj/konsolai/internal/safety"
+	"github.com/siraj/konsolai/internal/ui"
 )
 
 type memCache struct {
@@ -82,5 +84,30 @@ func TestWebFetchRejectsNonHTTP(t *testing.T) {
 	tool, _ := NewRegistry(g, nil, nil, nil, nil).Get("web_fetch")
 	if _, err := tool.Prepare(`{"url":"file:///etc/passwd"}`); err == nil {
 		t.Fatal("want error")
+	}
+}
+
+func TestWebFetchSpinner(t *testing.T) {
+	var buf bytes.Buffer
+	restore := ui.TestHook(&buf, true, 5*time.Millisecond, nil)
+	defer restore()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+	g, err := safety.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool, _ := NewRegistry(g, nil, nil, nil, nil).Get("web_fetch")
+	act, err := tool.Prepare(`{"url":"` + srv.URL + `"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := act.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "fetching") || !strings.Contains(buf.String(), "\033[?25l") {
+		t.Fatalf("spinner %q", buf.String())
 	}
 }
