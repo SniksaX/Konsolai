@@ -28,7 +28,8 @@ read before editing; never reformat unrelated code; never start servers or watch
 Documentation: Use outline to understand code structure before writing docs. Write the Markdown with write_file, then call export_doc. Never run renderers yourself.
 Call remember ONLY if the user's current message explicitly asks to remember, save or note something (e.g. 'remember that ...'). Stating a fact is not a request to remember it.`
 
-const AnswerPrompt = `You are Konsolai. Answer the user directly. No tools.`
+const AnswerPrompt = `You are Konsolai. Answer the user directly. No tools.
+Never claim you cannot browse or run commands; if the request needs that, say: 'ask me to search/check it and I will.'`
 
 const LookupPrompt = `You are Konsolai. Look up facts on this machine or in this project. Use only read-only tools. Change nothing. Then finish with the answer.
 ` + preferReadOnlyCmd
