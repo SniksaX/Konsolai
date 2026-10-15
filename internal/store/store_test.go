@@ -138,7 +138,7 @@ func TestResumeAppendsNoNewRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AppendMessage(ctx, id, 1, Message{Role: "user", Content: "first request"}); err != nil {
+	if err := s.AppendMessage(ctx, id, 1, Message{Role: "user", Content: "first request", CWD: "/tmp/p/svc"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.EndSession(ctx, id, "finished"); err != nil {
@@ -161,6 +161,9 @@ func TestResumeAppendsNoNewRow(t *testing.T) {
 	msgs, err := s.LoadMessages(ctx, id)
 	if err != nil || len(msgs) != 2 {
 		t.Fatalf("msgs %d err=%v", len(msgs), err)
+	}
+	if msgs[0].CWD != "/tmp/p/svc" {
+		t.Fatalf("cwd %q", msgs[0].CWD)
 	}
 }
 
