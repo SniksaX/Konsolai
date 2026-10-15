@@ -1278,6 +1278,55 @@ func TestExploreBudgetCountsStepsNotCalls(t *testing.T) {
 	}
 }
 
+func TestPrePlanExploreCountsEveryStep(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"a.txt", "b.txt", "c.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(name), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, rep := newReplay(t, []llm.Message{
+		assistant(call("1", "read_file", `{"path":"a.txt"}`)),
+		assistant(call("2", "read_file", `{"path":"b.txt"}`)),
+		assistant(call("3", "run_shell", `{"cmd":"rm a.txt"}`)),
+		assistant(call("4", "read_file", `{"path":"c.txt"}`)),
+		assistant(call("5", "propose_plan", `{"summary":"x","steps":["y"],"files":["a.txt"]}`)),
+		assistant(call("6", "finish", `{"summary":"done"}`)),
+	})
+	err = Run(context.Background(), Config{
+		Client: client, Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		Confirmer: stubConfirm{d: ui.Approve}, Out: io.Discard,
+		RequirePlan: true, ExploreBudget: 2, ExploreNote: ExploreNoteBuild,
+		MaxSteps: 10, Intent: "build",
+	}, "sys", "explore then plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep.mu.Lock()
+	defer rep.mu.Unlock()
+	if len(rep.tools) < 5 {
+		t.Fatalf("reqs %d", len(rep.tools))
+	}
+	if len(rep.tools[4]) != 1 || rep.tools[4][0].Function.Name != "propose_plan" {
+		t.Fatalf("want forced plan after blocked shell, got %+v", rep.tools[4])
+	}
+	found := false
+	for _, msgs := range rep.reqs {
+		for _, m := range msgs {
+			if m.Role == llm.RoleTool && strings.Contains(m.Content, ExploreNoteBuild) {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing explore note; blocked run_shell must not reset the budget")
+	}
+}
+
 func TestExploreBudgetForDocs(t *testing.T) {
 	if ExploreBudgetFor("lookup", "other") != 6 || ExploreBudgetFor("lookup", "analysis") != 10 {
 		t.Fatal("lookup budgets")
