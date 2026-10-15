@@ -68,7 +68,7 @@ func TestResolveBuiltinDefault(t *testing.T) {
 	if p.Name != "default" || p.Endpoint != defaultEndpoint {
 		t.Fatalf("got %+v", p)
 	}
-	if p.SessionIdleMinutes != 30 || p.RetentionDays != 90 {
+	if p.SessionIdleMinutes != 30 || p.RetentionDays != 90 || p.LLMIdleTimeoutSeconds != 120 {
 		t.Fatalf("defaults %+v", p)
 	}
 }
