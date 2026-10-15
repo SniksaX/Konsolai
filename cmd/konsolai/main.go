@@ -190,7 +190,7 @@ func run() int {
 			return 1
 		}
 	} else {
-		clear := ui.Status(os.Stderr, "loading memory")
+		clear := ui.StartAfter("loading memory", 300*time.Millisecond)
 		opened, err := store.Open(ctx, prof.DatabaseURL)
 		clear()
 		if err != nil {
@@ -262,7 +262,9 @@ func run() int {
 		inRepo = true
 	}
 	routedAt := time.Now()
+	understand := ui.Start("understanding")
 	dec := decideIntent(ctx, client, inv, history, inRepo)
+	understand()
 	routerTime := time.Since(routedAt)
 	fmt.Fprintln(os.Stdout, ui.Dim("· "+string(dec.Intent)))
 	if sessionID == "" {
@@ -434,12 +436,21 @@ func runAnswer(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, fa
 	var filter llm.ThinkFilter
 	var collected strings.Builder
 	t0 := time.Now()
+	stopThink := ui.Start("thinking")
+	first := true
 	usage, streamErr := client.Stream(ctx, msgs, llm.ChatOptions{Thinking: think, Temperature: 0.3}, func(delta string) error {
 		s := filter.Write(delta)
+		if first && s != "" {
+			stopThink()
+			first = false
+		}
 		collected.WriteString(s)
 		_, err := io.WriteString(os.Stdout, s)
 		return err
 	})
+	if first {
+		stopThink()
+	}
 	modelTime := time.Since(t0)
 	rest := filter.Flush()
 	collected.WriteString(rest)
