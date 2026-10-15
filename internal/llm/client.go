@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -59,9 +60,12 @@ var (
 )
 
 const (
-	defaultIdleTimeout = 120 * time.Second
-	defaultRetryWait   = 2 * time.Second
-	progressPeriod     = 200 * time.Millisecond
+	defaultIdleTimeout   = 120 * time.Second
+	defaultRetryWait     = 2 * time.Second
+	progressPeriod       = 200 * time.Millisecond
+	defaultContextWindow = 32768
+	defaultTokensPerChar = 0.30
+	tokensPerCharAlpha   = 0.5
 )
 
 type Progress struct {
@@ -79,23 +83,93 @@ func (e *HTTPError) Error() string {
 }
 
 type Client struct {
-	baseURL     string
-	model       string
-	http        *http.Client
-	idleTimeout time.Duration
-	retryWait   time.Duration
+	baseURL       string
+	model         string
+	http          *http.Client
+	idleTimeout   time.Duration
+	retryWait     time.Duration
+	mu            sync.Mutex
+	contextWindow int
+	windowReady   bool
+	tokensPerChar float64
 }
 
 func New(baseURL, model string) *Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.DialContext = (&net.Dialer{Timeout: 5 * time.Second}).DialContext
 	return &Client{
-		baseURL:     strings.TrimRight(baseURL, "/"),
-		model:       model,
-		http:        &http.Client{Transport: tr},
-		idleTimeout: defaultIdleTimeout,
-		retryWait:   defaultRetryWait,
+		baseURL:       strings.TrimRight(baseURL, "/"),
+		model:         model,
+		http:          &http.Client{Transport: tr},
+		idleTimeout:   defaultIdleTimeout,
+		retryWait:     defaultRetryWait,
+		contextWindow: defaultContextWindow,
+		tokensPerChar: defaultTokensPerChar,
 	}
+}
+
+func (c *Client) ContextWindow() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.contextWindow <= 0 {
+		return defaultContextWindow
+	}
+	return c.contextWindow
+}
+
+func (c *Client) TokensPerChar() float64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.tokensPerChar <= 0 {
+		return defaultTokensPerChar
+	}
+	return c.tokensPerChar
+}
+
+func MessageChars(msgs []Message) int {
+	n := 0
+	for _, m := range msgs {
+		n += len(m.Content)
+		n += len(m.ToolCallID)
+		for _, tc := range m.ToolCalls {
+			n += len(tc.ID) + len(tc.Type) + len(tc.Function.Name) + len(tc.Function.Arguments)
+		}
+	}
+	return n
+}
+
+func ToolsSchemaChars(tools []ToolSpec) int {
+	n := 0
+	for _, t := range tools {
+		n += len(t.Type) + len(t.Function.Name) + len(t.Function.Description) + len(t.Function.Parameters)
+	}
+	return n
+}
+
+func (c *Client) EstimatePromptTokens(msgs []Message, tools []ToolSpec) int {
+	ratio := c.TokensPerChar()
+	return int(float64(MessageChars(msgs))*ratio + float64(ToolsSchemaChars(tools))*ratio)
+}
+
+func (c *Client) observePrompt(msgs []Message, usage Usage) {
+	chars := MessageChars(msgs)
+	if usage.PromptTokens <= 0 || chars <= 0 {
+		return
+	}
+	observed := float64(usage.PromptTokens) / float64(chars)
+	c.mu.Lock()
+	c.tokensPerChar = tokensPerCharAlpha*observed + (1-tokensPerCharAlpha)*c.tokensPerChar
+	c.mu.Unlock()
+}
+
+func (c *Client) setWindow(n int) {
+	if n <= 0 {
+		n = defaultContextWindow
+	}
+	c.mu.Lock()
+	c.contextWindow = n
+	c.windowReady = true
+	c.mu.Unlock()
 }
 
 func (c *Client) SetIdleTimeout(d time.Duration) {
@@ -104,36 +178,97 @@ func (c *Client) SetIdleTimeout(d time.Duration) {
 	}
 }
 
-// ResolveModel returns the configured model or the first model advertised by /models.
+// ResolveModel returns the configured model or the first model advertised by /models
+// and reads max_model_len for the resolved model (fallback 32768).
 func (c *Client) ResolveModel(ctx context.Context) (string, error) {
-	if c.model != "" {
-		return c.model, nil
+	c.mu.Lock()
+	if c.model != "" && c.windowReady {
+		id := c.model
+		c.mu.Unlock()
+		return id, nil
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/models", nil)
+	want := c.model
+	c.mu.Unlock()
+
+	fetchCtx := ctx
+	if want != "" {
+		var cancel context.CancelFunc
+		fetchCtx, cancel = context.WithTimeout(ctx, 400*time.Millisecond)
+		defer cancel()
+	}
+	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, c.baseURL+"/models", nil)
 	if err != nil {
+		if want != "" {
+			c.setWindow(defaultContextWindow)
+			return want, nil
+		}
 		return "", fmt.Errorf("llm: build models request: %w", err)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
+		if want != "" {
+			c.setWindow(defaultContextWindow)
+			return want, nil
+		}
 		return "", fmt.Errorf("llm: list models: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		if want != "" {
+			c.setWindow(defaultContextWindow)
+			return want, nil
+		}
 		return "", httpError(resp)
 	}
 	var body struct {
 		Data []struct {
-			ID string `json:"id"`
+			ID          string `json:"id"`
+			MaxModelLen int    `json:"max_model_len"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		if want != "" {
+			c.setWindow(defaultContextWindow)
+			return want, nil
+		}
 		return "", fmt.Errorf("llm: decode models: %w", err)
 	}
-	if len(body.Data) == 0 || body.Data[0].ID == "" {
+	if len(body.Data) == 0 || (want == "" && body.Data[0].ID == "") {
+		if want != "" {
+			c.setWindow(defaultContextWindow)
+			return want, nil
+		}
 		return "", errors.New("llm: server advertises no models, set KONSOLAI_MODEL")
 	}
-	c.model = body.Data[0].ID
-	return c.model, nil
+
+	chosen := body.Data[0]
+	if want != "" {
+		found := false
+		for _, m := range body.Data {
+			if m.ID == want {
+				chosen = m
+				found = true
+				break
+			}
+		}
+		if !found {
+			chosen.ID = want
+			chosen.MaxModelLen = 0
+		}
+	}
+	c.mu.Lock()
+	if c.model == "" {
+		c.model = chosen.ID
+	}
+	win := chosen.MaxModelLen
+	if win <= 0 {
+		win = defaultContextWindow
+	}
+	c.contextWindow = win
+	c.windowReady = true
+	id := c.model
+	c.mu.Unlock()
+	return id, nil
 }
 
 type ChatOptions struct {
@@ -246,6 +381,7 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, opts ChatOptions, o
 func (c *Client) complete(ctx context.Context, msgs []Message, tools []ToolSpec, opts ChatOptions, onDelta func(string) error) (Message, Usage, error) {
 	msg, usage, err, gotBytes := c.completeAttempt(ctx, msgs, tools, opts, onDelta)
 	if err == nil || !shouldRetry(err, gotBytes) {
+		c.observePrompt(msgs, usage)
 		return msg, usage, err
 	}
 	wait := c.retryWait
@@ -260,6 +396,7 @@ func (c *Client) complete(ctx context.Context, msgs []Message, tools []ToolSpec,
 	case <-t.C:
 	}
 	msg, usage, err, _ = c.completeAttempt(ctx, msgs, tools, opts, onDelta)
+	c.observePrompt(msgs, usage)
 	return msg, usage, err
 }
 
