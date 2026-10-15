@@ -262,10 +262,10 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "konsolai:", err)
 		return 1
 	}
-	cand := findCandidate(ctx, mem, prof, projectID, cwd, inv)
-	routerHist := cand.Messages
+	cands := findCandidates(ctx, mem, prof, projectID, cwd)
+	routerCands := toIntentCandidates(cands)
 	if inv.New {
-		routerHist = nil
+		routerCands = nil
 	}
 	root := repo.Root(cwd)
 	inRepo := false
@@ -274,12 +274,24 @@ func run() int {
 	}
 	routedAt := time.Now()
 	understand := ui.Start("understanding")
-	dec := decideIntent(ctx, client, inv, routerHist, inRepo)
+	dec := decideIntent(ctx, client, inv, routerCands, inRepo)
 	understand()
 	routerTime := time.Since(routedAt)
-	sessionID, history := applyResume(inv, dec, cand)
+	picked := applyResume(inv, dec, cands)
+	if picked.ID != "" && len(picked.Messages) == 0 {
+		if s := mem.Store(); s != nil {
+			msgs, err := s.LoadMessages(ctx, picked.ID)
+			if err != nil {
+				mem.Fail(err)
+				picked = resumeCandidate{}
+			} else {
+				picked.Messages = memory.ToLLM(msgs)
+			}
+		}
+	}
+	sessionID, history := picked.ID, picked.Messages
 	if len(history) > 0 {
-		fmt.Fprintln(os.Stdout, ui.Dim("↻ continuing session: "+cand.Title))
+		fmt.Fprintln(os.Stdout, ui.Dim("↻ continuing session: "+picked.Title))
 	}
 	if inv.Plain {
 		fmt.Fprintln(os.Stdout, "· "+string(dec.Intent))
@@ -345,38 +357,63 @@ func upsertProject(ctx context.Context, mem *memory.Guard, cwd string) *int64 {
 type resumeCandidate struct {
 	ID       string
 	Title    string
+	LastUser string
+	Age      time.Duration
 	Messages []llm.Message
 }
 
-func findCandidate(ctx context.Context, mem *memory.Guard, prof config.Profile, projectID *int64, cwd string, inv invocation) resumeCandidate {
+func findCandidates(ctx context.Context, mem *memory.Guard, prof config.Profile, projectID *int64, cwd string) []resumeCandidate {
 	idle := time.Duration(prof.SessionIdleMinutes) * time.Minute
 	if mem.Store() == nil {
 		if sess, ok := memory.LoadLast(prof.Name, cwd, idle); ok {
-			return resumeCandidate{Title: sess.Title, Messages: sess.Messages}
+			age := time.Duration(0)
+			if !sess.UpdatedAt.IsZero() {
+				age = time.Since(sess.UpdatedAt)
+			}
+			return []resumeCandidate{{
+				Title: sess.Title, LastUser: lastUserOf(sess.Messages), Age: age, Messages: sess.Messages,
+			}}
 		}
-		return resumeCandidate{}
+		return nil
 	}
-	sess, found, err := mem.Store().FindResumableSession(ctx, prof.Name, projectID, cwd, inv.Intent, idle)
+	rows, err := mem.Store().RecentSessions(ctx, prof.Name, projectID, cwd, idle, 3)
 	if err != nil {
 		mem.Fail(err)
-		return resumeCandidate{}
+		return nil
 	}
-	if !found {
-		return resumeCandidate{}
+	out := make([]resumeCandidate, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, resumeCandidate{ID: r.ID, Title: r.Title, LastUser: r.LastUserMessage, Age: r.Age})
 	}
-	msgs, err := mem.Store().LoadMessages(ctx, sess.ID)
-	if err != nil {
-		mem.Fail(err)
-		return resumeCandidate{}
-	}
-	return resumeCandidate{ID: sess.ID, Title: sess.Title, Messages: memory.ToLLM(msgs)}
+	return out
 }
 
-func applyResume(inv invocation, dec intent.Decision, cand resumeCandidate) (string, []llm.Message) {
-	if inv.New || !dec.ContinuesPrevious || len(cand.Messages) == 0 {
-		return "", nil
+func lastUserOf(msgs []llm.Message) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == llm.RoleUser {
+			s := msgs[i].Content
+			if utf8.RuneCountInString(s) > 120 {
+				s = string([]rune(s)[:120])
+			}
+			return s
+		}
 	}
-	return cand.ID, cand.Messages
+	return ""
+}
+
+func toIntentCandidates(cands []resumeCandidate) []intent.Candidate {
+	out := make([]intent.Candidate, len(cands))
+	for i, c := range cands {
+		out[i] = intent.Candidate{Title: c.Title, LastUser: c.LastUser, Age: c.Age}
+	}
+	return out
+}
+
+func applyResume(inv invocation, dec intent.Decision, cands []resumeCandidate) resumeCandidate {
+	if inv.New || dec.ContinuesSession <= 0 || dec.ContinuesSession > len(cands) {
+		return resumeCandidate{}
+	}
+	return cands[dec.ContinuesSession-1]
 }
 
 func createSession(ctx context.Context, mem *memory.Guard, prof config.Profile, projectID *int64, cwd, mode, request string) string {
@@ -450,14 +487,18 @@ func sessionStatus(code int) string {
 	}
 }
 
-func decideIntent(ctx context.Context, client *llm.Client, inv invocation, history []llm.Message, inRepo bool) intent.Decision {
+func decideIntent(ctx context.Context, client *llm.Client, inv invocation, cands []intent.Candidate, inRepo bool) intent.Decision {
 	if inv.Intent != "" {
+		n := 0
+		if !inv.New && len(cands) > 0 {
+			n = 1
+		}
 		return intent.Decision{
 			Intent: intent.Intent(inv.Intent), Language: "en", Reason: "flag",
-			ContinuesPrevious: !inv.New && len(history) > 0,
+			ContinuesSession: n,
 		}
 	}
-	d, _ := intent.Classify(ctx, client, inv.Request, history, inRepo)
+	d, _ := intent.Classify(ctx, client, inv.Request, cands, inRepo)
 	return d
 }
 
