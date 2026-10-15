@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -155,6 +156,41 @@ func TestNopGuard(t *testing.T) {
 	rec := NewRecorder(g, "")
 	if err := rec.Message(context.Background(), llm.Message{Content: "x"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestFailIgnoresCancel(t *testing.T) {
+	f := &fake{}
+	var n int
+	g := NewGuard(f, func(error) { n++ })
+	g.Fail(context.Canceled)
+	if n != 0 || g.Disabled() {
+		t.Fatalf("n=%d disabled=%v", n, g.Disabled())
+	}
+	g.Fail(fmt.Errorf("store: end: %w", context.Canceled))
+	if n != 0 || g.Disabled() {
+		t.Fatal("wrapped cancel")
+	}
+	f.failNext = true
+	rec := NewRecorder(g, "s")
+	_ = rec.Message(context.Background(), llm.Message{Content: "x"})
+	if n != 1 {
+		t.Fatalf("real error should disable, n=%d", n)
+	}
+}
+
+func TestIsolatedSurvivesCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	iso, stop := Isolated(ctx)
+	defer stop()
+	if err := iso.Err(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-iso.Done():
+		t.Fatal("isolated ctx already done")
+	default:
 	}
 }
 
