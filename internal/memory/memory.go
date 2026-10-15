@@ -39,6 +39,8 @@ func (g *Guard) Store() *store.Store {
 	return g.store
 }
 
+func (g *Guard) Fail(err error) { g.disable(err) }
+
 func (g *Guard) disable(err error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
