@@ -422,3 +422,45 @@ func TestRecorderGateAndFileChange(t *testing.T) {
 		t.Fatalf("messages %+v", rec2.msgs)
 	}
 }
+
+func TestDisplayMetaFallback(t *testing.T) {
+	got := displayMeta(tools.Result{Output: "error: is a directory", IsError: true})
+	if got != "is a directory" {
+		t.Fatalf("%q", got)
+	}
+	if displayMeta(tools.Result{Meta: "74 B"}) != "74 B" {
+		t.Fatal("keep meta")
+	}
+}
+
+func TestTrimLeadingBlanks(t *testing.T) {
+	if trimLeadingBlanks("\n\nhello\n") != "hello\n" {
+		t.Fatalf("%q", trimLeadingBlanks("\n\nhello\n"))
+	}
+}
+
+func TestFailedReadDirShowsMeta(t *testing.T) {
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, _ := newReplay(t, []llm.Message{
+		assistant(call("1", "read_file", `{"path":"."}`)),
+		{Role: llm.RoleAssistant, Content: "ok"},
+	})
+	var buf strings.Builder
+	err = Run(context.Background(), Config{
+		Client:    client,
+		Tools:     tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		Confirmer: stubConfirm{d: ui.Approve},
+		Out:       &buf,
+		MaxSteps:  5,
+	}, "sys", "task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "is a directory") {
+		t.Fatalf("want meta, got %q", buf.String())
+	}
+}
