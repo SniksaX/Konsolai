@@ -3,6 +3,7 @@ package tools
 import (
 	"bytes"
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -51,8 +52,8 @@ func TestWebFetchExtractsAndCaches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if act.Kind() != ReadOnly {
-		t.Fatal("want ReadOnly")
+	if act.Kind() != Mutating {
+		t.Fatal("httptest loopback must be Mutating")
 	}
 	res, err := act.Run(context.Background())
 	if err != nil || res.IsError {
@@ -109,5 +110,67 @@ func TestWebFetchSpinner(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "fetching") || !strings.Contains(buf.String(), "\033[?25l") {
 		t.Fatalf("spinner %q", buf.String())
+	}
+}
+
+func prepareFetch(t *testing.T, rawURL string) Action {
+	t.Helper()
+	g, err := safety.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool, _ := NewRegistry(g, nil, nil, nil, nil).Get("web_fetch")
+	act, err := tool.Prepare(`{"url":"` + rawURL + `"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return act
+}
+
+func TestWebFetchKindPrivateAlwaysMutating(t *testing.T) {
+	orig := lookupIPs
+	t.Cleanup(func() { lookupIPs = orig })
+	cases := []net.IP{
+		net.ParseIP("127.0.0.1"),
+		net.ParseIP("::1"),
+		net.ParseIP("10.0.0.1"),
+		net.ParseIP("192.168.1.1"),
+		net.ParseIP("172.16.0.1"),
+		net.ParseIP("169.254.1.1"),
+		net.ParseIP("fc00::1"),
+		net.ParseIP("fe80::1"),
+	}
+	for _, ip := range cases {
+		lookupIPs = func(context.Context, string) ([]net.IP, error) {
+			return []net.IP{ip}, nil
+		}
+		act := prepareFetch(t, "https://example.com/")
+		if act.Kind() != Mutating {
+			t.Fatalf("%s want Mutating got %v", ip, act.Kind())
+		}
+	}
+}
+
+func TestWebFetchKindAllowlistReadOnly(t *testing.T) {
+	orig := lookupIPs
+	lookupIPs = func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("1.2.3.4")}, nil
+	}
+	t.Cleanup(func() { lookupIPs = orig })
+	act := prepareFetch(t, "https://en.wikipedia.org/wiki/RAG")
+	if act.Kind() != ReadOnly {
+		t.Fatalf("allowlisted public want ReadOnly, got %v", act.Kind())
+	}
+}
+
+func TestWebFetchKindNotAllowlistedMutating(t *testing.T) {
+	orig := lookupIPs
+	lookupIPs = func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("1.2.3.4")}, nil
+	}
+	t.Cleanup(func() { lookupIPs = orig })
+	act := prepareFetch(t, "https://evil.example/")
+	if act.Kind() != Mutating {
+		t.Fatalf("not allowlisted want Mutating, got %v", act.Kind())
 	}
 }
