@@ -28,6 +28,10 @@ func (s stubConfirm) Confirm(string, string) (ui.Decision, string, error) {
 	return s.d, s.reason, nil
 }
 
+func (s stubConfirm) ConfirmForced(summary, preview string) (ui.Decision, string, error) {
+	return s.Confirm(summary, preview)
+}
+
 type replay struct {
 	t       *testing.T
 	mu      sync.Mutex
@@ -237,7 +241,7 @@ func TestPlanGateBlocksMutating(t *testing.T) {
 
 func TestPlanApprovalAllowsMutating(t *testing.T) {
 	root, _, err := setupCfg(t, []llm.Message{
-		assistant(call("1", "propose_plan", `{"summary":"add a.txt","steps":["write a.txt"]}`)),
+		assistant(call("1", "propose_plan", `{"summary":"add a.txt","steps":["write a.txt"],"files":["a.txt"]}`)),
 		assistant(call("2", "write_file", `{"path":"a.txt","content":"ok"}`)),
 		assistant(call("3", "finish", `{"summary":"done"}`)),
 	}, stubConfirm{d: ui.Approve}, Config{RequirePlan: true})
@@ -252,7 +256,7 @@ func TestPlanApprovalAllowsMutating(t *testing.T) {
 
 func TestPlanRejectFeedsReason(t *testing.T) {
 	_, rep, err := setupCfg(t, []llm.Message{
-		assistant(call("1", "propose_plan", `{"summary":"x","steps":["y"]}`)),
+		assistant(call("1", "propose_plan", `{"summary":"x","steps":["y"],"files":["a.txt"]}`)),
 		{Role: llm.RoleAssistant, Content: "ok"},
 	}, stubConfirm{d: ui.Reject, reason: "too risky"}, Config{RequirePlan: true})
 	if err != nil {
@@ -436,6 +440,117 @@ func TestDisplayMetaFallback(t *testing.T) {
 func TestTrimLeadingBlanks(t *testing.T) {
 	if trimLeadingBlanks("\n\nhello\n") != "hello\n" {
 		t.Fatalf("%q", trimLeadingBlanks("\n\nhello\n"))
+	}
+}
+
+func TestEmptyAnswer(t *testing.T) {
+	_, _, err := setup(t, []llm.Message{{Role: llm.RoleAssistant, Content: "\n\n"}}, nil, 0)
+	if !errors.Is(err, ErrNoAnswer) {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestDuplicateReadonlySkipped(t *testing.T) {
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	client, rep := newReplay(t, []llm.Message{
+		assistant(call("1", "read_file", `{"path":"a.txt"}`)),
+		assistant(call("2", "read_file", `{"path":"a.txt"}`)),
+		{Role: llm.RoleAssistant, Content: "done"},
+	})
+	var buf strings.Builder
+	err = Run(context.Background(), Config{
+		Client:    client,
+		Tools:     tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		Confirmer: stubConfirm{d: ui.Approve},
+		Out:       &buf,
+		MaxSteps:  5,
+	}, "sys", "task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "duplicate, skipped") {
+		t.Fatalf("%q", buf.String())
+	}
+	got := rep.lastTool()
+	if !strings.Contains(got.Content, "already made this exact call") {
+		t.Fatalf("%q", got.Content)
+	}
+}
+
+type recConfirm struct {
+	forced int
+	d      ui.Decision
+}
+
+func (r *recConfirm) Confirm(string, string) (ui.Decision, string, error) {
+	return r.d, "", nil
+}
+func (r *recConfirm) ConfirmForced(string, string) (ui.Decision, string, error) {
+	r.forced++
+	return r.d, "", nil
+}
+
+func TestOutsidePlanForcedConfirm(t *testing.T) {
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc := &recConfirm{d: ui.Approve}
+	client, _ := newReplay(t, []llm.Message{
+		assistant(call("1", "propose_plan", `{"summary":"a","steps":["a"],"files":["a.txt"]}`)),
+		assistant(call("2", "write_file", `{"path":"b.txt","content":"x"}`)),
+		assistant(call("3", "finish", `{"summary":"done"}`)),
+	})
+	err = Run(context.Background(), Config{
+		Client:      client,
+		Tools:       tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		Confirmer:   rc,
+		Out:         io.Discard,
+		MaxSteps:    8,
+		RequirePlan: true,
+	}, "sys", "task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rc.forced != 1 {
+		t.Fatalf("forced %d", rc.forced)
+	}
+}
+
+func TestOutsidePlanYesPrintsWarning(t *testing.T) {
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, _ := newReplay(t, []llm.Message{
+		assistant(call("1", "propose_plan", `{"summary":"a","steps":["a"],"files":["a.txt"]}`)),
+		assistant(call("2", "write_file", `{"path":"b.txt","content":"x"}`)),
+		assistant(call("3", "finish", `{"summary":"done"}`)),
+	})
+	var buf strings.Builder
+	err = Run(context.Background(), Config{
+		Client:      client,
+		Tools:       tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		Confirmer:   stubConfirm{d: ui.Approve},
+		Out:         &buf,
+		MaxSteps:    8,
+		RequirePlan: true,
+		AutoApprove: true,
+	}, "sys", "task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "⚠ outside plan:") {
+		t.Fatalf("%q", buf.String())
 	}
 }
 
