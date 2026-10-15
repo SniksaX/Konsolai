@@ -19,7 +19,6 @@ var (
 	reBullet  = regexp.MustCompile(`^(\s*)([-*+])\s+(.*)$`)
 	reNumber  = regexp.MustCompile(`^(\s*)(\d+)([.)])\s+(.*)$`)
 	reQuote   = regexp.MustCompile(`^(\s*)>\s?(.*)$`)
-	reFence   = regexp.MustCompile("^```\\s*(\\S*)\\s*$")
 	reTable   = regexp.MustCompile(`^\s*\|`)
 )
 
@@ -29,6 +28,8 @@ type Renderer struct {
 	plain     bool
 	buf       []byte
 	inFence   bool
+	fenceChar byte
+	fenceN    int
 	fenceLang string
 	fenceBody strings.Builder
 	table     []string
@@ -85,7 +86,7 @@ func (r *Renderer) line(s string) error {
 		return err
 	}
 	if r.inFence {
-		if reFence.MatchString(strings.TrimRight(s, "\r")) {
+		if isCloseFence(strings.TrimRight(s, "\r"), r.fenceChar, r.fenceN) {
 			body := r.fenceBody.String()
 			r.fenceBody.Reset()
 			r.inFence = false
@@ -95,12 +96,14 @@ func (r *Renderer) line(s string) error {
 		r.fenceBody.WriteByte('\n')
 		return nil
 	}
-	if m := reFence.FindStringSubmatch(strings.TrimRight(s, "\r")); m != nil {
+	if char, n, lang, ok := parseOpenFence(strings.TrimRight(s, "\r")); ok {
 		if err := r.flushTable(); err != nil {
 			return err
 		}
 		r.inFence = true
-		r.fenceLang = m[1]
+		r.fenceChar = char
+		r.fenceN = n
+		r.fenceLang = lang
 		return nil
 	}
 	if reTable.MatchString(s) {
@@ -111,6 +114,52 @@ func (r *Renderer) line(s string) error {
 		return err
 	}
 	return r.emitLine(s)
+}
+
+func parseOpenFence(s string) (char byte, n int, lang string, ok bool) {
+	i := 0
+	for i < len(s) && i < 3 && s[i] == ' ' {
+		i++
+	}
+	if i >= len(s) {
+		return 0, 0, "", false
+	}
+	char = s[i]
+	if char != '`' && char != '~' {
+		return 0, 0, "", false
+	}
+	start := i
+	for i < len(s) && s[i] == char {
+		i++
+	}
+	n = i - start
+	if n < 3 {
+		return 0, 0, "", false
+	}
+	info := strings.TrimSpace(s[i:])
+	if char == '`' && strings.Contains(info, "`") {
+		return 0, 0, "", false
+	}
+	lang = info
+	if j := strings.IndexAny(info, " \t"); j >= 0 {
+		lang = info[:j]
+	}
+	return char, n, lang, true
+}
+
+func isCloseFence(s string, char byte, n int) bool {
+	i := 0
+	for i < len(s) && i < 3 && s[i] == ' ' {
+		i++
+	}
+	start := i
+	for i < len(s) && s[i] == char {
+		i++
+	}
+	if i-start < n {
+		return false
+	}
+	return strings.TrimSpace(s[i:]) == ""
 }
 
 func (r *Renderer) emitLine(s string) error {
