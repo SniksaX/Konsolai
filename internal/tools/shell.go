@@ -127,9 +127,11 @@ func (a *shellAction) Run(ctx context.Context) (Result, error) {
 	runErr := cmd.Run()
 	if ctx.Err() != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			sec := int(a.timeout.Seconds())
 			return Result{
-				Output:  fmt.Sprintf("timed out after %ds\nexit_code: %d\n%s", int(a.timeout.Seconds()), exitCode(runErr), cap.String()),
+				Output:  fmt.Sprintf("timed out after %ds\nexit_code: %d\n%s", sec, exitCode(runErr), cap.String()),
 				IsError: true,
+				Meta:    fmt.Sprintf("timed out %ds", sec),
 			}, nil
 		}
 		return Result{}, ctx.Err()
@@ -145,6 +147,7 @@ func (a *shellAction) Run(ctx context.Context) (Result, error) {
 	return Result{
 		Output:  fmt.Sprintf("exit_code: %d\n%s", code, cap.String()),
 		IsError: code != 0,
+		Meta:    fmt.Sprintf("exit %d", code),
 	}, nil
 }
 
