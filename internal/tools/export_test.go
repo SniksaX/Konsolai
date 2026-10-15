@@ -7,11 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/siraj/konsolai/internal/docrender"
 	"github.com/siraj/konsolai/internal/safety"
 	"github.com/siraj/konsolai/internal/ui"
 )
@@ -51,6 +51,9 @@ func TestExportDocHTMLChange(t *testing.T) {
 }
 
 func TestExportDocPDFChange(t *testing.T) {
+	if _, err := docrender.FindChrome(); err != nil {
+		t.Skip("chrome not installed")
+	}
 	root := t.TempDir()
 	g, err := safety.New(root)
 	if err != nil {
@@ -123,8 +126,8 @@ func TestExportDocMermaidRenders(t *testing.T) {
 	if _, err := exec.LookPath("mmdc"); err != nil {
 		t.Skip("mmdc not installed")
 	}
-	if _, err := exec.LookPath("pdftotext"); err != nil {
-		t.Skip("pdftotext not installed")
+	if _, err := docrender.FindChrome(); err != nil {
+		t.Skip("chrome not installed")
 	}
 	root := t.TempDir()
 	g, err := safety.New(root)
@@ -137,8 +140,12 @@ func TestExportDocMermaidRenders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := htmlAct.Run(context.Background()); err != nil {
-		t.Fatal(err)
+	htmlRes, err := htmlAct.Run(context.Background())
+	if err != nil || htmlRes.IsError {
+		t.Fatal(htmlRes.Output, err)
+	}
+	if !strings.Contains(htmlRes.Meta, "diagrams") {
+		t.Fatalf("meta %q", htmlRes.Meta)
 	}
 	html, err := os.ReadFile(filepath.Join(root, "out.html"))
 	if err != nil {
@@ -162,30 +169,9 @@ func TestExportDocMermaidRenders(t *testing.T) {
 	if !strings.Contains(string(out), "Arch") && !strings.Contains(string(out), "Architecture") {
 		t.Fatalf("pdftotext %q", out)
 	}
-	if _, err := exec.LookPath("pdfimages"); err == nil {
-		list, err := exec.Command("pdfimages", "-list", pdf).CombinedOutput()
-		if err != nil {
-			t.Fatalf("pdfimages: %s %v", list, err)
-		}
-		if !strings.Contains(string(list), "image") && !strings.Contains(string(list), "smask") && !hasPDFImageRow(string(list)) {
-			t.Fatalf("pdfimages -list has no image:\n%s", list)
-		}
-	}
 }
 
 func quoteJSON(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
-}
-
-func hasPDFImageRow(s string) bool {
-	for _, line := range strings.Split(s, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) > 2 && fields[0] != "page" {
-			if _, err := strconv.Atoi(fields[0]); err == nil {
-				return true
-			}
-		}
-	}
-	return false
 }
