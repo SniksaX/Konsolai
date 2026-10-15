@@ -36,6 +36,15 @@ Do not mention the user's project unless the message is about it.`
 const LookupPrompt = `You are Konsolai. Look up facts on this machine or in this project. Use only read-only tools. Change nothing. Then finish with the answer.
 Check ports and processes with run_shell, never with web_fetch.
 If ss shows a listening socket without a process name, it belongs to another user (often root or docker). Say so and suggest ` + "`sudo ss -ltnp`" + ` or ` + "`docker ps`" + `, instead of digging further.
+
+Code analysis:
+For requests to analyse, review or give an opinion on code:
+  1. list the current directory; read its manifest (package.json, go.mod, pyproject.toml, requirements.txt, Cargo.toml) and README if present.
+  2. Identify the entry point(s) from the manifest (main, bin, scripts.start, cmd/) and read them.
+  3. outline the main source directories, then read 2 to 5 key source files (largest or most central).
+  4. Only then conclude. Never infer architecture or responsibilities from file names or sizes alone.
+  5. Before reporting a config value as current, check whether the code actually uses it (search for the name).
+Structure the answer as: Observed (each point with file:line or file), Inferred (clearly labeled guesses), Verdict.
 ` + preferReadOnlyCmd
 
 const (
@@ -50,6 +59,7 @@ const ScopeRule = `Do exactly what was asked, nothing more: no extra features, r
 const SubprojectNote = `The user is in a sub-project. Treat the current directory as the subject unless they say otherwise; mention the parent only as context.`
 
 const (
-	ExploreNoteLookup = "note: you have explored enough. Answer now, or state exactly what is missing."
-	ExploreNoteBuild  = "note: exploration budget reached. Call propose_plan now with what you know."
+	ExploreNoteLookup   = "note: you have explored enough. Answer now, or state exactly what is missing."
+	ExploreNoteBuild    = "note: exploration budget reached. Call propose_plan now with what you know."
+	AnalysisExploreNote = "read source files before concluding"
 )
