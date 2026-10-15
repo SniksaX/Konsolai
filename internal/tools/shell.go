@@ -1,0 +1,151 @@
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/siraj/konsolai/internal/llm"
+	"github.com/siraj/konsolai/internal/safety"
+)
+
+type shellTool struct {
+	guard *safety.Guard
+	out   io.Writer
+}
+
+func newShell(g *safety.Guard, out io.Writer) *shellTool {
+	return &shellTool{guard: g, out: out}
+}
+
+func (t *shellTool) Spec() llm.ToolSpec {
+	return llm.ToolSpec{
+		Type: "function",
+		Function: llm.FunctionSpec{
+			Name: "run_shell",
+			Description: "Run a bash command in a fresh process. Non-interactive only. " +
+				"Each call is a new process; cd does not persist, use cwd. " +
+				"Never start servers or watchers.",
+			Parameters: json.RawMessage(`{"type":"object","properties":{"cmd":{"type":"string","description":"Bash command to execute."},"cwd":{"type":"string","description":"Working directory relative to the project root. Defaults to the root."},"timeout_sec":{"type":"integer","description":"Timeout in seconds. Default 120, maximum 600."}},"required":["cmd"]}`),
+		},
+	}
+}
+
+type shellArgs struct {
+	Cmd        string `json:"cmd"`
+	Cwd        string `json:"cwd"`
+	TimeoutSec int    `json:"timeout_sec"`
+}
+
+type shellAction struct {
+	cmd     string
+	cwd     string
+	timeout time.Duration
+	out     io.Writer
+}
+
+func (t *shellTool) Prepare(rawArgs string) (Action, error) {
+	var args shellArgs
+	dec := json.NewDecoder(strings.NewReader(rawArgs))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&args); err != nil {
+		return nil, fmt.Errorf("tools: decode run_shell: %w", err)
+	}
+	if strings.TrimSpace(args.Cmd) == "" {
+		return nil, errors.New("tools: run_shell: cmd is required")
+	}
+	if err := t.guard.CheckCommand(args.Cmd); err != nil {
+		return nil, err
+	}
+	cwd := args.Cwd
+	if cwd == "" {
+		cwd = "."
+	}
+	resolved, err := t.guard.ResolvePath(cwd)
+	if err != nil {
+		return nil, err
+	}
+	sec := args.TimeoutSec
+	if sec == 0 {
+		sec = 120
+	}
+	if sec < 1 || sec > 600 {
+		return nil, fmt.Errorf("tools: run_shell: timeout_sec must be between 1 and 600")
+	}
+	return &shellAction{cmd: args.Cmd, cwd: resolved, timeout: time.Duration(sec) * time.Second, out: t.out}, nil
+}
+
+func (a *shellAction) Summary() string { return "run: " + a.cmd }
+func (a *shellAction) Preview() string { return "" }
+func (a *shellAction) ReadOnly() bool  { return false }
+
+func (a *shellAction) Run(ctx context.Context) (Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, a.timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "bash", "-o", "pipefail", "-c", a.cmd)
+	cmd.Dir = a.cwd
+	cmd.Stdin = nil
+	cmd.Env = append(os.Environ(),
+		"CI=1",
+		"npm_config_yes=true",
+		"GIT_TERMINAL_PROMPT=0",
+		"DEBIAN_FRONTEND=noninteractive",
+		"PAGER=cat",
+		"GIT_PAGER=cat",
+	)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.WaitDelay = 2 * time.Second
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+
+	var cap Capture
+	mw := io.MultiWriter(a.out, &cap)
+	cmd.Stdout = mw
+	cmd.Stderr = mw
+
+	runErr := cmd.Run()
+	if ctx.Err() != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return Result{
+				Output:  fmt.Sprintf("timed out after %ds\nexit_code: %d\n%s", int(a.timeout.Seconds()), exitCode(runErr), cap.String()),
+				IsError: true,
+			}, nil
+		}
+		return Result{}, ctx.Err()
+	}
+	code := 0
+	if runErr != nil {
+		var ee *exec.ExitError
+		if !errors.As(runErr, &ee) {
+			return Result{}, fmt.Errorf("tools: run_shell: %w", runErr)
+		}
+		code = ee.ExitCode()
+	}
+	return Result{
+		Output:  fmt.Sprintf("exit_code: %d\n%s", code, cap.String()),
+		IsError: code != 0,
+	}, nil
+}
+
+func exitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode()
+	}
+	return -1
+}
