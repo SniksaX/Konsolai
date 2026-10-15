@@ -106,6 +106,34 @@ func TestShellLookupRejectsMutating(t *testing.T) {
 	}
 }
 
+func TestShellBlocksExportRenderers(t *testing.T) {
+	tool := shellToolFor(t)
+	blocked := []string{
+		"mmdc -i diagram.mmd -o out.png",
+		"pandoc doc.md -o doc.pdf",
+		"typst compile doc.typ",
+		"wkhtmltopdf page.html out.pdf",
+		"weasyprint page.html out.pdf",
+		"chromium --headless --print-to-pdf=out.pdf page.html",
+		"chrome --print-to-pdf=out.pdf",
+		"google-chrome --headless --dump-dom",
+		"google-chrome-stable --print-to-pdf",
+		"firefox --headless --screenshot",
+	}
+	for _, cmd := range blocked {
+		_, err := tool.Prepare(`{"cmd":` + jsonQuote(cmd) + `}`)
+		if err == nil || !strings.Contains(err.Error(), "use the export_doc tool for diagrams and PDF/HTML export") {
+			t.Errorf("%q: %v", cmd, err)
+		}
+	}
+	if _, err := tool.Prepare(`{"cmd":"cat pandoc.md"}`); err != nil {
+		t.Fatalf("lookalike: %v", err)
+	}
+	if _, err := tool.Prepare(`{"cmd":"echo mmdc"}`); err != nil {
+		t.Fatalf("echo lookalike: %v", err)
+	}
+}
+
 func TestShellCancelKillsGrandchild(t *testing.T) {
 	act, err := shellToolFor(t).Prepare(`{"cmd":"sleep 30 & wait"}`)
 	if err != nil {
