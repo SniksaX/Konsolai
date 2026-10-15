@@ -25,12 +25,17 @@ alwaysApply: true
 - internal/llm (model client)
 - internal/sysctx (environment context)
 - internal/safety (command and path guard)
-- internal/tools (run_shell, write_file, read_file, list_dir, finish)
+- internal/diff (Myers unified diffs)
+- internal/repo (root, file listing, project detect)
+- internal/tools (run_shell, write_file, read_file, list_dir, search, find_files, edit_file, propose_plan, finish)
 - internal/agent (tool-calling loop)
 - internal/ui (TTY prompt and ANSI)
 - New packages only when the architect specifies them.
 - Grammar: konsolai [--yes] [howto|do|code] "<request>"
   The optional mode is a separate argument; the request is exactly one argument.
+- do: cwd root, do prompt, no thinking, 15 steps, no plan gate, 60k token budget.
+- code: repo.Root, CodePrompt plus project context, thinking, temp 0.3, 60 steps,
+  RequirePlan, 60k token budget; then git diff --stat (no confirm), printed dimmed.
 - Exit codes: 0 ok, 1 error, 2 usage, 3 aborted, 4 max steps, 130 cancelled.
 
 ## Server
