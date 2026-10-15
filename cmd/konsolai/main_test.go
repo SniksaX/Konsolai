@@ -1,13 +1,18 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/siraj/konsolai/internal/agent"
 	"github.com/siraj/konsolai/internal/intent"
+	"github.com/siraj/konsolai/internal/llm"
 )
 
 func TestParseArgs(t *testing.T) {
@@ -191,5 +196,57 @@ func TestThinkingFor(t *testing.T) {
 	}
 	if g := thinkingFor(intent.Decision{Intent: intent.Act, Reasoning: true}); g != agent.ThinkOn {
 		t.Fatalf("act+reason %v", g)
+	}
+}
+
+func TestSanitizeAnswerHistory(t *testing.T) {
+	hist := []llm.Message{
+		{Role: llm.RoleTool, Content: "tool"},
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "1"}}},
+		{Role: llm.RoleUser, Content: "u1"},
+		{Role: llm.RoleAssistant, Content: "a1"},
+	}
+	for i := 0; i < 14; i++ {
+		hist = append(hist, llm.Message{Role: llm.RoleUser, Content: "x"})
+	}
+	got := sanitizeAnswerHistory(hist)
+	if len(got) != 12 {
+		t.Fatalf("len %d", len(got))
+	}
+	for _, m := range got {
+		if m.Role == llm.RoleTool {
+			t.Fatal("tool kept")
+		}
+		if m.Role == llm.RoleAssistant && m.Content == "" && len(m.ToolCalls) > 0 {
+			t.Fatal("tool_calls-only kept")
+		}
+	}
+}
+
+func TestStreamAnswerRetryThenEmpty(t *testing.T) {
+	var n int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if n == 1 {
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"\"}}]}\n\n")
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+			return
+		}
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(srv.Close)
+	c := llm.New(srv.URL+"/v1", "qwen")
+	out, _, err := streamAnswer(context.Background(), c, []llm.Message{{Role: llm.RoleUser, Content: "q"}}, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != "" {
+		t.Fatalf("first %q", out)
+	}
+	out, _, err = streamAnswer(context.Background(), c, []llm.Message{{Role: llm.RoleUser, Content: "q"}}, false, true)
+	if err != nil || out != "hi" {
+		t.Fatalf("retry %q %v", out, err)
 	}
 }
