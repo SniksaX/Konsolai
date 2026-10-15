@@ -740,6 +740,50 @@ func TestInPlanMarkerAndWhitespace(t *testing.T) {
 	}
 }
 
+func TestInPlanCmdSegments(t *testing.T) {
+	cmds := []string{"npm init -y", "npm install express"}
+	if !inPlanCmd(cmds, "npm init -y && npm install express") {
+		t.Fatal("joined && should be in plan")
+	}
+	if inPlanCmd(cmds, "npm init -y && npm install lodash") {
+		t.Fatal("undeclared segment should be outside")
+	}
+	if !inPlanCmd([]string{`echo "a && b"`}, `echo "a && b"`) {
+		t.Fatal("quoted && must stay one command")
+	}
+	if inPlanCmd(cmds, `echo "npm init -y && npm install express"`) {
+		t.Fatal("quoted && must not split into declared segments")
+	}
+	if inPlanCmd([]string{"ss -ltnp", "grep 80"}, "ss -ltnp | grep 80") {
+		t.Fatal("pipeline must not split")
+	}
+	if !inPlanCmd([]string{"ss -ltnp | grep 80"}, "ss -ltnp | grep 80") {
+		t.Fatal("declared pipeline should match")
+	}
+}
+
+func TestInPlanAndJoinAutoApprove(t *testing.T) {
+	cc := &countConfirm{d: ui.Approve}
+	var buf strings.Builder
+	_, _, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "propose_plan", `{"summary":"a","steps":["i"],"files":["package.json"],"commands":["npm init -y","npm install express"]}`)),
+		assistant(call("2", "run_shell", `{"cmd":"npm init -y && npm install express"}`)),
+		assistant(call("3", "finish", `{"summary":"done"}`)),
+	}, cc, Config{RequirePlan: true, Out: &buf})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cc.n != 1 {
+		t.Fatalf("confirm %d want 1", cc.n)
+	}
+	if cc.forced != 0 {
+		t.Fatalf("forced %d", cc.forced)
+	}
+	if !strings.Contains(buf.String(), "(in plan)") {
+		t.Fatalf("%q", buf.String())
+	}
+}
+
 func TestApproveAllDoesNotCoverOutsidePlan(t *testing.T) {
 	cc := &countConfirm{d: ui.ApproveAll}
 	_, _, err := setupCfg(t, []llm.Message{
