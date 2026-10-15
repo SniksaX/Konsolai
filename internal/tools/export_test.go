@@ -1,13 +1,16 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/siraj/konsolai/internal/safety"
+	"github.com/siraj/konsolai/internal/ui"
 )
 
 func TestExportDocHTMLChange(t *testing.T) {
@@ -71,5 +74,27 @@ func TestExportDocPDFChange(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join(root, "out.pdf"))
 	if err != nil || !strings.HasPrefix(string(b), "%PDF") {
 		t.Fatalf("pdf %q %v", b, err)
+	}
+}
+
+func TestExportDocSpinner(t *testing.T) {
+	var buf bytes.Buffer
+	restore := ui.TestHook(&buf, true, 5*time.Millisecond, nil)
+	defer restore()
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool, _ := NewRegistry(g, nil, nil, nil, nil).Get("export_doc")
+	act, err := tool.Prepare(`{"path":"out.html","format":"html","content":"<p>x</p>"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := act.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "exporting") || !strings.Contains(buf.String(), "\033[?25l") {
+		t.Fatalf("spinner %q", buf.String())
 	}
 }
