@@ -87,21 +87,35 @@ func TestClassifySchemaAndRecent(t *testing.T) {
 	if _, ok := wrap.JSONSchema.Schema.Properties["reasoning"]; !ok {
 		t.Fatal("schema missing reasoning")
 	}
+	if _, ok := wrap.JSONSchema.Schema.Properties["task"]; !ok {
+		t.Fatal("schema missing task")
+	}
 	found := false
+	taskReq := false
 	for _, r := range wrap.JSONSchema.Schema.Required {
 		if r == "reasoning" {
 			found = true
 		}
+		if r == "task" {
+			taskReq = true
+		}
 	}
-	if !found {
+	if !found || !taskReq {
 		t.Fatalf("required %v", wrap.JSONSchema.Schema.Required)
+	}
+	if !strings.Contains(joined, `task is "analysis"`) {
+		t.Fatal("router prompt missing task rule")
 	}
 }
 
 func TestParseDecision(t *testing.T) {
 	d, ok := parseDecision(`{"intent":"build","language":"fr","reason":"code","reasoning":false}`)
-	if !ok || d.Intent != Build || d.Language != "fr" || d.Reasoning {
+	if !ok || d.Intent != Build || d.Language != "fr" || d.Reasoning || d.Task != TaskOther {
 		t.Fatalf("%+v %v", d, ok)
+	}
+	d, ok = parseDecision(`{"intent":"lookup","language":"en","reason":"review","reasoning":true,"task":"analysis"}`)
+	if !ok || d.Task != TaskAnalysis {
+		t.Fatalf("task %+v %v", d, ok)
 	}
 	d, ok = parseDecision(`{"intent":"answer","language":"en","reason":"debug","reasoning":true}`)
 	if !ok || !d.Reasoning {
