@@ -98,7 +98,6 @@ func NewRegistry(g *safety.Guard, out io.Writer, files FileLister, cache WebCach
 	if facts == nil {
 		facts = NopFactStore{}
 	}
-	_ = cache
 	list := []Tool{
 		newShell(g, out),
 		newWriteFile(g),
@@ -109,6 +108,8 @@ func NewRegistry(g *safety.Guard, out io.Writer, files FileLister, cache WebCach
 		newEditFile(g),
 		newProposePlan(),
 		newRemember(facts),
+		newWebFetch(cache),
+		newExportDoc(g),
 		newFinish(),
 	}
 	byName := make(map[string]Tool, len(list))
