@@ -110,8 +110,11 @@ func TestClassifySchemaAndRecent(t *testing.T) {
 	if !found || !taskReq || !contReq {
 		t.Fatalf("required %v", wrap.JSONSchema.Schema.Required)
 	}
-	if !strings.Contains(joined, `task is "analysis"`) {
+	if !strings.Contains(joined, `task is "analysis"`) || !strings.Contains(joined, `"docs"`) {
 		t.Fatal("router prompt missing task rule")
+	}
+	if !strings.Contains(string(wrap.JSONSchema.Schema.Properties["task"]), `"docs"`) {
+		t.Fatal("schema missing docs task")
 	}
 	if !strings.Contains(joined, "continues_previous=true only if") {
 		t.Fatal("router prompt missing continues_previous rule")
@@ -126,6 +129,10 @@ func TestParseDecision(t *testing.T) {
 	d, ok = parseDecision(`{"intent":"lookup","language":"en","reason":"review","reasoning":true,"task":"analysis","continues_previous":true}`)
 	if !ok || d.Task != TaskAnalysis || !d.ContinuesPrevious {
 		t.Fatalf("task %+v %v", d, ok)
+	}
+	d, ok = parseDecision(`{"intent":"build","language":"en","reason":"readme","reasoning":false,"task":"docs","continues_previous":false}`)
+	if !ok || d.Task != TaskDocs {
+		t.Fatalf("docs %+v %v", d, ok)
 	}
 	d, ok = parseDecision(`{"intent":"answer","language":"en","reason":"debug","reasoning":true}`)
 	if !ok || !d.Reasoning {
