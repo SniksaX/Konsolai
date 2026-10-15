@@ -35,8 +35,16 @@ func OpenPrompter(autoApprove bool) (*Prompter, error) {
 	return p, nil
 }
 
+func (p *Prompter) ConfirmForced(summary, preview string) (Decision, string, error) {
+	return p.confirm(summary, preview, true)
+}
+
 func (p *Prompter) Confirm(summary, preview string) (Decision, string, error) {
-	if p.autoApprove || p.approveAll {
+	return p.confirm(summary, preview, false)
+}
+
+func (p *Prompter) confirm(summary, preview string, force bool) (Decision, string, error) {
+	if p.autoApprove || (!force && p.approveAll) {
 		return Approve, "", nil
 	}
 	in := bufio.NewReader(p.tty)
