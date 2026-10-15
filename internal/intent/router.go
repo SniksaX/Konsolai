@@ -54,6 +54,7 @@ language is the ISO 639-1 code of the user's message.
 reasoning=true when the request needs multi-step analysis: debugging an error or a pasted command, comparing approaches, non-trivial code questions. false for greetings, simple facts and simple commands.
 task is "analysis" when the user asks to analyse, review or give an opinion on code; "docs" when they ask to generate documentation, READMEs, diagrams or reports about code; otherwise "other".
 continues_session: Pick the conversation this message follows up, or 0 if it starts a new topic. Prefer 0 when unsure.
+Prefer 0 (new topic) when the new request is a different task, even about the same project (e.g. a PDF overview after a README request).
 Never print a secret value in full. Refer to it by name and its first 4 characters.`
 
 var decisionSchema = json.RawMessage(`{"type":"object","properties":{"intent":{"type":"string","enum":["answer","lookup","act","build"]},"language":{"type":"string"},"reason":{"type":"string"},"reasoning":{"type":"boolean"},"task":{"type":"string","enum":["analysis","docs","other"]},"continues_session":{"type":"integer"}},"required":["intent","language","reason","reasoning","task","continues_session"],"additionalProperties":false}`)
