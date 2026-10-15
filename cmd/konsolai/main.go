@@ -277,7 +277,11 @@ func run() int {
 		sessionID = createSession(ctx, mem, prof, projectID, cwd, string(dec.Intent), inv.Request)
 	}
 	rec := memory.NewRecorder(mem, sessionID)
-	code := runProfile(ctx, client, snap, facts, history, rec, mem, sessionID, projectID, prof.Name, inv, cwd, prompter, dec, routerTime)
+	tap := &sessionTap{inner: rec, msgs: append([]llm.Message(nil), history...)}
+	if len(tap.msgs) > 20 {
+		tap.msgs = tap.msgs[len(tap.msgs)-20:]
+	}
+	code := runProfile(ctx, client, snap, facts, history, tap, mem, sessionID, projectID, prof.Name, inv, cwd, prompter, dec, routerTime)
 	if sessionID != "" {
 		if s := mem.Store(); s != nil {
 			endCtx, cancel := memory.Isolated(ctx)
@@ -286,6 +290,23 @@ func run() int {
 				mem.Fail(err)
 			}
 		}
+	}
+	if mem.Store() == nil {
+		title := inv.Request
+		if utf8.RuneCountInString(title) > 80 {
+			title = string([]rune(title)[:80])
+		}
+		if !inv.New {
+			if prev, ok := memory.LoadLast(prof.Name, cwd, time.Duration(prof.SessionIdleMinutes)*time.Minute); ok && prev.Title != "" {
+				title = prev.Title
+			}
+		}
+		_ = memory.SaveLast(memory.LastSession{
+			Profile:  prof.Name,
+			CWD:      cwd,
+			Title:    title,
+			Messages: tap.msgs,
+		})
 	}
 	return code
 }
@@ -309,10 +330,17 @@ func upsertProject(ctx context.Context, mem *memory.Guard, cwd string) *int64 {
 }
 
 func resumeSession(ctx context.Context, mem *memory.Guard, prof config.Profile, projectID *int64, cwd string, inv invocation) (string, []llm.Message) {
-	if mem.Store() == nil || inv.New {
+	if inv.New {
 		return "", nil
 	}
 	idle := time.Duration(prof.SessionIdleMinutes) * time.Minute
+	if mem.Store() == nil {
+		if sess, ok := memory.LoadLast(prof.Name, cwd, idle); ok {
+			fmt.Fprintln(os.Stdout, ui.Dim("↻ continuing session: "+sess.Title))
+			return "", sess.Messages
+		}
+		return "", nil
+	}
 	sess, found, err := mem.Store().FindResumableSession(ctx, prof.Name, projectID, cwd, inv.Intent, idle)
 	if err != nil {
 		mem.Fail(err)
@@ -427,11 +455,11 @@ func thinkingFor(dec intent.Decision) agent.ThinkingPolicy {
 	return agent.ThinkOff
 }
 
-func runAnswer(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, query, extra string, think bool, inv invocation, dec intent.Decision, routerTime time.Duration) int {
+func runAnswer(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, history []llm.Message, rec agent.Recorder, query, extra string, think bool, inv invocation, dec intent.Decision, routerTime time.Duration) int {
 	if rec == nil {
 		rec = agent.NopRecorder{}
 	}
-	system := llm.Message{Role: llm.RoleSystem, Content: extra + "\n\n" + snap.String() + facts}
+	system := llm.Message{Role: llm.RoleSystem, Content: extra + "\n\n" + snap.Brief()}
 	user := llm.Message{Role: llm.RoleUser, Content: query}
 	msgs := []llm.Message{system}
 	msgs = append(msgs, sanitizeAnswerHistory(history)...)
@@ -527,11 +555,43 @@ func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 
 func trimLeadingBlanks(s string) string { return strings.TrimLeft(s, "\r\n") }
 
+type sessionTap struct {
+	inner agent.Recorder
+	msgs  []llm.Message
+}
+
+func (t *sessionTap) Message(ctx context.Context, m llm.Message) error {
+	if m.Role != llm.RoleSystem {
+		t.msgs = append(t.msgs, m)
+		if len(t.msgs) > 20 {
+			t.msgs = t.msgs[len(t.msgs)-20:]
+		}
+	}
+	if t.inner != nil {
+		return t.inner.Message(ctx, m)
+	}
+	return nil
+}
+
+func (t *sessionTap) Action(ctx context.Context, a agent.ActionRecord) error {
+	if t.inner != nil {
+		return t.inner.Action(ctx, a)
+	}
+	return nil
+}
+
+func (t *sessionTap) FileChange(ctx context.Context, c tools.FileChange) error {
+	if t.inner != nil {
+		return t.inner.FileChange(ctx, c)
+	}
+	return nil
+}
+
 func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, mem *memory.Guard, sessionID string, projectID *int64, profile string, inv invocation, cwd string, prompter *ui.Prompter, dec intent.Decision, routerTime time.Duration) int {
 	defer prompter.Close()
 	lang := langLine(dec)
 	if dec.Intent == intent.Answer {
-		return runAnswer(ctx, client, snap, facts, history, rec, inv.Request, agent.AnswerPrompt+"\n"+lang, dec.Reasoning, inv, dec, routerTime)
+		return runAnswer(ctx, client, snap, history, rec, inv.Request, agent.AnswerPrompt+"\n"+lang, dec.Reasoning, inv, dec, routerTime)
 	}
 
 	root := repo.Root(cwd)
