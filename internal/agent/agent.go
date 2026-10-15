@@ -626,13 +626,54 @@ func inPlanCmd(cmds []string, cmd string) bool {
 }
 
 func matchDeclared(cmds []string, cmd string) bool {
-	want := normCmd(cmd)
+	want := equivCmd(cmd)
 	for _, c := range cmds {
-		if normCmd(c) == want {
+		if equivCmd(c) == want {
 			return true
 		}
 	}
 	return false
+}
+
+func equivCmd(s string) string {
+	return stripLauncher(normCmd(s))
+}
+
+var launcherPrefixes = []string{
+	"npx -y ",
+	"npx ",
+	"pnpm exec ",
+	"pnpm dlx ",
+	"npm exec -- ",
+}
+
+var yarnCommands = map[string]bool{
+	"install": true, "add": true, "remove": true, "run": true, "init": true,
+	"test": true, "build": true, "start": true, "dev": true, "workspace": true,
+	"workspaces": true, "dlx": true, "exec": true, "create": true, "global": true,
+	"upgrade": true, "outdated": true, "why": true, "info": true, "config": true,
+	"cache": true, "help": true, "version": true, "publish": true, "link": true,
+	"unlink": true, "pack": true,
+}
+
+func stripLauncher(s string) string {
+	lower := strings.ToLower(s)
+	for _, p := range launcherPrefixes {
+		if strings.HasPrefix(lower, p) {
+			return strings.TrimSpace(s[len(p):])
+		}
+	}
+	if strings.HasPrefix(lower, "yarn ") {
+		rest := strings.TrimSpace(s[5:])
+		first := rest
+		if i := strings.IndexByte(rest, ' '); i >= 0 {
+			first = rest[:i]
+		}
+		if first != "" && !yarnCommands[strings.ToLower(first)] {
+			return rest
+		}
+	}
+	return s
 }
 
 func splitPlanSegments(cmd string) []string {
