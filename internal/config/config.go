@@ -3,12 +3,16 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 var (
@@ -126,18 +130,46 @@ func DisableLine(databaseURL string, err error) string {
 	if host == "" {
 		host = "database"
 	}
-	cause := ""
-	if err != nil {
-		cause = err.Error()
-	}
-	if i := strings.IndexByte(cause, '\n'); i >= 0 {
-		cause = cause[:i]
-	}
-	cause = stripConnectSecrets(cause)
+	cause := innermostCause(err)
 	if cause == "" {
 		cause = "unknown error"
 	}
 	return "memory disabled: cannot connect to " + host + ": " + cause
+}
+
+func innermostCause(err error) string {
+	if err == nil {
+		return ""
+	}
+	var op *net.OpError
+	if errors.As(err, &op) {
+		if op.Err != nil {
+			return stripConnectSecrets(firstLine(op.Err.Error()))
+		}
+		return stripConnectSecrets(firstLine(op.Error()))
+	}
+	var ce *pgconn.ConnectError
+	if errors.As(err, &ce) {
+		if inner := errors.Unwrap(ce); inner != nil {
+			return innermostCause(inner)
+		}
+		return stripConnectSecrets(firstLine(ce.Error()))
+	}
+	for {
+		next := errors.Unwrap(err)
+		if next == nil {
+			break
+		}
+		err = next
+	}
+	return stripConnectSecrets(firstLine(err.Error()))
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 func stripConnectSecrets(s string) string {
