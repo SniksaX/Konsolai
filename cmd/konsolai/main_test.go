@@ -275,3 +275,24 @@ func TestResumeSessionLocalFallback(t *testing.T) {
 		t.Fatalf("new should ignore local: %+v", hist)
 	}
 }
+
+func TestModelErrorLine(t *testing.T) {
+	ep := "http://fatboy:11436/v1"
+	if got := modelErrorLine(ep, llm.ErrIdleTimeout, false); !strings.Contains(got, "stopped responding (fatboy:11436)") {
+		t.Fatalf("idle %q", got)
+	}
+	if got := modelErrorLine(ep, llm.ErrTruncated, false); !strings.Contains(got, "cut off") {
+		t.Fatalf("trunc %q", got)
+	}
+	he := &llm.HTTPError{Status: 400, Body: "bad schema\nmore"}
+	if got := modelErrorLine(ep, he, false); got != "konsolai: the model server rejected the request: bad schema" {
+		t.Fatalf("4xx %q", got)
+	}
+	dial := errors.New("llm: chat: dial tcp: connection refused")
+	if got := modelErrorLine(ep, dial, false); got != "konsolai: cannot reach the model server at fatboy:11436." {
+		t.Fatalf("dial %q", got)
+	}
+	if got := modelErrorLine(ep, llm.ErrIdleTimeout, true); !strings.Contains(got, llm.ErrIdleTimeout.Error()) {
+		t.Fatalf("trace %q", got)
+	}
+}
