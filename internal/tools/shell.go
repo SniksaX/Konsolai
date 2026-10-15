@@ -118,7 +118,9 @@ func (a *shellAction) Run(ctx context.Context) (Result, error) {
 	}
 
 	var cap Capture
-	mw := io.MultiWriter(a.out, &cap)
+	lim := NewLineLimiter(a.out)
+	defer lim.Close(a.out)
+	mw := io.MultiWriter(lim, &cap)
 	cmd.Stdout = mw
 	cmd.Stderr = mw
 
