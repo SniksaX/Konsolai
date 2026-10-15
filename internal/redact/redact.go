@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -60,8 +61,13 @@ func init() {
 		},
 		{
 			name: "kv",
-			re:   regexp.MustCompile(`(?i)((?:api[_-]?key|secret|token|passw(?:or)?d|auth(?:orization)?|private[_-]?key)(?:\s*=\s*|\s*:\s+))(\S+)`),
+			re:   regexp.MustCompile(`(?i)((?:[A-Za-z0-9_.-]*(?:KEYS?|TOKENS?|SECRETS?|PASSWORDS?|PASSWDS?|PASS|CREDENTIALS?|PRIVATE)[A-Za-z0-9_.-]*|auth(?:orization)?)(?:\s*=\s*|\s*:\s+))(\S+)`),
 			repl: "${1}[REDACTED:kv]",
+		},
+		{
+			name: "env",
+			re:   regexp.MustCompile(`(?m)^(\s*[A-Za-z_][A-Za-z0-9_]*\s*[=:]\s*)([A-Fa-f0-9]{32,}|[A-Za-z0-9_-]{32,})\s*$`),
+			repl: "${1}[REDACTED:env]",
 		},
 	}
 }
@@ -136,6 +142,33 @@ func redactArray(raw []byte) []byte {
 		return raw
 	}
 	return b
+}
+
+var envAssign = regexp.MustCompile(`^(\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*[=:]\s*)(\S+)(.*)$`)
+
+func MaskValues(s string) (string, int) {
+	if s == "" {
+		return s, 0
+	}
+	lines := strings.Split(s, "\n")
+	n := 0
+	for i, line := range lines {
+		sub := envAssign.FindStringSubmatch(line)
+		if sub == nil || sub[2] == "" {
+			continue
+		}
+		n++
+		lines[i] = sub[1] + maskKeep4(sub[2]) + sub[3]
+	}
+	return strings.Join(lines, "\n"), n
+}
+
+func maskKeep4(v string) string {
+	keep := v
+	if len(v) > 4 {
+		keep = v[:4]
+	}
+	return keep + "…[masked " + strconv.Itoa(len(v)) + " chars]"
 }
 
 func SensitivePath(path string) bool {
