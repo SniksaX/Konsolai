@@ -431,45 +431,19 @@ func runAnswer(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, fa
 	if rec == nil {
 		rec = agent.NopRecorder{}
 	}
-	msgs := []llm.Message{
-		{Role: llm.RoleSystem, Content: extra + "\n\n" + snap.String() + facts},
-	}
-	msgs = append(msgs, history...)
+	system := llm.Message{Role: llm.RoleSystem, Content: extra + "\n\n" + snap.String() + facts}
 	user := llm.Message{Role: llm.RoleUser, Content: query}
+	msgs := []llm.Message{system}
+	msgs = append(msgs, sanitizeAnswerHistory(history)...)
 	msgs = append(msgs, user)
 	_ = rec.Message(ctx, user)
 
-	var filter llm.ThinkFilter
-	var collected strings.Builder
 	t0 := time.Now()
-	stopThink := ui.Start("thinking")
-	first := true
-	rend := ui.NewRenderer(os.Stdout, inv.Plain)
-	usage, streamErr := client.Stream(ctx, msgs, llm.ChatOptions{Thinking: think, Temperature: 0.3}, func(delta string) error {
-		s := filter.Write(delta)
-		if first && s != "" {
-			stopThink()
-			first = false
-			_, _ = io.WriteString(os.Stdout, "\n")
-		}
-		collected.WriteString(s)
-		_, err := rend.Write([]byte(s))
-		return err
-	})
-	if first {
-		stopThink()
+	out, usage, streamErr := streamAnswer(ctx, client, msgs, think, inv.Plain)
+	if streamErr == nil && strings.TrimSpace(out) == "" {
+		out, usage, streamErr = streamAnswer(ctx, client, []llm.Message{system, user}, think, inv.Plain)
 	}
 	modelTime := time.Since(t0)
-	rest := filter.Flush()
-	collected.WriteString(rest)
-	out := trimLeadingBlanks(collected.String())
-	if rest != "" {
-		_, _ = rend.Write([]byte(rest))
-	}
-	_ = rend.Flush()
-	if !strings.HasSuffix(out, "\n") && out != "" {
-		_, _ = io.WriteString(os.Stdout, "\n")
-	}
 	_ = rec.Message(ctx, llm.Message{Role: llm.RoleAssistant, Content: out})
 	st := agent.Stats{
 		Steps:            1,
@@ -495,6 +469,60 @@ func runAnswer(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, fa
 		return 1
 	}
 	return 0
+}
+
+func sanitizeAnswerHistory(hist []llm.Message) []llm.Message {
+	var keep []llm.Message
+	for _, m := range hist {
+		switch m.Role {
+		case llm.RoleTool:
+			continue
+		case llm.RoleAssistant:
+			if strings.TrimSpace(m.Content) == "" && len(m.ToolCalls) > 0 {
+				continue
+			}
+			keep = append(keep, m)
+		case llm.RoleUser:
+			keep = append(keep, m)
+		}
+	}
+	if len(keep) > 12 {
+		keep = keep[len(keep)-12:]
+	}
+	return keep
+}
+
+func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, think, plain bool) (string, llm.Usage, error) {
+	var filter llm.ThinkFilter
+	var collected strings.Builder
+	stopThink := ui.Start("thinking")
+	first := true
+	rend := ui.NewRenderer(os.Stdout, plain)
+	usage, err := client.Stream(ctx, msgs, llm.ChatOptions{Thinking: think, Temperature: 0.3}, func(delta string) error {
+		s := filter.Write(delta)
+		if first && s != "" {
+			stopThink()
+			first = false
+			_, _ = io.WriteString(os.Stdout, "\n")
+		}
+		collected.WriteString(s)
+		_, werr := rend.Write([]byte(s))
+		return werr
+	})
+	if first {
+		stopThink()
+	}
+	rest := filter.Flush()
+	collected.WriteString(rest)
+	if rest != "" {
+		_, _ = rend.Write([]byte(rest))
+	}
+	_ = rend.Flush()
+	out := trimLeadingBlanks(collected.String())
+	if out != "" && !strings.HasSuffix(out, "\n") {
+		_, _ = io.WriteString(os.Stdout, "\n")
+	}
+	return out, usage, err
 }
 
 func trimLeadingBlanks(s string) string { return strings.TrimLeft(s, "\r\n") }
