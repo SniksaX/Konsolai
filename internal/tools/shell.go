@@ -73,6 +73,9 @@ func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 	if err := t.guard.CheckCommand(args.Cmd); err != nil {
 		return nil, err
 	}
+	if blocksExport(args.Cmd) {
+		return nil, errors.New("use the export_doc tool for diagrams and PDF/HTML export")
+	}
 	ro := safety.IsReadOnlyCommand(args.Cmd)
 	if t.readOnlyOnly && !ro {
 		return nil, errors.New("lookup can only run read-only commands")
@@ -159,6 +162,27 @@ func (a *shellAction) Run(ctx context.Context) (Result, error) {
 		IsError: code != 0,
 		Meta:    fmt.Sprintf("exit %d", code),
 	}, nil
+}
+
+var exportBins = map[string]bool{
+	"mmdc": true, "pandoc": true, "typst": true, "wkhtmltopdf": true, "weasyprint": true,
+}
+
+var browserBins = map[string]bool{
+	"chromium": true, "chrome": true, "google-chrome": true, "google-chrome-stable": true, "firefox": true,
+}
+
+func blocksExport(cmd string) bool {
+	for _, seg := range safety.SplitSegments(cmd) {
+		bin := safety.SegmentBinary(seg)
+		if exportBins[bin] {
+			return true
+		}
+		if browserBins[bin] && (strings.Contains(seg, "--headless") || strings.Contains(seg, "--print-to-pdf")) {
+			return true
+		}
+	}
+	return false
 }
 
 func exitCode(err error) int {
