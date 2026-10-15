@@ -555,6 +555,7 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 		sys = codeContext(ctx, snap, root) + facts
 	default:
 		cfg.Prompt = agent.ActPrompt + "\n" + lang + "\n" + agent.ScopeRule
+		cfg.RequirePlan = true
 		cfg.MaxSteps = 15
 		cfg.ExploreBudget = 6
 		cfg.ExploreNote = agent.ExploreNoteLookup
