@@ -1,0 +1,142 @@
+package config
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+const (
+	defaultEndpoint    = "http://fatboy:11436/v1"
+	defaultIdleMinutes = 30
+	defaultRetention   = 90
+	builtinProfile     = "default"
+)
+
+type File struct {
+	DefaultProfile string             `json:"default_profile"`
+	Profiles       map[string]Profile `json:"profiles"`
+}
+
+type Profile struct {
+	Name               string `json:"-"`
+	DatabaseURL        string `json:"database_url"`
+	Endpoint           string `json:"endpoint"`
+	Model              string `json:"model"`
+	SessionIdleMinutes int    `json:"session_idle_minutes"`
+	RetentionDays      int    `json:"retention_days"`
+}
+
+func DefaultPath() string {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "konsolai", "config.json")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".config", "konsolai", "config.json")
+	}
+	return filepath.Join(home, ".config", "konsolai", "config.json")
+}
+
+func Load(path string) (File, error) {
+	if path == "" {
+		path = DefaultPath()
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return File{}, nil
+		}
+		return File{}, fmt.Errorf("config: read %s: %w", path, err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	var f File
+	if err := dec.Decode(&f); err != nil {
+		return File{}, fmt.Errorf("config: decode %s: %w", path, err)
+	}
+	return f, nil
+}
+
+func (f File) Resolve(name string) (Profile, error) {
+	if name == "" {
+		name = os.Getenv("KONSOLAI_PROFILE")
+	}
+	if name == "" {
+		name = f.DefaultProfile
+	}
+	if name == "" {
+		name = builtinProfile
+	}
+	p, ok := f.Profiles[name]
+	if !ok {
+		if name != builtinProfile {
+			return Profile{}, fmt.Errorf("config: unknown profile %q", name)
+		}
+		p = Profile{}
+	}
+	p.Name = name
+	if p.Endpoint == "" {
+		p.Endpoint = defaultEndpoint
+	}
+	if p.SessionIdleMinutes == 0 {
+		p.SessionIdleMinutes = defaultIdleMinutes
+	}
+	if p.RetentionDays == 0 {
+		p.RetentionDays = defaultRetention
+	}
+	if v := os.Getenv("KONSOLAI_DATABASE_URL"); v != "" {
+		p.DatabaseURL = v
+	}
+	if v := os.Getenv("KONSOLAI_ENDPOINT"); v != "" {
+		p.Endpoint = v
+	}
+	if v := os.Getenv("KONSOLAI_MODEL"); v != "" {
+		p.Model = v
+	}
+	return p, nil
+}
+
+// Location returns host/dbname for display. It never includes the URL or secrets.
+func (p Profile) Location() string {
+	host, db := hostDB(p.DatabaseURL)
+	switch {
+	case host != "" && db != "":
+		return host + "/" + db
+	case host != "":
+		return host
+	default:
+		return db
+	}
+}
+
+func hostDB(raw string) (host, dbname string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ""
+	}
+	if strings.HasPrefix(raw, "postgres://") || strings.HasPrefix(raw, "postgresql://") {
+		u, err := url.Parse(raw)
+		if err != nil {
+			return "", ""
+		}
+		return u.Host, strings.TrimPrefix(u.Path, "/")
+	}
+	for _, field := range strings.Fields(raw) {
+		k, v, ok := strings.Cut(field, "=")
+		if !ok {
+			continue
+		}
+		switch k {
+		case "host":
+			host = v
+		case "dbname":
+			dbname = v
+		}
+	}
+	return host, dbname
+}
