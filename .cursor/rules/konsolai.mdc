@@ -24,8 +24,13 @@ alwaysApply: true
 - cmd/konsolai (entrypoint)
 - internal/llm (model client)
 - internal/sysctx (environment context)
+- internal/safety (command and path guard)
+- internal/tools (run_shell, write_file, read_file, list_dir, finish)
+- internal/agent (tool-calling loop)
+- internal/ui (TTY prompt and ANSI)
 - shell/ (bash integration)
 - New packages only when the architect specifies them.
+- Exit codes: 0 ok, 1 error, 2 usage, 3 aborted, 4 max steps, 130 cancelled.
 
 ## Server
 - vLLM at http://fatboy:11436/v1, model qwen38.nvfp4, max_model_len 94208.
