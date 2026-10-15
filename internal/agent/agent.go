@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,31 @@ import (
 	"github.com/siraj/konsolai/internal/tools"
 	"github.com/siraj/konsolai/internal/ui"
 )
+
+type Recorder interface {
+	Message(ctx context.Context, m llm.Message) error
+	Action(ctx context.Context, a ActionRecord) error
+	FileChange(ctx context.Context, c tools.FileChange) error
+}
+
+type ActionRecord struct {
+	Seq          int
+	Tool         string
+	Args         json.RawMessage
+	Kind         tools.ActionKind
+	Decision     string
+	RejectReason string
+	IsError      bool
+	Meta         string
+	Duration     time.Duration
+	Output       string
+}
+
+type NopRecorder struct{}
+
+func (NopRecorder) Message(context.Context, llm.Message) error         { return nil }
+func (NopRecorder) Action(context.Context, ActionRecord) error         { return nil }
+func (NopRecorder) FileChange(context.Context, tools.FileChange) error { return nil }
 
 type Confirmer interface {
 	Confirm(summary, preview string) (ui.Decision, string, error)
@@ -29,6 +55,9 @@ type Config struct {
 	ContextBudgetTokens int
 	Prompt              string
 	Temperature         float64
+	Recorder            Recorder
+	History             []llm.Message
+	AutoApprove         bool
 }
 
 var (
@@ -47,10 +76,17 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	if temp == 0 {
 		temp = 0.2
 	}
+	rec := cfg.Recorder
+	if rec == nil {
+		rec = NopRecorder{}
+	}
 	msgs := []llm.Message{
 		{Role: llm.RoleSystem, Content: prompt + "\n\n" + systemContext},
-		{Role: llm.RoleUser, Content: task},
 	}
+	msgs = append(msgs, cfg.History...)
+	userMsg := llm.Message{Role: llm.RoleUser, Content: task}
+	msgs = append(msgs, userMsg)
+	_ = rec.Message(ctx, userMsg)
 	opts := llm.ChatOptions{Thinking: cfg.Thinking, Temperature: temp}
 	specs := cfg.Tools.Specs()
 	seenFail := make(map[string]struct{})
@@ -65,6 +101,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			return err
 		}
 		msgs = append(msgs, msg)
+		_ = rec.Message(ctx, msg)
 
 		if len(msg.ToolCalls) == 0 {
 			if text := strings.TrimSpace(msg.Content); text != "" {
@@ -81,32 +118,43 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				return err
 			}
 			tool, ok := cfg.Tools.Get(call.Function.Name)
+			args := json.RawMessage(call.Function.Arguments)
 			if !ok {
-				msgs = append(msgs, llm.Message{
+				tm := llm.Message{
 					Role:       llm.RoleTool,
 					Content:    "error: unknown tool " + call.Function.Name,
 					ToolCallID: call.ID,
-				})
+				}
+				msgs = append(msgs, tm)
+				_ = rec.Message(ctx, tm)
+				_ = rec.Action(ctx, ActionRecord{Tool: call.Function.Name, Args: args, Decision: "invalid", IsError: true, Output: tm.Content})
 				continue
 			}
 			action, err := tool.Prepare(call.Function.Arguments)
 			if err != nil {
-				msgs = append(msgs, llm.Message{
+				tm := llm.Message{
 					Role:       llm.RoleTool,
 					Content:    "error: " + err.Error(),
 					ToolCallID: call.ID,
-				})
+				}
+				msgs = append(msgs, tm)
+				_ = rec.Message(ctx, tm)
+				_ = rec.Action(ctx, ActionRecord{Tool: call.Function.Name, Args: args, Decision: "invalid", IsError: true, Output: tm.Content})
 				continue
 			}
 			kind := action.Kind()
 			if kind == tools.Mutating && cfg.RequirePlan && !planApproved {
-				msgs = append(msgs, llm.Message{
+				tm := llm.Message{
 					Role:       llm.RoleTool,
 					Content:    "error: plan not approved. Explore with read-only tools, then call propose_plan.",
 					ToolCallID: call.ID,
-				})
+				}
+				msgs = append(msgs, tm)
+				_ = rec.Message(ctx, tm)
+				_ = rec.Action(ctx, ActionRecord{Tool: call.Function.Name, Args: args, Kind: kind, Decision: "gate_blocked", IsError: true, Output: tm.Content})
 				continue
 			}
+			decision := "auto"
 			if kind != tools.ReadOnly && kind != tools.Final {
 				d, reason, err := cfg.Confirmer.Confirm(action.Summary(), action.Preview())
 				if err != nil {
@@ -114,15 +162,30 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				}
 				switch d {
 				case ui.Reject:
-					msgs = append(msgs, llm.Message{
+					tm := llm.Message{
 						Role:       llm.RoleTool,
 						Content:    "user rejected: " + reason,
 						ToolCallID: call.ID,
-					})
+					}
+					msgs = append(msgs, tm)
+					_ = rec.Message(ctx, tm)
+					_ = rec.Action(ctx, ActionRecord{Tool: call.Function.Name, Args: args, Kind: kind, Decision: "rejected", RejectReason: reason, IsError: true, Output: tm.Content})
 					continue
 				case ui.Quit:
 					return ErrAborted
-				case ui.Approve, ui.ApproveAll:
+				case ui.Approve:
+					decision = "approved"
+					if cfg.AutoApprove {
+						decision = "auto"
+					}
+					if kind == tools.Plan {
+						planApproved = true
+					}
+				case ui.ApproveAll:
+					decision = "approved_all"
+					if cfg.AutoApprove {
+						decision = "auto"
+					}
 					if kind == tools.Plan {
 						planApproved = true
 					}
@@ -137,6 +200,13 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			elapsed := time.Since(start)
 			if err != nil {
 				return err
+			}
+			_ = rec.Action(ctx, ActionRecord{
+				Tool: call.Function.Name, Args: args, Kind: kind, Decision: decision,
+				IsError: result.IsError, Meta: result.Meta, Duration: elapsed, Output: result.Output,
+			})
+			if result.Change != nil {
+				_ = rec.FileChange(ctx, *result.Change)
 			}
 			if result.Final {
 				fmt.Fprintln(cfg.Out)
@@ -158,11 +228,13 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					seenFail[key] = struct{}{}
 				}
 			}
-			msgs = append(msgs, llm.Message{
+			tm := llm.Message{
 				Role:       llm.RoleTool,
 				Content:    content,
 				ToolCallID: call.ID,
-			})
+			}
+			msgs = append(msgs, tm)
+			_ = rec.Message(ctx, tm)
 		}
 	}
 	return ErrMaxSteps

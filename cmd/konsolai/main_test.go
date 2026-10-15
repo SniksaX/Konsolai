@@ -39,6 +39,31 @@ func TestParseArgs(t *testing.T) {
 			want: invocation{Mode: modeCode, Request: "add tests", Yes: true},
 		},
 		{
+			name: "new session",
+			args: []string{"new", "what is my favourite number?"},
+			want: invocation{Mode: modeDo, Request: "what is my favourite number?", New: true},
+		},
+		{
+			name: "profile and new code",
+			args: []string{"--profile", "home", "new", "code", "add tests"},
+			want: invocation{Mode: modeCode, Request: "add tests", Profile: "home", New: true},
+		},
+		{
+			name: "history",
+			args: []string{"history"},
+			want: invocation{Cmd: cmdHistory},
+		},
+		{
+			name: "remember project",
+			args: []string{"remember", "--project", "I use pnpm"},
+			want: invocation{Cmd: cmdRemember, Fact: "I use pnpm", FactScope: "project"},
+		},
+		{
+			name: "forget user",
+			args: []string{"forget", "user", "3"},
+			want: invocation{Cmd: cmdForget, FactScope: "user", FactID: 3},
+		},
+		{
 			name: "double dash",
 			args: []string{"--", "howto", "ss -l"},
 			want: invocation{Mode: modeHowto, Request: "ss -l"},

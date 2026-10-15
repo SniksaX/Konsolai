@@ -18,24 +18,38 @@ alwaysApply: true
 
 ## Stack
 - Go 1.27, stdlib only unless the architect approves a dependency.
+- Approved: github.com/jackc/pgx/v5 (pgxpool). Raw SQL only; no ORM; no migration library.
 - Module github.com/siraj/konsolai.
 
 ## Layout
 - cmd/konsolai (entrypoint)
+- internal/config (XDG config.json profiles)
+- internal/redact (secrets before persist)
+- internal/store (Postgres via pgxpool; best-effort, 2s timeouts)
+- internal/memory (adapters; agent/tools/ui never import pgx)
 - internal/llm (model client)
 - internal/sysctx (environment context)
 - internal/safety (command and path guard)
 - internal/diff (Myers unified diffs)
 - internal/repo (root, file listing, project detect)
-- internal/tools (run_shell, write_file, read_file, list_dir, search, find_files, edit_file, propose_plan, finish)
+- internal/tools (run_shell, write_file, read_file, list_dir, search, find_files, edit_file, propose_plan, remember, finish)
 - internal/agent (tool-calling loop)
 - internal/ui (TTY prompt and ANSI)
 - New packages only when the architect specifies them.
-- Grammar: konsolai [--yes] [howto|do|code] "<request>"
+- Grammar:
+  konsolai [--yes] [--profile NAME] [new] [howto|do|code] "<request>"
+  konsolai [--profile NAME] history | undo | facts | prune
+  konsolai [--profile NAME] remember [--project] "<fact>"
+  konsolai [--profile NAME] forget user|project <id>
   The optional mode is a separate argument; the request is exactly one argument.
 - do: cwd root, do prompt, no thinking, 15 steps, no plan gate, 60k token budget.
 - code: repo.Root, CodePrompt plus project context, thinking, temp 0.3, 60 steps,
   RequirePlan, 60k token budget; then git diff --stat (no confirm), printed dimmed.
+- Memory: $XDG_CONFIG_HOME/konsolai/config.json (default ~/.config/konsolai/config.json).
+  --profile beats KONSOLAI_PROFILE beats default_profile beats built-in "default".
+  KONSOLAI_DATABASE_URL / KONSOLAI_ENDPOINT / KONSOLAI_MODEL override profile fields.
+  Resume the latest active|finished session within session_idle_minutes unless `new`.
+  Redact only what is persisted. On first store failure, dim "memory disabled" and continue.
 - Exit codes: 0 ok, 1 error, 2 usage, 3 aborted, 4 max steps, 130 cancelled.
 
 ## Server

@@ -20,7 +20,7 @@ func codeReg(t *testing.T) (string, *Registry) {
 	list := func(ctx context.Context) ([]string, error) {
 		return walkRel(root)
 	}
-	return root, NewRegistry(g, os.Stdout, list)
+	return root, NewRegistry(g, os.Stdout, list, nil, nil)
 }
 
 func walkRel(root string) ([]string, error) {

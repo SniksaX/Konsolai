@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -114,10 +116,25 @@ func (a *writeFileAction) Run(ctx context.Context) (Result, error) {
 		add, rem := diff.Stat(a.oldText, a.content)
 		meta = fmt.Sprintf("+%d -%d", add, rem)
 	}
+	ch := &FileChange{
+		Path:          a.display,
+		ExistedBefore: a.overwrite,
+		AfterHash:     fileSHA256([]byte(a.content)),
+		Diff:          diff.Unified(a.display, a.oldText, a.content, 3),
+	}
+	if a.overwrite {
+		ch.Before = []byte(a.oldText)
+	}
 	return Result{
 		Output: fmt.Sprintf("wrote %s (%d bytes)", a.display, len(a.content)),
 		Meta:   meta,
+		Change: ch,
 	}, nil
+}
+
+func fileSHA256(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
 func atomicWrite(path, content string) error {

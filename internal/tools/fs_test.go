@@ -18,7 +18,7 @@ func fsRegistry(t *testing.T) (*safety.Guard, *Registry, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return g, NewRegistry(g, os.Stdout, nil), root
+	return g, NewRegistry(g, os.Stdout, nil, nil, nil), root
 }
 
 func TestWriteFileAtomicAndMode(t *testing.T) {
@@ -38,6 +38,9 @@ func TestWriteFileAtomicAndMode(t *testing.T) {
 	}
 	if res.IsError {
 		t.Fatal(res.Output)
+	}
+	if res.Change == nil || res.Change.Path != "f.txt" || !res.Change.ExistedBefore || string(res.Change.Before) != "old" {
+		t.Fatalf("change %+v", res.Change)
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {

@@ -104,7 +104,7 @@ func setup(t *testing.T, replies []llm.Message, confirm Confirmer, maxSteps int)
 	}
 	err = Run(context.Background(), Config{
 		Client:    client,
-		Tools:     tools.NewRegistry(g, io.Discard, nil),
+		Tools:     tools.NewRegistry(g, io.Discard, nil, nil, nil),
 		Confirmer: confirm,
 		Out:       io.Discard,
 		MaxSteps:  maxSteps,
@@ -205,7 +205,7 @@ func setupCfg(t *testing.T, replies []llm.Message, confirm Confirmer, extra Conf
 	}
 	extra.Client = client
 	if extra.Tools == nil {
-		extra.Tools = tools.NewRegistry(g, io.Discard, nil)
+		extra.Tools = tools.NewRegistry(g, io.Discard, nil, nil, nil)
 	}
 	extra.Confirmer = confirm
 	if extra.Out == nil {
@@ -282,7 +282,7 @@ func TestContextElision(t *testing.T) {
 	client, rep := newReplay(t, replies)
 	err = Run(context.Background(), Config{
 		Client:              client,
-		Tools:               tools.NewRegistry(g, io.Discard, list),
+		Tools:               tools.NewRegistry(g, io.Discard, list, nil, nil),
 		Confirmer:           stubConfirm{d: ui.Approve},
 		Out:                 io.Discard,
 		MaxSteps:            15,
@@ -315,5 +315,110 @@ func TestRunCDPrepareError(t *testing.T) {
 	got := rep.lastTool()
 	if got.Role != llm.RoleTool || !strings.Contains(got.Content, "do not use cd") {
 		t.Fatalf("last tool %+v", got)
+	}
+}
+
+type collectRec struct {
+	mu    sync.Mutex
+	msgs  []llm.Message
+	acts  []ActionRecord
+	files []tools.FileChange
+}
+
+func (c *collectRec) Message(_ context.Context, m llm.Message) error {
+	c.mu.Lock()
+	c.msgs = append(c.msgs, m)
+	c.mu.Unlock()
+	return nil
+}
+func (c *collectRec) Action(_ context.Context, a ActionRecord) error {
+	c.mu.Lock()
+	c.acts = append(c.acts, a)
+	c.mu.Unlock()
+	return nil
+}
+func (c *collectRec) FileChange(_ context.Context, f tools.FileChange) error {
+	c.mu.Lock()
+	c.files = append(c.files, f)
+	c.mu.Unlock()
+	return nil
+}
+
+func TestHistoryPrepended(t *testing.T) {
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, rep := newReplay(t, []llm.Message{{Role: llm.RoleAssistant, Content: "hi"}})
+	err = Run(context.Background(), Config{
+		Client:    client,
+		Tools:     tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		Confirmer: stubConfirm{d: ui.Approve},
+		Out:       io.Discard,
+		MaxSteps:  5,
+		History:   []llm.Message{{Role: llm.RoleUser, Content: "earlier"}, {Role: llm.RoleAssistant, Content: "ok"}},
+	}, "sys", "now")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.reqs) == 0 {
+		t.Fatal("no requests")
+	}
+	roles := make([]llm.Role, len(rep.reqs[0]))
+	for i, m := range rep.reqs[0] {
+		roles[i] = m.Role
+	}
+	if len(roles) < 4 || roles[0] != llm.RoleSystem || roles[1] != llm.RoleUser || roles[2] != llm.RoleAssistant || roles[3] != llm.RoleUser {
+		t.Fatalf("roles %v", roles)
+	}
+	if rep.reqs[0][1].Content != "earlier" || rep.reqs[0][3].Content != "now" {
+		t.Fatalf("history %+v", rep.reqs[0])
+	}
+}
+
+func TestRecorderGateAndFileChange(t *testing.T) {
+	rec := &collectRec{}
+	_, _, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "write_file", `{"path":"a.txt","content":"x"}`)),
+		{Role: llm.RoleAssistant, Content: "ok"},
+	}, nil, Config{RequirePlan: true, Recorder: rec})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, a := range rec.acts {
+		if a.Decision == "gate_blocked" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("want gate_blocked, acts=%+v", rec.acts)
+	}
+
+	rec2 := &collectRec{}
+	_, _, err = setupCfg(t, []llm.Message{
+		assistant(call("1", "write_file", `{"path":"a.txt","content":"hello"}`)),
+		assistant(call("2", "finish", `{"summary":"done"}`)),
+	}, nil, Config{Recorder: rec2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rec2.files) != 1 || rec2.files[0].Path != "a.txt" || rec2.files[0].ExistedBefore {
+		t.Fatalf("file changes %+v", rec2.files)
+	}
+	var sawUser, sawAsst, sawTool bool
+	for _, m := range rec2.msgs {
+		switch m.Role {
+		case llm.RoleUser:
+			sawUser = true
+		case llm.RoleAssistant:
+			sawAsst = true
+		case llm.RoleTool:
+			sawTool = true
+		}
+	}
+	if !sawUser || !sawAsst || !sawTool {
+		t.Fatalf("messages %+v", rec2.msgs)
 	}
 }

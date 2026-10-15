@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/siraj/konsolai/internal/llm"
 	"github.com/siraj/konsolai/internal/safety"
@@ -18,6 +19,49 @@ const (
 )
 
 type FileLister func(ctx context.Context) ([]string, error)
+
+type FileChange struct {
+	Path          string
+	ExistedBefore bool
+	Before        []byte
+	AfterHash     string
+	Diff          string
+}
+
+type WebCache interface {
+	Get(ctx context.Context, url string) (title, text string, ok bool)
+	Put(ctx context.Context, url, title, text string, ttl time.Duration) error
+}
+
+type NopWebCache struct{}
+
+func (NopWebCache) Get(context.Context, string) (string, string, bool) { return "", "", false }
+func (NopWebCache) Put(context.Context, string, string, string, time.Duration) error {
+	return nil
+}
+
+type FactStore interface {
+	Add(ctx context.Context, fact, scope string) error
+}
+
+type NopFactStore struct{}
+
+func (NopFactStore) Add(context.Context, string, string) error { return nil }
+
+func (k ActionKind) String() string {
+	switch k {
+	case ReadOnly:
+		return "readonly"
+	case Mutating:
+		return "mutating"
+	case Plan:
+		return "plan"
+	case Final:
+		return "final"
+	default:
+		return "unknown"
+	}
+}
 
 type Tool interface {
 	Spec() llm.ToolSpec
@@ -36,6 +80,7 @@ type Result struct {
 	IsError bool
 	Final   bool
 	Meta    string
+	Change  *FileChange
 }
 
 type Registry struct {
@@ -43,10 +88,17 @@ type Registry struct {
 	byName map[string]Tool
 }
 
-func NewRegistry(g *safety.Guard, out io.Writer, files FileLister) *Registry {
+func NewRegistry(g *safety.Guard, out io.Writer, files FileLister, cache WebCache, facts FactStore) *Registry {
 	if files == nil {
 		files = func(context.Context) ([]string, error) { return nil, nil }
 	}
+	if cache == nil {
+		cache = NopWebCache{}
+	}
+	if facts == nil {
+		facts = NopFactStore{}
+	}
+	_ = cache
 	list := []Tool{
 		newShell(g, out),
 		newWriteFile(g),
@@ -56,6 +108,7 @@ func NewRegistry(g *safety.Guard, out io.Writer, files FileLister) *Registry {
 		newFindFiles(files),
 		newEditFile(g),
 		newProposePlan(),
+		newRemember(facts),
 		newFinish(),
 	}
 	byName := make(map[string]Tool, len(list))

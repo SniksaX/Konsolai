@@ -17,7 +17,7 @@ func shellToolFor(t *testing.T) Tool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tool, ok := NewRegistry(g, io.Discard, nil).Get("run_shell")
+	tool, ok := NewRegistry(g, io.Discard, nil, nil, nil).Get("run_shell")
 	if !ok {
 		t.Fatal("missing run_shell")
 	}
