@@ -605,6 +605,22 @@ func normCmd(s string) string {
 }
 
 func inPlanCmd(cmds []string, cmd string) bool {
+	if matchDeclared(cmds, cmd) {
+		return true
+	}
+	segs := splitPlanSegments(cmd)
+	if len(segs) == 0 {
+		return false
+	}
+	for _, s := range segs {
+		if !matchDeclared(cmds, s) {
+			return false
+		}
+	}
+	return true
+}
+
+func matchDeclared(cmds []string, cmd string) bool {
 	want := normCmd(cmd)
 	for _, c := range cmds {
 		if normCmd(c) == want {
@@ -612,6 +628,52 @@ func inPlanCmd(cmds []string, cmd string) bool {
 		}
 	}
 	return false
+}
+
+func splitPlanSegments(cmd string) []string {
+	var segs []string
+	var b strings.Builder
+	var quote byte
+	flush := func() {
+		s := strings.TrimSpace(b.String())
+		b.Reset()
+		if s != "" {
+			segs = append(segs, s)
+		}
+	}
+	for i := 0; i < len(cmd); i++ {
+		c := cmd[i]
+		if quote != 0 {
+			b.WriteByte(c)
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		if c == '\'' || c == '"' {
+			quote = c
+			b.WriteByte(c)
+			continue
+		}
+		if c == '\\' && i+1 < len(cmd) {
+			b.WriteByte(c)
+			b.WriteByte(cmd[i+1])
+			i++
+			continue
+		}
+		if c == '\n' || c == '\r' || c == ';' {
+			flush()
+			continue
+		}
+		if c == '&' && i+1 < len(cmd) && cmd[i+1] == '&' {
+			flush()
+			i++
+			continue
+		}
+		b.WriteByte(c)
+	}
+	flush()
+	return segs
 }
 
 func inPlan(files []string, path string) bool {
