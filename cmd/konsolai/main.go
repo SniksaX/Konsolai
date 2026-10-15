@@ -638,6 +638,7 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 		cfg.MaxSteps = 10
 		cfg.ExploreBudget = 6
 		cfg.ExploreNote = agent.ExploreNoteLookup
+		cfg.Task = string(dec.Task)
 	case intent.Build:
 		cfg.Prompt = agent.CodePrompt + "\n" + lang + "\n" + agent.ScopeRule + sub
 		cfg.Temperature = 0.3
