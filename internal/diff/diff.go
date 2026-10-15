@@ -23,12 +23,12 @@ func Unified(path, oldText, newText string, context int) string {
 	hunks := groupHunks(edits, context)
 	var b strings.Builder
 	fmt.Fprintf(&b, "--- a/%s\n+++ b/%s\n", path, path)
-	oi, ni := 1, 1
 	oldN, newN := len(oldLines), len(newLines)
 	for _, h := range hunks {
-		oldStart, newStart := oi, ni
+		oldStart, newStart := lineStarts(edits, h.lo)
+		chunk := edits[h.lo:h.hi]
 		oldCount, newCount := 0, 0
-		for _, e := range h {
+		for _, e := range chunk {
 			switch e.kind {
 			case eq, del:
 				oldCount++
@@ -39,7 +39,8 @@ func Unified(path, oldText, newText string, context int) string {
 			}
 		}
 		fmt.Fprintf(&b, "@@ -%d,%d +%d,%d @@\n", zeroStart(oldStart, oldCount), oldCount, zeroStart(newStart, newCount), newCount)
-		for i, e := range h {
+		oi, ni := oldStart, newStart
+		for _, e := range chunk {
 			switch e.kind {
 			case eq:
 				b.WriteString(" " + e.line + "\n")
@@ -58,10 +59,24 @@ func Unified(path, oldText, newText string, context int) string {
 				}
 				ni++
 			}
-			_ = i
 		}
 	}
 	return b.String()
+}
+
+func lineStarts(edits []edit, lo int) (oldStart, newStart int) {
+	oldStart, newStart = 1, 1
+	for i := 0; i < lo; i++ {
+		switch edits[i].kind {
+		case eq, del:
+			oldStart++
+		}
+		switch edits[i].kind {
+		case eq, ins:
+			newStart++
+		}
+	}
+	return oldStart, newStart
 }
 
 func Stat(oldText, newText string) (added, removed int) {
@@ -192,7 +207,9 @@ func backtrack(a, b []string, trace [][]int, offset int) []edit {
 	return rev
 }
 
-func groupHunks(edits []edit, context int) [][]edit {
+type hunkSpan struct{ lo, hi int }
+
+func groupHunks(edits []edit, context int) []hunkSpan {
 	type rng struct{ lo, hi int }
 	var changed []rng
 	i := 0
@@ -210,7 +227,7 @@ func groupHunks(edits []edit, context int) [][]edit {
 	if len(changed) == 0 {
 		return nil
 	}
-	var hunks [][]edit
+	var hunks []hunkSpan
 	hLo := max(0, changed[0].lo-context)
 	hHi := min(len(edits), changed[0].hi+context)
 	for _, c := range changed[1:] {
@@ -219,10 +236,10 @@ func groupHunks(edits []edit, context int) [][]edit {
 			hHi = min(len(edits), c.hi+context)
 			continue
 		}
-		hunks = append(hunks, edits[hLo:hHi])
+		hunks = append(hunks, hunkSpan{hLo, hHi})
 		hLo = nextLo
 		hHi = min(len(edits), c.hi+context)
 	}
-	hunks = append(hunks, edits[hLo:hHi])
+	hunks = append(hunks, hunkSpan{hLo, hHi})
 	return hunks
 }
