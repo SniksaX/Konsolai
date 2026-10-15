@@ -32,7 +32,7 @@ import (
 var _ agent.Confirmer = (*ui.Prompter)(nil)
 
 const (
-	usageText = `usage: konsolai [--yes] [--profile NAME] [--intent answer|lookup|act|build] [--trace] [new] ["<request>"]`
+	usageText = `usage: konsolai [--yes] [--profile NAME] [--intent answer|lookup|act|build] [--trace] [--plain] [new] ["<request>"]`
 
 	noMemory = "memory is not configured (see ~/.config/konsolai/config.json)"
 )
@@ -56,6 +56,7 @@ type invocation struct {
 	Profile   string
 	New       bool
 	Trace     bool
+	Plain     bool
 	Cmd       command
 	FactScope string
 	FactID    int64
@@ -74,6 +75,7 @@ func parseArgs(args []string) (invocation, error) {
 	profile := fs.String("profile", "", "config profile")
 	intent := fs.String("intent", "", "skip the router")
 	trace := fs.Bool("trace", false, "print per-call timing and tokens")
+	plain := fs.Bool("plain", false, "disable styled output")
 	project := fs.Bool("project", false, "project-scoped fact")
 	if err := fs.Parse(args); err != nil {
 		return invocation{}, err
@@ -82,7 +84,7 @@ func parseArgs(args []string) (invocation, error) {
 		return invocation{}, errRequest
 	}
 	rest := fs.Args()
-	inv := invocation{Yes: *yes, Profile: *profile, Intent: *intent, Trace: *trace}
+	inv := invocation{Yes: *yes, Profile: *profile, Intent: *intent, Trace: *trace, Plain: *plain}
 	if len(rest) == 0 {
 		return inv, nil
 	}
@@ -266,7 +268,11 @@ func run() int {
 	dec := decideIntent(ctx, client, inv, history, inRepo)
 	understand()
 	routerTime := time.Since(routedAt)
-	fmt.Fprintln(os.Stdout, ui.Dim("· "+string(dec.Intent)))
+	if inv.Plain {
+		fmt.Fprintln(os.Stdout, "· "+string(dec.Intent))
+	} else {
+		fmt.Fprintln(os.Stdout, ui.IntentBadge(string(dec.Intent)))
+	}
 	if sessionID == "" {
 		sessionID = createSession(ctx, mem, prof, projectID, cwd, string(dec.Intent), inv.Request)
 	}
@@ -438,14 +444,16 @@ func runAnswer(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, fa
 	t0 := time.Now()
 	stopThink := ui.Start("thinking")
 	first := true
+	rend := ui.NewRenderer(os.Stdout, inv.Plain)
 	usage, streamErr := client.Stream(ctx, msgs, llm.ChatOptions{Thinking: think, Temperature: 0.3}, func(delta string) error {
 		s := filter.Write(delta)
 		if first && s != "" {
 			stopThink()
 			first = false
+			_, _ = io.WriteString(os.Stdout, "\n")
 		}
 		collected.WriteString(s)
-		_, err := io.WriteString(os.Stdout, s)
+		_, err := rend.Write([]byte(s))
 		return err
 	})
 	if first {
@@ -456,9 +464,12 @@ func runAnswer(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, fa
 	collected.WriteString(rest)
 	out := trimLeadingBlanks(collected.String())
 	if rest != "" {
-		_, _ = io.WriteString(os.Stdout, rest)
+		_, _ = rend.Write([]byte(rest))
 	}
-	_, _ = io.WriteString(os.Stdout, "\n")
+	_ = rend.Flush()
+	if !strings.HasSuffix(out, "\n") && out != "" {
+		_, _ = io.WriteString(os.Stdout, "\n")
+	}
 	_ = rec.Message(ctx, llm.Message{Role: llm.RoleAssistant, Content: out})
 	st := agent.Stats{
 		Steps:            1,
@@ -504,7 +515,11 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 	lister := func(ctx context.Context) ([]string, error) {
 		return repo.Files(ctx, root)
 	}
-	reg := tools.NewRegistry(sg, os.Stdout, lister, memory.NewWebCache(mem), memory.NewFactStore(mem, profile, projectID, sessionID), tools.Options{ReadOnlyShell: dec.Intent == intent.Lookup})
+	toolOut := io.Writer(os.Stdout)
+	if !inv.Plain {
+		toolOut = ui.NewGutter(os.Stdout)
+	}
+	reg := tools.NewRegistry(sg, toolOut, lister, memory.NewWebCache(mem), memory.NewFactStore(mem, profile, projectID, sessionID), tools.Options{ReadOnlyShell: dec.Intent == intent.Lookup})
 	cfg := agent.Config{
 		Client:              client,
 		Tools:               reg,
@@ -520,6 +535,7 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 		Intent:              string(dec.Intent),
 		RouterTime:          routerTime,
 		Err:                 os.Stderr,
+		Plain:               inv.Plain,
 	}
 	sys := snap.String() + facts
 	switch dec.Intent {
