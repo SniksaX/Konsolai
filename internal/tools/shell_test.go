@@ -68,6 +68,44 @@ func TestShellTimeout(t *testing.T) {
 	}
 }
 
+func TestShellKindReadOnly(t *testing.T) {
+	act, err := shellToolFor(t).Prepare(`{"cmd":"go version"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if act.Kind() != ReadOnly {
+		t.Fatalf("kind %s", act.Kind())
+	}
+}
+
+func TestShellKindMutating(t *testing.T) {
+	act, err := shellToolFor(t).Prepare(`{"cmd":"echo hi > out"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if act.Kind() != Mutating {
+		t.Fatalf("kind %s", act.Kind())
+	}
+}
+
+func TestShellLookupRejectsMutating(t *testing.T) {
+	g, err := safety.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool, ok := NewRegistry(g, io.Discard, nil, nil, nil, Options{ReadOnlyShell: true}).Get("run_shell")
+	if !ok {
+		t.Fatal("missing run_shell")
+	}
+	if _, err := tool.Prepare(`{"cmd":"echo hi"}`); err != nil {
+		t.Fatalf("readonly: %v", err)
+	}
+	_, err = tool.Prepare(`{"cmd":"rm x"}`)
+	if err == nil || !strings.Contains(err.Error(), "lookup can only run read-only commands") {
+		t.Fatalf("got %v", err)
+	}
+}
+
 func TestShellCancelKillsGrandchild(t *testing.T) {
 	act, err := shellToolFor(t).Prepare(`{"cmd":"sleep 30 & wait"}`)
 	if err != nil {
