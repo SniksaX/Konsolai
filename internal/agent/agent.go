@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -42,7 +43,16 @@ func (NopRecorder) FileChange(context.Context, tools.FileChange) error { return 
 
 type Confirmer interface {
 	Confirm(summary, preview string) (ui.Decision, string, error)
+	ConfirmForced(summary, preview string) (ui.Decision, string, error)
 }
+
+type ThinkingPolicy int
+
+const (
+	ThinkOff ThinkingPolicy = iota
+	ThinkOn
+	ThinkUntilPlan
+)
 
 type Config struct {
 	Client              *llm.Client
@@ -50,7 +60,7 @@ type Config struct {
 	Confirmer           Confirmer
 	Out                 io.Writer
 	MaxSteps            int
-	Thinking            bool
+	ThinkingPolicy      ThinkingPolicy
 	RequirePlan         bool
 	ContextBudgetTokens int
 	Prompt              string
@@ -58,11 +68,76 @@ type Config struct {
 	Recorder            Recorder
 	History             []llm.Message
 	AutoApprove         bool
+	ExploreBudget       int
+	ExploreNote         string
+	Trace               bool
+	Intent              string
+	RouterTime          time.Duration
+	Err                 io.Writer
+	Stats               *Stats
+	Plain               bool
+}
+
+type Stats struct {
+	Steps            int
+	ModelTime        time.Duration
+	ToolTime         time.Duration
+	PromptTokens     int
+	CompletionTokens int
+	RouterTime       time.Duration
+}
+
+func FormatTokens(n int) string {
+	return fmt.Sprintf("%.1fk", float64(n)/1000)
+}
+
+func FormatSummary(intent string, s Stats) string {
+	return fmt.Sprintf("· %s · %d steps · model %s · tools %s · %s in / %s out",
+		intent, s.Steps, formatDuration(s.ModelTime), formatDuration(s.ToolTime),
+		FormatTokens(s.PromptTokens), FormatTokens(s.CompletionTokens))
+}
+
+func FormatTrace(step int, think bool, d time.Duration, in, out int, names []string) string {
+	th := "off"
+	if think {
+		th = "on"
+	}
+	return fmt.Sprintf("  [step %d] think=%s  %s  in=%s out=%s  -> %s",
+		step, th, formatDuration(d), FormatTokens(in), FormatTokens(out), strings.Join(names, ", "))
+}
+
+func PrintSummary(w io.Writer, intent string, s Stats) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintln(w, ui.Current().Muted(FormatSummary(intent, s)))
+}
+
+func PrintTrace(w io.Writer, step int, think bool, d time.Duration, in, out int, names []string) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintln(w, FormatTrace(step, think, d, in, out, names))
+}
+
+func (p ThinkingPolicy) enabled(planApproved, shellFail bool) bool {
+	switch p {
+	case ThinkOn:
+		return true
+	case ThinkUntilPlan:
+		if !planApproved {
+			return true
+		}
+		return shellFail
+	default:
+		return false
+	}
 }
 
 var (
 	ErrAborted  = errors.New("agent: aborted")
 	ErrMaxSteps = errors.New("agent: max steps exceeded")
+	ErrNoAnswer = errors.New("agent: no answer")
 )
 
 const elidedOutput = "[output elided to save context]"
@@ -70,7 +145,7 @@ const elidedOutput = "[output elided to save context]"
 func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	prompt := cfg.Prompt
 	if prompt == "" {
-		prompt = systemPrompt
+		prompt = ActPrompt
 	}
 	temp := cfg.Temperature
 	if temp == 0 {
@@ -87,30 +162,91 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	userMsg := llm.Message{Role: llm.RoleUser, Content: task}
 	msgs = append(msgs, userMsg)
 	_ = rec.Message(ctx, userMsg)
-	opts := llm.ChatOptions{Thinking: cfg.Thinking, Temperature: temp}
 	specs := cfg.Tools.Specs()
 	seenFail := make(map[string]struct{})
+	seenRead := make(map[string]struct{})
 	planApproved := false
+	var planFiles []string
+	var planCmds []string
+	explore := 0
+	noteSent := false
+	readonlyAfterNote := 0
+	toolsGone := false
+	goneNoteAdded := false
+	shellFail := false
+	var st Stats
+	st.RouterTime = cfg.RouterTime
+	defer func() {
+		if cfg.Stats != nil {
+			*cfg.Stats = st
+		}
+		if cfg.Intent != "" || cfg.Err != nil {
+			intent := cfg.Intent
+			if intent == "" {
+				intent = "act"
+			}
+			PrintSummary(cfg.Err, intent, st)
+		}
+	}()
 
 	for step := 0; step < cfg.MaxSteps; step++ {
 		elideToolOutputs(msgs, cfg.ContextBudgetTokens)
-		clear := ui.Status(cfg.Out, "planning...")
-		msg, err := cfg.Client.Complete(ctx, msgs, specs, opts)
+		think := cfg.ThinkingPolicy.enabled(planApproved, shellFail)
+		opts := llm.ChatOptions{Thinking: think, Temperature: temp}
+		shellFail = false
+		label := "working"
+		if cfg.RequirePlan && !planApproved {
+			label = "planning"
+		} else if think {
+			label = "thinking"
+		}
+		if toolsGone && !goneNoteAdded {
+			gone := llm.Message{Role: llm.RoleUser, Content: ToolsGoneNote}
+			msgs = append(msgs, gone)
+			_ = rec.Message(ctx, gone)
+			goneNoteAdded = true
+		}
+		stepSpecs := specs
+		if toolsGone {
+			if cfg.RequirePlan && !planApproved {
+				stepSpecs = planOnlySpecs(specs)
+			} else if !cfg.RequirePlan {
+				stepSpecs = nil
+			}
+		}
+		clear := ui.Start(label)
+		t0 := time.Now()
+		msg, usage, err := cfg.Client.Complete(ctx, msgs, stepSpecs, opts)
+		modelElapsed := time.Since(t0)
 		clear()
 		if err != nil {
 			return err
+		}
+		st.Steps++
+		st.ModelTime += modelElapsed
+		st.PromptTokens += usage.PromptTokens
+		st.CompletionTokens += usage.CompletionTokens
+		var names []string
+		for _, c := range msg.ToolCalls {
+			names = append(names, c.Function.Name)
+		}
+		if cfg.Trace {
+			PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, names)
 		}
 		msgs = append(msgs, msg)
 		_ = rec.Message(ctx, msg)
 
 		if len(msg.ToolCalls) == 0 {
-			if text := strings.TrimSpace(msg.Content); text != "" {
-				fmt.Fprintln(cfg.Out, text)
+			text := trimLeadingBlanks(msg.Content)
+			if strings.TrimSpace(text) == "" {
+				return ErrNoAnswer
 			}
+			fmt.Fprintln(cfg.Out)
+			writeAnswer(cfg.Out, text, cfg.Plain)
 			return nil
 		}
-		if text := strings.TrimSpace(msg.Content); text != "" {
-			fmt.Fprintln(cfg.Out, ui.Dim(text))
+		if text := trimLeadingBlanks(msg.Content); strings.TrimSpace(text) != "" {
+			fmt.Fprintln(cfg.Out, ui.Current().Muted(text))
 		}
 
 		for _, call := range msg.ToolCalls {
@@ -143,6 +279,12 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				continue
 			}
 			kind := action.Kind()
+			if noteSent && kind == tools.ReadOnly {
+				readonlyAfterNote++
+				if readonlyAfterNote >= 2 {
+					toolsGone = true
+				}
+			}
 			if kind == tools.Mutating && cfg.RequirePlan && !planApproved {
 				tm := llm.Message{
 					Role:       llm.RoleTool,
@@ -155,8 +297,44 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				continue
 			}
 			decision := "auto"
-			if kind != tools.ReadOnly && kind != tools.Final {
-				d, reason, err := cfg.Confirmer.Confirm(action.Summary(), action.Preview())
+			summary := action.Summary()
+			outside := false
+			inPlanHit := false
+			if kind == tools.Mutating && cfg.RequirePlan && planApproved {
+				if p, ok := filePathOf(action); ok {
+					if inPlan(planFiles, p) {
+						inPlanHit = true
+					} else {
+						outside = true
+					}
+				} else if c, ok := commandOf(action); ok {
+					if inPlanCmd(planCmds, c) {
+						inPlanHit = true
+					} else {
+						outside = true
+					}
+				} else {
+					outside = true
+				}
+				if outside {
+					summary = "⚠ outside plan: " + summary
+				}
+			}
+			if inPlanHit {
+				summary += " " + ui.Current().Muted("(in plan)")
+			}
+			if !inPlanHit && kind != tools.ReadOnly && kind != tools.Final {
+				var d ui.Decision
+				var reason string
+				var err error
+				if outside && !cfg.AutoApprove {
+					d, reason, err = cfg.Confirmer.ConfirmForced(summary, action.Preview())
+				} else {
+					if outside && cfg.AutoApprove {
+						fmt.Fprintln(cfg.Out, ui.Current().Warn(summary))
+					}
+					d, reason, err = cfg.Confirmer.Confirm(summary, action.Preview())
+				}
 				if err != nil {
 					return err
 				}
@@ -180,6 +358,8 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					}
 					if kind == tools.Plan {
 						planApproved = true
+						planFiles = planFilesOf(action)
+						planCmds = planCmdsOf(action)
 					}
 				case ui.ApproveAll:
 					decision = "approved_all"
@@ -188,16 +368,35 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					}
 					if kind == tools.Plan {
 						planApproved = true
+						planFiles = planFilesOf(action)
+						planCmds = planCmdsOf(action)
 					}
 				}
 			}
 			finish := action.Kind() == tools.Final
+			if kind == tools.ReadOnly {
+				key := call.Function.Name + "\x00" + canonicalJSON(call.Function.Arguments)
+				if _, dup := seenRead[key]; dup {
+					if !finish {
+						fmt.Fprintln(cfg.Out, ui.Current().Accent("▸")+" "+summary+" (duplicate, skipped)")
+					}
+					tm := llm.Message{
+						Role: llm.RoleTool, Content: "note: you already made this exact call; its result is above.",
+						ToolCallID: call.ID,
+					}
+					msgs = append(msgs, tm)
+					_ = rec.Message(ctx, tm)
+					continue
+				}
+				seenRead[key] = struct{}{}
+			}
 			if !finish {
-				fmt.Fprintln(cfg.Out, ui.Cyan("▸ ")+action.Summary())
+				fmt.Fprintln(cfg.Out, ui.Current().Accent("▸")+" "+summary)
 			}
 			start := time.Now()
 			result, err := action.Run(ctx)
 			elapsed := time.Since(start)
+			st.ToolTime += elapsed
 			if err != nil {
 				return err
 			}
@@ -209,16 +408,32 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				_ = rec.FileChange(ctx, *result.Change)
 			}
 			if result.Final {
+				text := trimLeadingBlanks(result.Output)
+				if strings.TrimSpace(text) == "" {
+					return ErrNoAnswer
+				}
 				fmt.Fprintln(cfg.Out)
-				fmt.Fprintln(cfg.Out, ui.Bold(result.Output))
+				writeAnswer(cfg.Out, text, cfg.Plain)
 				return nil
 			}
-			mark := ui.Green("✓")
+			pal := ui.Current()
+			mark := pal.Success("✓")
 			if result.IsError {
-				mark = ui.Red("✗")
+				mark = pal.Error("✗")
 			}
-			fmt.Fprintf(cfg.Out, "%s %s · %s\n", mark, result.Meta, formatDuration(elapsed))
+			fmt.Fprintf(cfg.Out, "%s %s · %s\n", mark, pal.Muted(displayMeta(result)), pal.Muted(formatDuration(elapsed)))
 			content := result.Output
+			if kind == tools.ReadOnly {
+				if !cfg.RequirePlan || !planApproved {
+					explore++
+				}
+			} else if kind != tools.Plan {
+				explore = 0
+			}
+			if cfg.ExploreBudget > 0 && explore >= cfg.ExploreBudget && cfg.ExploreNote != "" {
+				content += "\n\n" + cfg.ExploreNote
+				noteSent = true
+			}
 			if result.IsError {
 				sum := sha256.Sum256([]byte(result.Output))
 				key := call.Function.Name + call.Function.Arguments + string(sum[:])
@@ -235,13 +450,72 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			}
 			msgs = append(msgs, tm)
 			_ = rec.Message(ctx, tm)
+			if call.Function.Name == "run_shell" && result.IsError {
+				shellFail = true
+			}
+		}
+	}
+	note := llm.Message{Role: llm.RoleUser, Content: MaxStepsNote}
+	msgs = append(msgs, note)
+	_ = rec.Message(ctx, note)
+	clear := ui.Start("thinking")
+	t0 := time.Now()
+	msg, usage, err := cfg.Client.Complete(ctx, msgs, nil, llm.ChatOptions{Thinking: false, Temperature: temp})
+	clear()
+	if err == nil {
+		st.Steps++
+		st.ModelTime += time.Since(t0)
+		st.PromptTokens += usage.PromptTokens
+		st.CompletionTokens += usage.CompletionTokens
+		text := trimLeadingBlanks(msg.Content)
+		if strings.TrimSpace(text) != "" {
+			fmt.Fprintln(cfg.Out)
+			writeAnswer(cfg.Out, text, cfg.Plain)
 		}
 	}
 	return ErrMaxSteps
 }
 
+func planOnlySpecs(specs []llm.ToolSpec) []llm.ToolSpec {
+	for _, s := range specs {
+		if s.Function.Name == "propose_plan" {
+			return []llm.ToolSpec{s}
+		}
+	}
+	return nil
+}
+
+func writeAnswer(w io.Writer, text string, plain bool) {
+	if plain {
+		fmt.Fprintln(w, text)
+		return
+	}
+	r := ui.NewRenderer(w, false)
+	_, _ = r.Write([]byte(text))
+	if !strings.HasSuffix(text, "\n") {
+		_, _ = r.Write([]byte("\n"))
+	}
+	_ = r.Flush()
+}
+
 func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%.1fs", d.Seconds())
+}
+
+func trimLeadingBlanks(s string) string {
+	return strings.TrimLeft(s, "\r\n")
+}
+
+func displayMeta(r tools.Result) string {
+	if r.Meta != "" {
+		return r.Meta
+	}
+	s := strings.TrimSpace(r.Output)
+	s = strings.TrimPrefix(s, "error: ")
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	return s
 }
 
 func tokenEstimate(msgs []llm.Message) int {
@@ -276,4 +550,138 @@ func elideToolOutputs(msgs []llm.Message, budget int) {
 		}
 		msgs[idx].Content = elidedOutput
 	}
+}
+
+func canonicalJSON(raw string) string {
+	var v any
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		return raw
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return raw
+	}
+	return string(b)
+}
+
+func filePathOf(a tools.Action) (string, bool) {
+	type hasPath interface{ FilePath() string }
+	p, ok := a.(hasPath)
+	if !ok {
+		return "", false
+	}
+	return p.FilePath(), true
+}
+
+func planFilesOf(a tools.Action) []string {
+	type hasFiles interface{ PlanFiles() []string }
+	p, ok := a.(hasFiles)
+	if !ok {
+		return nil
+	}
+	return p.PlanFiles()
+}
+
+func planCmdsOf(a tools.Action) []string {
+	type hasCmds interface{ PlanCommands() []string }
+	p, ok := a.(hasCmds)
+	if !ok {
+		return nil
+	}
+	return p.PlanCommands()
+}
+
+func commandOf(a tools.Action) (string, bool) {
+	type hasCmd interface{ PlanCommand() string }
+	p, ok := a.(hasCmd)
+	if !ok {
+		return "", false
+	}
+	return p.PlanCommand(), true
+}
+
+func normCmd(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func inPlanCmd(cmds []string, cmd string) bool {
+	if matchDeclared(cmds, cmd) {
+		return true
+	}
+	segs := splitPlanSegments(cmd)
+	if len(segs) == 0 {
+		return false
+	}
+	for _, s := range segs {
+		if !matchDeclared(cmds, s) {
+			return false
+		}
+	}
+	return true
+}
+
+func matchDeclared(cmds []string, cmd string) bool {
+	want := normCmd(cmd)
+	for _, c := range cmds {
+		if normCmd(c) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func splitPlanSegments(cmd string) []string {
+	var segs []string
+	var b strings.Builder
+	var quote byte
+	flush := func() {
+		s := strings.TrimSpace(b.String())
+		b.Reset()
+		if s != "" {
+			segs = append(segs, s)
+		}
+	}
+	for i := 0; i < len(cmd); i++ {
+		c := cmd[i]
+		if quote != 0 {
+			b.WriteByte(c)
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		if c == '\'' || c == '"' {
+			quote = c
+			b.WriteByte(c)
+			continue
+		}
+		if c == '\\' && i+1 < len(cmd) {
+			b.WriteByte(c)
+			b.WriteByte(cmd[i+1])
+			i++
+			continue
+		}
+		if c == '\n' || c == '\r' || c == ';' {
+			flush()
+			continue
+		}
+		if c == '&' && i+1 < len(cmd) && cmd[i+1] == '&' {
+			flush()
+			i++
+			continue
+		}
+		b.WriteByte(c)
+	}
+	flush()
+	return segs
+}
+
+func inPlan(files []string, path string) bool {
+	path = strings.TrimPrefix(filepath.ToSlash(path), "./")
+	for _, f := range files {
+		if strings.TrimPrefix(filepath.ToSlash(f), "./") == path {
+			return true
+		}
+	}
+	return false
 }

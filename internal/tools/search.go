@@ -69,6 +69,10 @@ func (t *searchTool) Prepare(rawArgs string) (Action, error) {
 	if args.Pattern == "" {
 		return nil, errors.New("tools: search: pattern is required")
 	}
+	prefix, err := relPrefix(t.guard, args.Path)
+	if err != nil {
+		return nil, err
+	}
 	pat := args.Pattern
 	if args.CaseInsensitive {
 		pat = "(?i)" + pat
@@ -84,7 +88,7 @@ func (t *searchTool) Prepare(rawArgs string) (Action, error) {
 			return nil, fmt.Errorf("tools: search glob: %w", err)
 		}
 	}
-	return &searchAction{guard: t.guard, files: t.files, re: re, prefix: args.Path, glob: args.Glob, globRe: globRe, pattern: args.Pattern}, nil
+	return &searchAction{guard: t.guard, files: t.files, re: re, prefix: prefix, glob: args.Glob, globRe: globRe, pattern: args.Pattern}, nil
 }
 
 func (a *searchAction) Summary() string  { return "search " + a.pattern }

@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/siraj/konsolai/internal/safety"
+	"github.com/siraj/konsolai/internal/ui"
 )
 
 func shellToolFor(t *testing.T) Tool {
@@ -68,6 +70,72 @@ func TestShellTimeout(t *testing.T) {
 	}
 }
 
+func TestShellKindReadOnly(t *testing.T) {
+	act, err := shellToolFor(t).Prepare(`{"cmd":"go version"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if act.Kind() != ReadOnly {
+		t.Fatalf("kind %s", act.Kind())
+	}
+}
+
+func TestShellKindMutating(t *testing.T) {
+	act, err := shellToolFor(t).Prepare(`{"cmd":"echo hi > out"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if act.Kind() != Mutating {
+		t.Fatalf("kind %s", act.Kind())
+	}
+}
+
+func TestShellLookupRejectsMutating(t *testing.T) {
+	g, err := safety.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool, ok := NewRegistry(g, io.Discard, nil, nil, nil, Options{ReadOnlyShell: true}).Get("run_shell")
+	if !ok {
+		t.Fatal("missing run_shell")
+	}
+	if _, err := tool.Prepare(`{"cmd":"echo hi"}`); err != nil {
+		t.Fatalf("readonly: %v", err)
+	}
+	_, err = tool.Prepare(`{"cmd":"rm x"}`)
+	if err == nil || !strings.Contains(err.Error(), "lookup can only run read-only commands") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestShellBlocksExportRenderers(t *testing.T) {
+	tool := shellToolFor(t)
+	blocked := []string{
+		"mmdc -i diagram.mmd -o out.png",
+		"pandoc doc.md -o doc.pdf",
+		"typst compile doc.typ",
+		"wkhtmltopdf page.html out.pdf",
+		"weasyprint page.html out.pdf",
+		"chromium --headless --print-to-pdf=out.pdf page.html",
+		"chrome --print-to-pdf=out.pdf",
+		"google-chrome --headless --dump-dom",
+		"google-chrome-stable --print-to-pdf",
+		"firefox --headless --screenshot",
+	}
+	for _, cmd := range blocked {
+		_, err := tool.Prepare(`{"cmd":` + jsonQuote(cmd) + `}`)
+		if err == nil || !strings.Contains(err.Error(), "use the export_doc tool for diagrams and PDF/HTML export") {
+			t.Errorf("%q: %v", cmd, err)
+		}
+	}
+	if _, err := tool.Prepare(`{"cmd":"cat pandoc.md"}`); err != nil {
+		t.Fatalf("lookalike: %v", err)
+	}
+	if _, err := tool.Prepare(`{"cmd":"echo mmdc"}`); err != nil {
+		t.Fatalf("echo lookalike: %v", err)
+	}
+}
+
 func TestShellCancelKillsGrandchild(t *testing.T) {
 	act, err := shellToolFor(t).Prepare(`{"cmd":"sleep 30 & wait"}`)
 	if err != nil {
@@ -88,5 +156,24 @@ func TestShellCancelKillsGrandchild(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("cancel did not return quickly")
+	}
+}
+
+func TestShellRunningSpinner(t *testing.T) {
+	var buf bytes.Buffer
+	restore := ui.TestHook(&buf, true, 5*time.Millisecond, nil)
+	defer restore()
+	old := shellQuietFor
+	shellQuietFor = 20 * time.Millisecond
+	defer func() { shellQuietFor = old }()
+	act, err := shellToolFor(t).Prepare(`{"cmd":"sleep 0.08"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := act.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "running") || !strings.Contains(buf.String(), "\033[?25l") {
+		t.Fatalf("spinner %q", buf.String())
 	}
 }

@@ -84,6 +84,8 @@ func (t *writeFileTool) Prepare(rawArgs string) (Action, error) {
 	return &writeFileAction{path: resolved, display: args.Path, content: args.Content, oldText: old, overwrite: overwrite}, nil
 }
 
+func (a *writeFileAction) FilePath() string { return a.display }
+
 func (a *writeFileAction) Summary() string {
 	kind := "new"
 	if a.overwrite {
@@ -228,7 +230,7 @@ func (a *readFileAction) Run(ctx context.Context) (Result, error) {
 		return Result{Output: err.Error(), IsError: true}, nil
 	}
 	if fi.IsDir() {
-		return Result{Output: "error: is a directory", IsError: true}, nil
+		return Result{Output: "error: is a directory", IsError: true, Meta: "is a directory"}, nil
 	}
 	allBytes, err := os.ReadFile(a.path)
 	if err != nil {

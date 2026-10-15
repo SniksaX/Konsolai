@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"io"
 	"os"
 )
@@ -29,11 +28,6 @@ func Yellow(s string) string { return wrap("33", s) }
 func Cyan(s string) string   { return wrap("36", s) }
 
 func Status(w io.Writer, msg string) (clear func()) {
-	if !stdoutTTY() {
-		return func() {}
-	}
-	fmt.Fprint(w, Dim(msg))
-	return func() {
-		fmt.Fprint(w, "\r\033[K")
-	}
+	_ = w
+	return Start(msg)
 }

@@ -83,12 +83,20 @@ type Result struct {
 	Change  *FileChange
 }
 
+type Options struct {
+	ReadOnlyShell bool
+}
+
 type Registry struct {
 	tools  []Tool
 	byName map[string]Tool
 }
 
-func NewRegistry(g *safety.Guard, out io.Writer, files FileLister, cache WebCache, facts FactStore) *Registry {
+func NewRegistry(g *safety.Guard, out io.Writer, files FileLister, cache WebCache, facts FactStore, opts ...Options) *Registry {
+	var o Options
+	if len(opts) > 0 {
+		o = opts[0]
+	}
 	if files == nil {
 		files = func(context.Context) ([]string, error) { return nil, nil }
 	}
@@ -98,17 +106,19 @@ func NewRegistry(g *safety.Guard, out io.Writer, files FileLister, cache WebCach
 	if facts == nil {
 		facts = NopFactStore{}
 	}
-	_ = cache
 	list := []Tool{
-		newShell(g, out),
+		newShell(g, out, o.ReadOnlyShell),
 		newWriteFile(g),
 		newReadFile(g),
 		newListDir(g),
 		newSearch(g, files),
-		newFindFiles(files),
+		newFindFiles(g, files),
 		newEditFile(g),
 		newProposePlan(),
 		newRemember(facts),
+		newWebFetch(cache),
+		newExportDoc(g),
+		newOutline(g, files),
 		newFinish(),
 	}
 	byName := make(map[string]Tool, len(list))
@@ -129,4 +139,21 @@ func (r *Registry) Specs() []llm.ToolSpec {
 func (r *Registry) Get(name string) (Tool, bool) {
 	t, ok := r.byName[name]
 	return t, ok
+}
+
+func (r *Registry) Named(names ...string) *Registry {
+	keep := make(map[string]bool, len(names))
+	for _, n := range names {
+		keep[n] = true
+	}
+	var list []Tool
+	byName := make(map[string]Tool)
+	for _, t := range r.tools {
+		n := t.Spec().Function.Name
+		if keep[n] {
+			list = append(list, t)
+			byName[n] = t
+		}
+	}
+	return &Registry{tools: list, byName: byName}
 }

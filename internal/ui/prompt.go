@@ -3,8 +3,10 @@ package ui
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
+	"time"
 )
 
 type Decision int
@@ -18,6 +20,8 @@ const (
 
 type Prompter struct {
 	tty         *os.File
+	in          *bufio.Reader
+	out         io.Writer
 	autoApprove bool
 	approveAll  bool
 }
@@ -32,21 +36,62 @@ func OpenPrompter(autoApprove bool) (*Prompter, error) {
 		return nil, fmt.Errorf("ui: open tty: %w", err)
 	}
 	p.tty = f
+	p.in = bufio.NewReader(f)
+	p.out = f
 	return p, nil
 }
 
+func (p *Prompter) ConfirmForced(summary, preview string) (Decision, string, error) {
+	return p.confirm(summary, preview, true)
+}
+
 func (p *Prompter) Confirm(summary, preview string) (Decision, string, error) {
-	if p.autoApprove || p.approveAll {
+	return p.confirm(summary, preview, false)
+}
+
+func (p *Prompter) writer() io.Writer {
+	if p.out != nil {
+		return p.out
+	}
+	return p.tty
+}
+
+func (p *Prompter) drain() {
+	if p.tty == nil {
+		return
+	}
+	_ = p.tty.SetReadDeadline(time.Now())
+	var buf [256]byte
+	for {
+		_, err := p.tty.Read(buf[:])
+		if err != nil {
+			break
+		}
+	}
+	_ = p.tty.SetReadDeadline(time.Time{})
+	if p.in == nil {
+		p.in = bufio.NewReader(p.tty)
+	} else {
+		p.in.Reset(p.tty)
+	}
+}
+
+func (p *Prompter) confirm(summary, preview string, force bool) (Decision, string, error) {
+	if p.autoApprove || (!force && p.approveAll) {
 		return Approve, "", nil
 	}
-	in := bufio.NewReader(p.tty)
+	if p.in == nil && p.tty != nil {
+		p.in = bufio.NewReader(p.tty)
+	}
+	w := p.writer()
+	p.drain()
 	for {
-		fmt.Fprintln(p.tty, summary)
+		fmt.Fprintln(w, Current().Strong(summary))
 		if preview != "" {
-			fmt.Fprintln(p.tty, preview)
+			fmt.Fprintln(w, ColorDiff(preview))
 		}
-		fmt.Fprint(p.tty, "[y]es [n]o [a]ll [q]uit ")
-		line, err := in.ReadString('\n')
+		fmt.Fprint(w, PromptOptions())
+		line, err := p.in.ReadString('\n')
 		if err != nil {
 			return 0, "", fmt.Errorf("ui: read prompt: %w", err)
 		}
@@ -59,12 +104,14 @@ func (p *Prompter) Confirm(summary, preview string) (Decision, string, error) {
 		case "q", "quit":
 			return Quit, "", nil
 		case "n", "no":
-			fmt.Fprint(p.tty, "reason (optional): ")
-			reason, err := in.ReadString('\n')
+			fmt.Fprint(w, "reason (optional): ")
+			reason, err := p.in.ReadString('\n')
 			if err != nil {
 				return 0, "", fmt.Errorf("ui: read reason: %w", err)
 			}
 			return Reject, strings.TrimSpace(reason), nil
+		default:
+			fmt.Fprintln(w, Current().Warn("answer y, n, a or q"))
 		}
 	}
 }

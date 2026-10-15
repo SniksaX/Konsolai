@@ -15,15 +15,17 @@ import (
 
 	"github.com/siraj/konsolai/internal/llm"
 	"github.com/siraj/konsolai/internal/safety"
+	"github.com/siraj/konsolai/internal/ui"
 )
 
 type shellTool struct {
-	guard *safety.Guard
-	out   io.Writer
+	guard        *safety.Guard
+	out          io.Writer
+	readOnlyOnly bool
 }
 
-func newShell(g *safety.Guard, out io.Writer) *shellTool {
-	return &shellTool{guard: g, out: out}
+func newShell(g *safety.Guard, out io.Writer, readOnlyOnly bool) *shellTool {
+	return &shellTool{guard: g, out: out, readOnlyOnly: readOnlyOnly}
 }
 
 func (t *shellTool) Spec() llm.ToolSpec {
@@ -51,9 +53,12 @@ type shellAction struct {
 	cwd     string
 	timeout time.Duration
 	out     io.Writer
+	kind    ActionKind
 }
 
 var reCD = regexp.MustCompile(`(^|[;&|(]\s*)cd(\s|$)`)
+
+var shellQuietFor = time.Second
 
 func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 	var args shellArgs
@@ -71,6 +76,17 @@ func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 	if err := t.guard.CheckCommand(args.Cmd); err != nil {
 		return nil, err
 	}
+	if blocksExport(args.Cmd) {
+		return nil, errors.New("use the export_doc tool for diagrams and PDF/HTML export")
+	}
+	ro := safety.IsReadOnlyCommand(args.Cmd)
+	if t.readOnlyOnly && !ro {
+		return nil, errors.New("lookup can only run read-only commands")
+	}
+	kind := Mutating
+	if ro {
+		kind = ReadOnly
+	}
 	cwd := args.Cwd
 	if cwd == "" {
 		cwd = "."
@@ -86,12 +102,13 @@ func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 	if sec < 1 || sec > 600 {
 		return nil, fmt.Errorf("tools: run_shell: timeout_sec must be between 1 and 600")
 	}
-	return &shellAction{cmd: args.Cmd, cwd: resolved, timeout: time.Duration(sec) * time.Second, out: t.out}, nil
+	return &shellAction{cmd: args.Cmd, cwd: resolved, timeout: time.Duration(sec) * time.Second, out: t.out, kind: kind}, nil
 }
 
-func (a *shellAction) Summary() string  { return "run: " + a.cmd }
-func (a *shellAction) Preview() string  { return "" }
-func (a *shellAction) Kind() ActionKind { return Mutating }
+func (a *shellAction) Summary() string     { return "run: " + a.cmd }
+func (a *shellAction) Preview() string     { return "" }
+func (a *shellAction) Kind() ActionKind    { return a.kind }
+func (a *shellAction) PlanCommand() string { return a.cmd }
 
 func (a *shellAction) Run(ctx context.Context) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, a.timeout)
@@ -120,7 +137,9 @@ func (a *shellAction) Run(ctx context.Context) (Result, error) {
 	var cap Capture
 	lim := NewLineLimiter(a.out)
 	defer lim.Close(a.out)
-	mw := io.MultiWriter(lim, &cap)
+	quiet := ui.NewQuiet("running", shellQuietFor)
+	defer quiet.Stop()
+	mw := io.MultiWriter(lim, &cap, quiet)
 	cmd.Stdout = mw
 	cmd.Stderr = mw
 
@@ -149,6 +168,27 @@ func (a *shellAction) Run(ctx context.Context) (Result, error) {
 		IsError: code != 0,
 		Meta:    fmt.Sprintf("exit %d", code),
 	}, nil
+}
+
+var exportBins = map[string]bool{
+	"mmdc": true, "pandoc": true, "typst": true, "wkhtmltopdf": true, "weasyprint": true,
+}
+
+var browserBins = map[string]bool{
+	"chromium": true, "chrome": true, "google-chrome": true, "google-chrome-stable": true, "firefox": true,
+}
+
+func blocksExport(cmd string) bool {
+	for _, seg := range safety.SplitSegments(cmd) {
+		bin := safety.SegmentBinary(seg)
+		if exportBins[bin] {
+			return true
+		}
+		if browserBins[bin] && (strings.Contains(seg, "--headless") || strings.Contains(seg, "--print-to-pdf")) {
+			return true
+		}
+	}
+	return false
 }
 
 func exitCode(err error) int {

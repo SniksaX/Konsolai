@@ -81,23 +81,86 @@ func TestSessionResumeWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, ok, err := s.FindResumableSession(ctx, "home", &pid, "/tmp/p", 30*time.Minute)
+	got, ok, err := s.FindResumableSession(ctx, "home", &pid, "/tmp/p", "do", 30*time.Minute)
 	if err != nil || !ok || got.ID != id {
 		t.Fatalf("active resume: ok=%v id=%s err=%v", ok, got.ID, err)
 	}
 	if err := s.EndSession(ctx, id, "finished"); err != nil {
 		t.Fatal(err)
 	}
-	got, ok, err = s.FindResumableSession(ctx, "home", &pid, "/tmp/p", 30*time.Minute)
+	got, ok, err = s.FindResumableSession(ctx, "home", &pid, "/tmp/p", "do", 30*time.Minute)
 	if err != nil || !ok || got.ID != id {
 		t.Fatalf("finished resume: ok=%v id=%s err=%v", ok, got.ID, err)
 	}
 	if _, err := s.pool.Exec(ctx, `UPDATE sessions SET last_activity_at = now() - interval '2 hours' WHERE id = $1::uuid`, id); err != nil {
 		t.Fatal(err)
 	}
-	_, ok, err = s.FindResumableSession(ctx, "home", &pid, "/tmp/p", 30*time.Minute)
+	_, ok, err = s.FindResumableSession(ctx, "home", &pid, "/tmp/p", "do", 30*time.Minute)
 	if err != nil || ok {
 		t.Fatalf("stale should miss: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestResumeModeFamily(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	doID, err := s.CreateSession(ctx, NewSession{
+		Profile: "home", CWD: "/tmp/p", Mode: "do", Model: "m", Title: "do-title",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EndSession(ctx, doID, "finished"); err != nil {
+		t.Fatal(err)
+	}
+	codeID, err := s.CreateSession(ctx, NewSession{
+		Profile: "home", CWD: "/tmp/p", Mode: "code", Model: "m", Title: "code-title",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EndSession(ctx, codeID, "finished"); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := s.FindResumableSession(ctx, "home", nil, "/tmp/p", "answer", 30*time.Minute)
+	if err != nil || !ok || got.ID != codeID {
+		t.Fatalf("resume ignores mode: ok=%v id=%s want=%s err=%v", ok, got.ID, codeID, err)
+	}
+	_ = doID
+}
+
+func TestResumeAppendsNoNewRow(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	id, err := s.CreateSession(ctx, NewSession{
+		Profile: "home", CWD: "/tmp/p", Mode: "do", Model: "m", Title: "first request",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendMessage(ctx, id, 1, Message{Role: "user", Content: "first request"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EndSession(ctx, id, "finished"); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := s.FindResumableSession(ctx, "home", nil, "/tmp/p", "do", 30*time.Minute)
+	if err != nil || !ok || got.ID != id || got.Title != "first request" {
+		t.Fatalf("resume %+v ok=%v err=%v", got, ok, err)
+	}
+	if err := s.AppendMessage(ctx, got.ID, 2, Message{Role: "user", Content: "follow up"}); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE cwd = $1`, "/tmp/p").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("sessions %d want 1", n)
+	}
+	msgs, err := s.LoadMessages(ctx, id)
+	if err != nil || len(msgs) != 2 {
+		t.Fatalf("msgs %d err=%v", len(msgs), err)
 	}
 }
 

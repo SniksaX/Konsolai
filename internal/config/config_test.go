@@ -1,6 +1,9 @@
 package config
 
 import (
+	"errors"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -165,6 +168,60 @@ func TestLocationOmitsURL(t *testing.T) {
 	}
 	if loc != "localhost:5432/konsolai" {
 		t.Fatalf("got %q", loc)
+	}
+}
+
+func TestDisableLine(t *testing.T) {
+	err := errors.New("store: ping: failed to connect to `user=x database=x`:\n\t127.0.0.1:1 dial tcp: connection refused")
+	got := DisableLine("postgres://secret:hunter2@127.0.0.1:1/konsolai", err)
+	if strings.Contains(got, "secret") || strings.Contains(got, "hunter2") || strings.Contains(got, "user=x") {
+		t.Fatalf("leaked: %q", got)
+	}
+	if strings.Contains(got, "\n") {
+		t.Fatalf("want one line: %q", got)
+	}
+	if !strings.HasPrefix(got, "memory disabled: cannot connect to 127.0.0.1:1:") {
+		t.Fatalf("prefix: %q", got)
+	}
+}
+
+func TestDisableLineInnermost(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "connection refused",
+			err:  fmt.Errorf("store: ping: %w", &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}),
+			want: "connection refused",
+		},
+		{
+			name: "no such host",
+			err:  fmt.Errorf("store: ping: %w", &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("no such host")}),
+			want: "no such host",
+		},
+		{
+			name: "timeout",
+			err:  fmt.Errorf("store: ping: %w", &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("i/o timeout")}),
+			want: "i/o timeout",
+		},
+		{
+			name: "password",
+			err:  fmt.Errorf("store: ping: %w", errors.New("password authentication failed")),
+			want: "password authentication failed",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DisableLine("postgres://u:p@127.0.0.1:1/x", tt.err)
+			if strings.Contains(got, "u:p") || strings.Contains(got, "\n") {
+				t.Fatalf("leaked: %q", got)
+			}
+			if !strings.Contains(got, tt.want) {
+				t.Fatalf("%q want %q", got, tt.want)
+			}
+		})
 	}
 }
 

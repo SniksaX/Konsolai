@@ -20,19 +20,23 @@ func (t *proposePlanTool) Spec() llm.ToolSpec {
 		Function: llm.FunctionSpec{
 			Name:        "propose_plan",
 			Description: "Propose an implementation plan. Call this after exploring with read-only tools and before any mutating edits. Steps should name the files you will change.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"summary":{"type":"string"},"steps":{"type":"array","items":{"type":"string"}}},"required":["summary","steps"]}`),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"summary":{"type":"string"},"steps":{"type":"array","items":{"type":"string"}},"files":{"type":"array","items":{"type":"string"},"description":"Repo-relative paths this plan will create or modify."},"commands":{"type":"array","items":{"type":"string"},"description":"Exact shell commands this plan will run."}},"required":["summary","steps","files"]}`),
 		},
 	}
 }
 
 type proposePlanArgs struct {
-	Summary string   `json:"summary"`
-	Steps   []string `json:"steps"`
+	Summary  string   `json:"summary"`
+	Steps    []string `json:"steps"`
+	Files    []string `json:"files"`
+	Commands []string `json:"commands"`
 }
 
 type proposePlanAction struct {
-	summary string
-	steps   []string
+	summary  string
+	steps    []string
+	files    []string
+	commands []string
 }
 
 func (t *proposePlanTool) Prepare(rawArgs string) (Action, error) {
@@ -48,8 +52,14 @@ func (t *proposePlanTool) Prepare(rawArgs string) (Action, error) {
 	if len(args.Steps) < 1 {
 		return nil, errors.New("tools: propose_plan: at least one step is required")
 	}
-	return &proposePlanAction{summary: args.Summary, steps: args.Steps}, nil
+	if len(args.Files) < 1 {
+		return nil, errors.New("tools: propose_plan: files is required")
+	}
+	return &proposePlanAction{summary: args.Summary, steps: args.Steps, files: args.Files, commands: args.Commands}, nil
 }
+
+func (a *proposePlanAction) PlanFiles() []string    { return a.files }
+func (a *proposePlanAction) PlanCommands() []string { return a.commands }
 
 func (a *proposePlanAction) Summary() string { return "plan: " + a.summary }
 
@@ -57,6 +67,16 @@ func (a *proposePlanAction) Preview() string {
 	var b strings.Builder
 	for i, s := range a.steps {
 		fmt.Fprintf(&b, "%d. %s\n", i+1, s)
+	}
+	if len(a.files) > 0 {
+		b.WriteString("files: ")
+		b.WriteString(strings.Join(a.files, ", "))
+		b.WriteByte('\n')
+	}
+	if len(a.commands) > 0 {
+		b.WriteString("commands: ")
+		b.WriteString(strings.Join(a.commands, ", "))
+		b.WriteByte('\n')
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

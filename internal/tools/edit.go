@@ -90,6 +90,7 @@ func (t *editFileTool) Prepare(rawArgs string) (Action, error) {
 	}, nil
 }
 
+func (a *editFileAction) FilePath() string { return a.display }
 func (a *editFileAction) Summary() string  { return "edit " + a.display }
 func (a *editFileAction) Preview() string  { return diff.Unified(a.display, a.oldText, a.newText, 3) }
 func (a *editFileAction) Kind() ActionKind { return Mutating }

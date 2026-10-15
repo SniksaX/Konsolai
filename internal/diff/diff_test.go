@@ -80,6 +80,62 @@ func TestUnifiedMultipleHunks(t *testing.T) {
 	}
 }
 
+func numbered(n int) string {
+	var b strings.Builder
+	for i := 1; i <= n; i++ {
+		b.WriteString(strings.Repeat("L", 1))
+		b.WriteByte(byte('0' + (i/10)%10))
+		b.WriteByte(byte('0' + i%10))
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func TestUnifiedExactHeaders(t *testing.T) {
+	old20 := numbered(20)
+
+	t.Run("middle", func(t *testing.T) {
+		new20 := strings.Replace(old20, "L10\n", "XX\n", 1)
+		got := Unified("a.txt", old20, new20, 3)
+		if !strings.Contains(got, "@@ -7,7 +7,7 @@") {
+			t.Fatalf("%q", got)
+		}
+	})
+
+	t.Run("two hunks", func(t *testing.T) {
+		new20 := strings.Replace(old20, "L02\n", "AA\n", 1)
+		new20 = strings.Replace(new20, "L18\n", "BB\n", 1)
+		got := Unified("a.txt", old20, new20, 1)
+		if !strings.Contains(got, "@@ -1,3 +1,3 @@") {
+			t.Fatalf("first hunk: %q", got)
+		}
+		if !strings.Contains(got, "@@ -17,3 +17,3 @@") {
+			t.Fatalf("second hunk: %q", got)
+		}
+	})
+
+	t.Run("insert start", func(t *testing.T) {
+		got := Unified("a.txt", old20, "XX\n"+old20, 3)
+		if !strings.Contains(got, "@@ -1,3 +1,4 @@") {
+			t.Fatalf("%q", got)
+		}
+	})
+
+	t.Run("insert end", func(t *testing.T) {
+		got := Unified("a.txt", old20, old20+"XX\n", 3)
+		if !strings.Contains(got, "@@ -18,3 +18,4 @@") {
+			t.Fatalf("%q", got)
+		}
+	})
+
+	t.Run("delete all", func(t *testing.T) {
+		got := Unified("a.txt", "a\nb\nc\n", "", 3)
+		if !strings.Contains(got, "@@ -1,3 +0,0 @@") {
+			t.Fatalf("%q", got)
+		}
+	})
+}
+
 func TestUnifiedTooLarge(t *testing.T) {
 	old := strings.Repeat("x\n", 5001)
 	got := Unified("a.txt", old, "y\n", 3)

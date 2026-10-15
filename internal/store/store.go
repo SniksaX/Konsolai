@@ -156,7 +156,8 @@ func (s *Store) UpsertProject(ctx context.Context, root string, kinds, commands 
 	return id, nil
 }
 
-func (s *Store) FindResumableSession(ctx context.Context, profile string, projectID *int64, cwd string, idle time.Duration) (Session, bool, error) {
+func (s *Store) FindResumableSession(ctx context.Context, profile string, projectID *int64, cwd, mode string, idle time.Duration) (Session, bool, error) {
+	_ = mode
 	ctx, cancel := withTimeout(ctx)
 	defer cancel()
 	mins := int(idle / time.Minute)
