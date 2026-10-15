@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -683,5 +684,21 @@ func TestRunAccumulatesStats(t *testing.T) {
 	}
 	if !strings.Contains(errW.String(), "2.0k in / 0.4k out") {
 		t.Fatalf("totals %q", errW.String())
+	}
+}
+
+func TestAgentCompleteSpinner(t *testing.T) {
+	var buf bytes.Buffer
+	restore := ui.TestHook(&buf, true, 5*time.Millisecond, nil)
+	defer restore()
+	_, _, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "list_dir", `{"path":"."}`)),
+		assistant(call("2", "finish", `{"summary":"ok"}`)),
+	}, nil, Config{RequirePlan: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "planning") || !strings.Contains(buf.String(), "\033[?25l") {
+		t.Fatalf("spinner %q", buf.String())
 	}
 }
