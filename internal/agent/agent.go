@@ -75,6 +75,7 @@ type Config struct {
 	RouterTime          time.Duration
 	Err                 io.Writer
 	Stats               *Stats
+	Plain               bool
 }
 
 type Stats struct {
@@ -109,7 +110,7 @@ func PrintSummary(w io.Writer, intent string, s Stats) {
 	if w == nil {
 		return
 	}
-	fmt.Fprintln(w, ui.Dim(FormatSummary(intent, s)))
+	fmt.Fprintln(w, ui.Current().Muted(FormatSummary(intent, s)))
 }
 
 func PrintTrace(w io.Writer, step int, think bool, d time.Duration, in, out int, names []string) {
@@ -221,11 +222,12 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			if strings.TrimSpace(text) == "" {
 				return ErrNoAnswer
 			}
-			fmt.Fprintln(cfg.Out, text)
+			fmt.Fprintln(cfg.Out)
+			writeAnswer(cfg.Out, text, cfg.Plain)
 			return nil
 		}
 		if text := trimLeadingBlanks(msg.Content); strings.TrimSpace(text) != "" {
-			fmt.Fprintln(cfg.Out, ui.Dim(text))
+			fmt.Fprintln(cfg.Out, ui.Current().Muted(text))
 		}
 
 		for _, call := range msg.ToolCalls {
@@ -286,7 +288,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					d, reason, err = cfg.Confirmer.ConfirmForced(summary, action.Preview())
 				} else {
 					if outside && cfg.AutoApprove {
-						fmt.Fprintln(cfg.Out, ui.Yellow(summary))
+						fmt.Fprintln(cfg.Out, ui.Current().Warn(summary))
 					}
 					d, reason, err = cfg.Confirmer.Confirm(summary, action.Preview())
 				}
@@ -331,7 +333,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				key := call.Function.Name + "\x00" + canonicalJSON(call.Function.Arguments)
 				if _, dup := seenRead[key]; dup {
 					if !finish {
-						fmt.Fprintln(cfg.Out, ui.Cyan("▸ ")+summary+" (duplicate, skipped)")
+						fmt.Fprintln(cfg.Out, ui.Current().Accent("▸")+" "+summary+" (duplicate, skipped)")
 					}
 					tm := llm.Message{
 						Role: llm.RoleTool, Content: "note: you already made this exact call; its result is above.",
@@ -344,7 +346,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				seenRead[key] = struct{}{}
 			}
 			if !finish {
-				fmt.Fprintln(cfg.Out, ui.Cyan("▸ ")+summary)
+				fmt.Fprintln(cfg.Out, ui.Current().Accent("▸")+" "+summary)
 			}
 			start := time.Now()
 			result, err := action.Run(ctx)
@@ -366,14 +368,15 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					return ErrNoAnswer
 				}
 				fmt.Fprintln(cfg.Out)
-				fmt.Fprintln(cfg.Out, ui.Bold(text))
+				writeAnswer(cfg.Out, text, cfg.Plain)
 				return nil
 			}
-			mark := ui.Green("✓")
+			pal := ui.Current()
+			mark := pal.Success("✓")
 			if result.IsError {
-				mark = ui.Red("✗")
+				mark = pal.Error("✗")
 			}
-			fmt.Fprintf(cfg.Out, "%s %s · %s\n", mark, displayMeta(result), formatDuration(elapsed))
+			fmt.Fprintf(cfg.Out, "%s %s · %s\n", mark, pal.Muted(displayMeta(result)), pal.Muted(formatDuration(elapsed)))
 			content := result.Output
 			if kind == tools.ReadOnly {
 				if !cfg.RequirePlan || !planApproved {
@@ -407,6 +410,19 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		}
 	}
 	return ErrMaxSteps
+}
+
+func writeAnswer(w io.Writer, text string, plain bool) {
+	if plain {
+		fmt.Fprintln(w, text)
+		return
+	}
+	r := ui.NewRenderer(w, false)
+	_, _ = r.Write([]byte(text))
+	if !strings.HasSuffix(text, "\n") {
+		_, _ = r.Write([]byte("\n"))
+	}
+	_ = r.Flush()
 }
 
 func formatDuration(d time.Duration) string {
