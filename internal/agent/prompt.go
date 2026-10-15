@@ -46,6 +46,8 @@ const preferReadOnlyCmd = "Prefer running a read-only command (e.g. `go version`
 
 const ScopeRule = `Do exactly what was asked, nothing more: no extra features, refactors, renames, reformatting, comments or files the user did not request. Before calling finish, compare your changes with the request and revert anything unrequested. The finish summary must list every file you changed.`
 
+const SubprojectNote = `The user is in a sub-project. Treat the current directory as the subject unless they say otherwise; mention the parent only as context.`
+
 const (
 	ExploreNoteLookup = "note: you have explored enough. Answer now, or state exactly what is missing."
 	ExploreNoteBuild  = "note: exploration budget reached. Call propose_plan now with what you know."
