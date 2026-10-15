@@ -9,15 +9,19 @@ import (
 	"strings"
 
 	"github.com/siraj/konsolai/internal/llm"
+	"github.com/siraj/konsolai/internal/safety"
 )
 
 const findCap = 500
 
 type findFilesTool struct {
+	guard *safety.Guard
 	files FileLister
 }
 
-func newFindFiles(files FileLister) *findFilesTool { return &findFilesTool{files: files} }
+func newFindFiles(g *safety.Guard, files FileLister) *findFilesTool {
+	return &findFilesTool{guard: g, files: files}
+}
 
 func (t *findFilesTool) Spec() llm.ToolSpec {
 	return llm.ToolSpec{
@@ -56,7 +60,11 @@ func (t *findFilesTool) Prepare(rawArgs string) (Action, error) {
 	if err != nil {
 		return nil, fmt.Errorf("tools: find_files glob: %w", err)
 	}
-	return &findFilesAction{files: t.files, glob: args.Glob, prefix: args.Path, re: re}, nil
+	prefix, err := relPrefix(t.guard, args.Path)
+	if err != nil {
+		return nil, err
+	}
+	return &findFilesAction{files: t.files, glob: args.Glob, prefix: prefix, re: re}, nil
 }
 
 func (a *findFilesAction) Summary() string  { return "find " + a.glob }
