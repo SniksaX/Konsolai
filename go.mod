@@ -5,6 +5,7 @@ go 1.27.1
 require (
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/yuin/goldmark v1.8.6
 )
 
 require (
