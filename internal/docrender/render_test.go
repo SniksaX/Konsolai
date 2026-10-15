@@ -113,6 +113,67 @@ func TestRenderPDFIntegration(t *testing.T) {
 	}
 }
 
+func TestSVGStripsFontLicense(t *testing.T) {
+	bin := fakeMmdc(t, `#!/bin/sh
+out=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "-o" ]; then out="$2"; fi
+  shift
+done
+cat > "$out" <<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg">
+<!-- generated -->
+<title>chart</title>
+<desc>flowchart</desc>
+<metadata>SIL Open Font License</metadata>
+<style>@font-face{font-family:Treemap;src:url(x)} text{font-family:Treemap}</style>
+<text font-family="Treemap">A</text>
+</svg>
+SVG
+`)
+	lookMmdc = func(string) (string, error) { return bin, nil }
+	t.Cleanup(func() { lookMmdc = exec.LookPath })
+
+	src := "# Doc\n\n```mermaid\nflowchart TD\n  A-->B\n```\n"
+	res, err := Render(context.Background(), "html", "A.md", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(res.Bytes)
+	if strings.Contains(html, "SIL Open Font License") {
+		t.Fatalf("html still has OFL: %s", html)
+	}
+	if strings.Contains(html, "@font-face") {
+		t.Fatalf("html still has @font-face: %s", html)
+	}
+
+	if _, err := FindChrome(); err != nil {
+		return
+	}
+	pdf, err := Render(context.Background(), "pdf", "A.md", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := exec.LookPath("pdftotext"); err != nil {
+		return
+	}
+	dir := t.TempDir()
+	p := filepath.Join(dir, "A.pdf")
+	if err := os.WriteFile(p, pdf.Bytes, 0644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("pdftotext", p, "-").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(strings.ToLower(string(out)), "font license"); n != 0 {
+		t.Fatalf("pdftotext font license count %d: %s", n, out)
+	}
+	if strings.Contains(string(out), "SIL Open Font License") {
+		t.Fatalf("pdf text has OFL: %s", out)
+	}
+}
+
 func fakeMmdc(t *testing.T, script string) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "mmdc")
