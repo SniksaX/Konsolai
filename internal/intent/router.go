@@ -22,6 +22,7 @@ type Task string
 
 const (
 	TaskAnalysis Task = "analysis"
+	TaskDocs     Task = "docs"
 	TaskOther    Task = "other"
 )
 
@@ -44,11 +45,11 @@ References to the current location or its contents ('this', 'this one', 'here', 
 When unsure between answer and anything else, choose answer if the message is a question.
 language is the ISO 639-1 code of the user's message.
 reasoning=true when the request needs multi-step analysis: debugging an error or a pasted command, comparing approaches, non-trivial code questions. false for greetings, simple facts and simple commands.
-task is "analysis" when the user asks to analyse, review or give an opinion on code; otherwise "other".
+task is "analysis" when the user asks to analyse, review or give an opinion on code; "docs" when they ask to generate documentation, READMEs, diagrams or reports about code; otherwise "other".
 continues_previous=true only if the message depends on or follows up the recent conversation (references to 'it', 'that', 'continue', answers to a question you asked, same task). A new unrelated request -> false.
 Never print a secret value in full. Refer to it by name and its first 4 characters.`
 
-var decisionSchema = json.RawMessage(`{"type":"object","properties":{"intent":{"type":"string","enum":["answer","lookup","act","build"]},"language":{"type":"string"},"reason":{"type":"string"},"reasoning":{"type":"boolean"},"task":{"type":"string","enum":["analysis","other"]},"continues_previous":{"type":"boolean"}},"required":["intent","language","reason","reasoning","task","continues_previous"],"additionalProperties":false}`)
+var decisionSchema = json.RawMessage(`{"type":"object","properties":{"intent":{"type":"string","enum":["answer","lookup","act","build"]},"language":{"type":"string"},"reason":{"type":"string"},"reasoning":{"type":"boolean"},"task":{"type":"string","enum":["analysis","docs","other"]},"continues_previous":{"type":"boolean"}},"required":["intent","language","reason","reasoning","task","continues_previous"],"additionalProperties":false}`)
 
 func Classify(ctx context.Context, client *llm.Client, request string, recent []llm.Message, inRepo bool) (Decision, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -109,7 +110,7 @@ func parseDecision(raw string) (Decision, bool) {
 		d.Language = "en"
 	}
 	switch d.Task {
-	case TaskAnalysis, TaskOther:
+	case TaskAnalysis, TaskDocs, TaskOther:
 	case "":
 		d.Task = TaskOther
 	default:
