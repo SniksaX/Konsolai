@@ -266,13 +266,44 @@ func TestResumeSessionLocalFallback(t *testing.T) {
 	}
 	mem := memory.NewGuard(nil, nil)
 	prof := config.Profile{Name: "default", SessionIdleMinutes: 30}
-	id, hist := resumeSession(context.Background(), mem, prof, nil, cwd, invocation{})
+	cand := findCandidate(context.Background(), mem, prof, nil, cwd, invocation{})
+	if cand.Title != "quel process" || len(cand.Messages) != 1 || cand.Messages[0].Content != "port 3000" {
+		t.Fatalf("%+v", cand)
+	}
+	id, hist := applyResume(invocation{}, intent.Decision{ContinuesPrevious: true}, cand)
 	if id != "" || len(hist) != 1 || hist[0].Content != "port 3000" {
 		t.Fatalf("%q %+v", id, hist)
 	}
-	_, hist = resumeSession(context.Background(), mem, prof, nil, cwd, invocation{New: true})
-	if len(hist) != 0 {
-		t.Fatalf("new should ignore local: %+v", hist)
+	id, hist = applyResume(invocation{New: true}, intent.Decision{ContinuesPrevious: true}, cand)
+	if id != "" || len(hist) != 0 {
+		t.Fatalf("new should ignore candidate: %q %+v", id, hist)
+	}
+}
+
+func TestTopicAwareResume(t *testing.T) {
+	cand := resumeCandidate{
+		ID:    "sess-1",
+		Title: "how do I list git branches?",
+		Messages: []llm.Message{
+			{Role: llm.RoleUser, Content: "how do I list git branches?"},
+			{Role: llm.RoleAssistant, Content: "git branch"},
+		},
+	}
+	id, hist := applyResume(invocation{}, intent.Decision{ContinuesPrevious: false, Intent: intent.Build}, cand)
+	if id != "" || hist != nil {
+		t.Fatalf("unrelated should start new: %q %+v", id, hist)
+	}
+	id, hist = applyResume(invocation{}, intent.Decision{ContinuesPrevious: true, Intent: intent.Answer}, cand)
+	if id != "sess-1" || len(hist) != 2 {
+		t.Fatalf("continue: %q %d", id, len(hist))
+	}
+	id, hist = applyResume(invocation{Request: "and port 3306?"}, intent.Decision{ContinuesPrevious: true}, cand)
+	if id != "sess-1" {
+		t.Fatalf("follow-up %q", id)
+	}
+	id, hist = applyResume(invocation{New: true}, intent.Decision{ContinuesPrevious: true}, cand)
+	if id != "" || hist != nil {
+		t.Fatalf("new flag: %q %+v", id, hist)
 	}
 }
 
