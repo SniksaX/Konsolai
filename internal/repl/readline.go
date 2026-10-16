@@ -16,7 +16,25 @@ type rlReader struct {
 	footer   func() string
 	pastes   *PasteStore
 	lastChip string
+	shellOn  bool
 }
+
+type gatedHistory struct {
+	inner  *fileHistory
+	active *bool
+	want   bool
+}
+
+func (g *gatedHistory) Write(line string) (int, error) {
+	if g.active == nil || *g.active != g.want {
+		return g.inner.Len(), nil
+	}
+	return g.inner.Write(line)
+}
+
+func (g *gatedHistory) GetLine(pos int) (string, error) { return g.inner.GetLine(pos) }
+func (g *gatedHistory) Len() int                        { return g.inner.Len() }
+func (g *gatedHistory) Dump() interface{}               { return g.inner.Dump() }
 
 func NewReadline(completer func(line []rune, cursor int) readline.Completions, footer func() string, pastes *PasteStore) (LineReader, error) {
 	sh := readline.NewShell()
@@ -28,8 +46,9 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 	_ = sh.Config.Set("completion-description-style", "\x1b[38;5;245m")
 	_ = sh.Config.Set("prompt-transient", true)
 	_ = sh.Config.Set("transient-prompt", true)
-	sh.History.Add("repl", loadFileHistory(HistoryPath()))
 	r := &rlReader{sh: sh, footer: footer, pastes: pastes}
+	sh.History.Add("repl", &gatedHistory{inner: loadFileHistory(HistoryPath()), active: &r.shellOn, want: false})
+	sh.History.Add("shell", &gatedHistory{inner: loadFileHistory(ShellHistoryPath()), active: &r.shellOn, want: true})
 	sh.Keymap.Register(map[string]func(){
 		"insert-newline": func() {
 			sh.Line().Insert(sh.Cursor().Pos(), '\n')
@@ -109,3 +128,15 @@ func (r *rlReader) ReadLine(_ context.Context, prompt string) (string, error) {
 }
 
 func (r *rlReader) Close() error { return nil }
+
+func (r *rlReader) SetShellMode(on bool) {
+	if r == nil || r.sh == nil || r.shellOn == on {
+		return
+	}
+	if on {
+		r.sh.History.Cycle(true)
+	} else {
+		r.sh.History.Cycle(false)
+	}
+	r.shellOn = on
+}
