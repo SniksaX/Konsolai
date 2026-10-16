@@ -1478,6 +1478,33 @@ func TestDocsNudgeFiresOnce(t *testing.T) {
 	}
 }
 
+func TestDocsExportNudge(t *testing.T) {
+	var out bytes.Buffer
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "propose_plan", `{"summary":"write overview","steps":["write md","export pdf"],"files":["docs/OVERVIEW.pdf"]}`)),
+		{Role: llm.RoleAssistant, Content: "Here is the overview in chat."},
+		assistant(call("2", "write_file", `{"path":"docs/OVERVIEW.md","content":"# Overview\n"}`)),
+		{Role: llm.RoleAssistant, Content: "wrote"},
+	}, stubConfirm{d: ui.Approve}, Config{RequirePlan: true, Task: "docs", Out: &out, MaxSteps: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, msgs := range rep.reqs {
+		for _, m := range msgs {
+			if m.Role == llm.RoleUser && m.Content == DocsExportNote {
+				found = true
+			}
+			if m.Role == llm.RoleUser && m.Content == DocsFileNote {
+				t.Fatal("want export_doc nudge, got generic docs note")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing export_doc nudge")
+	}
+}
+
 func TestLeanResumeElidesOldToolOutputs(t *testing.T) {
 	longArgs := `{"path":"` + strings.Repeat("x", 300) + `"}`
 	hist := []llm.Message{
