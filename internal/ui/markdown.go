@@ -33,6 +33,7 @@ type Renderer struct {
 	fenceLang string
 	fenceBody strings.Builder
 	table     []string
+	lastBlank bool
 }
 
 func NewRenderer(w io.Writer, plain bool) *Renderer {
@@ -83,8 +84,7 @@ func (r *Renderer) Flush() error {
 
 func (r *Renderer) line(s string) error {
 	if r.plain {
-		_, err := io.WriteString(r.w, s+"\n")
-		return err
+		return r.writeCollapsed(s, s+"\n")
 	}
 	if r.inFence {
 		if isCloseFence(strings.TrimRight(s, "\r"), r.fenceChar, r.fenceN) {
@@ -105,6 +105,7 @@ func (r *Renderer) line(s string) error {
 		r.fenceChar = char
 		r.fenceN = n
 		r.fenceLang = lang
+		r.lastBlank = false
 		return nil
 	}
 	if reTable.MatchString(s) {
@@ -201,7 +202,25 @@ func isCloseFence(s string, char byte, n int) bool {
 	return strings.TrimSpace(s[i:]) == ""
 }
 
+func (r *Renderer) writeCollapsed(s, out string) error {
+	if strings.TrimSpace(s) == "" {
+		if r.lastBlank {
+			return nil
+		}
+		r.lastBlank = true
+		_, err := io.WriteString(r.w, "\n")
+		return err
+	}
+	r.lastBlank = false
+	_, err := io.WriteString(r.w, out)
+	return err
+}
+
 func (r *Renderer) emitLine(s string) error {
+	if strings.TrimSpace(s) == "" {
+		return r.writeCollapsed(s, "\n")
+	}
+	r.lastBlank = false
 	p := Current()
 	switch {
 	case reHeading.MatchString(s):
@@ -231,6 +250,7 @@ func (r *Renderer) emitLine(s string) error {
 }
 
 func (r *Renderer) emitFence(lang, body string) error {
+	r.lastBlank = false
 	p := Current()
 	label := lang
 	if label == "" {
@@ -442,4 +462,55 @@ func parseLink(s string) (text, url string, n int, ok bool) {
 		return "", "", 0, false
 	}
 	return s[1:end], s[end+2 : end+2+close], end + 3 + close, true
+}
+
+// CollapseBlankLines reduces runs of blank lines to one, outside fenced code blocks.
+func CollapseBlankLines(s string) string {
+	if s == "" {
+		return s
+	}
+	ends := strings.HasSuffix(s, "\n")
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	var b strings.Builder
+	inFence := false
+	var fenceChar byte
+	var fenceN int
+	lastBlank := false
+	for i, line := range lines {
+		raw := strings.TrimRight(line, "\r")
+		if inFence {
+			b.WriteString(line)
+			if i < len(lines)-1 || ends {
+				b.WriteByte('\n')
+			}
+			if isCloseFence(raw, fenceChar, fenceN) {
+				inFence = false
+			}
+			lastBlank = false
+			continue
+		}
+		if char, n, _, ok := parseOpenFence(raw); ok {
+			inFence = true
+			fenceChar, fenceN = char, n
+			lastBlank = false
+			b.WriteString(line)
+			if i < len(lines)-1 || ends {
+				b.WriteByte('\n')
+			}
+			continue
+		}
+		if strings.TrimSpace(line) == "" {
+			if lastBlank {
+				continue
+			}
+			lastBlank = true
+		} else {
+			lastBlank = false
+		}
+		b.WriteString(line)
+		if i < len(lines)-1 || ends {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
 }
