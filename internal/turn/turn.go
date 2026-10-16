@@ -13,6 +13,7 @@ import (
 	"github.com/siraj/konsolai/internal/intent"
 	"github.com/siraj/konsolai/internal/llm"
 	"github.com/siraj/konsolai/internal/memory"
+	"github.com/siraj/konsolai/internal/rag"
 	"github.com/siraj/konsolai/internal/ui"
 )
 
@@ -53,6 +54,7 @@ type Runner struct {
 	LastPromptTokens int
 	LastWindow       int
 	SlashHelp        string
+	Ingest           *rag.Ingester
 	shellOut         []string
 	lastCode         int
 	lastIntent       intent.Intent
