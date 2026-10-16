@@ -64,6 +64,7 @@ const (
 	defaultRetryWait     = 2 * time.Second
 	progressPeriod       = 200 * time.Millisecond
 	defaultContextWindow = 32768
+	defaultFastWindow    = 8192
 	defaultTokensPerChar = 0.30
 	tokensPerCharAlpha   = 0.5
 )
@@ -115,6 +116,7 @@ func New(baseURL, model string) *Client {
 func NewFast(baseURL, model string) *Client {
 	c := New(baseURL, model)
 	c.sendThinkKwargs = false
+	c.contextWindow = defaultFastWindow
 	return c
 }
 
@@ -279,22 +281,63 @@ func (c *Client) ResolveModel(ctx context.Context) (string, error) {
 			chosen.MaxModelLen = 0
 		}
 	}
-	c.mu.Lock()
-	if c.model == "" {
-		c.model = chosen.ID
-	}
 	win := chosen.MaxModelLen
 	if win <= 0 {
 		win = chosen.Meta.NCtx
 	}
 	if win <= 0 {
-		win = defaultContextWindow
+		win = c.propsNCtx(ctx)
+	}
+	if win <= 0 {
+		if !c.sendThinkKwargs {
+			win = defaultFastWindow
+		} else {
+			win = defaultContextWindow
+		}
+	}
+	c.mu.Lock()
+	if c.model == "" {
+		c.model = chosen.ID
 	}
 	c.contextWindow = win
 	c.windowReady = true
 	id := c.model
 	c.mu.Unlock()
 	return id, nil
+}
+
+func (c *Client) propsNCtx(ctx context.Context) int {
+	ctx, cancel := context.WithTimeout(ctx, 400*time.Millisecond)
+	defer cancel()
+	root := strings.TrimSuffix(c.baseURL, "/v1")
+	for _, u := range []string{c.baseURL + "/props", root + "/props"} {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			continue
+		}
+		resp, err := c.http.Do(req)
+		if err != nil {
+			continue
+		}
+		var body struct {
+			NCtx                      int `json:"n_ctx"`
+			DefaultGenerationSettings struct {
+				NCtx int `json:"n_ctx"`
+			} `json:"default_generation_settings"`
+		}
+		err = json.NewDecoder(resp.Body).Decode(&body)
+		resp.Body.Close()
+		if err != nil {
+			continue
+		}
+		if body.DefaultGenerationSettings.NCtx > 0 {
+			return body.DefaultGenerationSettings.NCtx
+		}
+		if body.NCtx > 0 {
+			return body.NCtx
+		}
+	}
+	return 0
 }
 
 type ChatOptions struct {
