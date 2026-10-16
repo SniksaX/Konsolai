@@ -19,6 +19,7 @@ type Snapshot struct {
 	Entries   []string
 	Truncated bool
 	GitRepo   bool
+	Pkg       PkgInfo
 }
 
 func LocationLine(cwd, root string) string {
@@ -44,6 +45,7 @@ func Collect() (Snapshot, error) {
 		Shell:   filepath.Base(os.Getenv("SHELL")),
 		User:    os.Getenv("USER"),
 		GitRepo: inGitRepo(cwd),
+		Pkg:     detectPkg(),
 	}
 	// An unreadable directory is not fatal; the listing is best-effort context.
 	if entries, err := os.ReadDir(cwd); err == nil {
@@ -69,6 +71,10 @@ func (s Snapshot) Brief() string {
 func (s Snapshot) String() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "OS: %s\nShell: %s\nUser: %s\nCWD: %s\nGit repo: %t\n", s.OS, s.Shell, s.User, s.CWD, s.GitRepo)
+	if line := s.Pkg.Line(); line != "" {
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
 	if s.RepoRoot != "" {
 		b.WriteString(LocationLine(s.CWD, s.RepoRoot))
 		b.WriteByte('\n')
