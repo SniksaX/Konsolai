@@ -77,6 +77,7 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 		return chip
 	}
 	sh.Prompt.Primary(func() string { return r.prompt })
+	// Transient is the only copy of the submitted line that stays in scrollback.
 	sh.Prompt.Transient(func() string { return r.prompt })
 	sh.Hint.SetProvider(func(line []rune, cursor int) []rune {
 		if r.footer == nil {
