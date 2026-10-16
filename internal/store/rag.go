@@ -194,10 +194,22 @@ func (s *Store) ChunkCounts(ctx context.Context, profile string, projectID *int6
 	return out, rows.Err()
 }
 
+func (s *Store) ClearCodeIndex(ctx context.Context, projectID int64) error {
+	ctx, cancel := withTimeout(ctx)
+	defer cancel()
+	if _, err := s.pool.Exec(ctx, `DELETE FROM memory_chunks WHERE source = 'code' AND project_id = $1`, projectID); err != nil {
+		return fmt.Errorf("store: clear code chunks: %w", err)
+	}
+	if _, err := s.pool.Exec(ctx, `DELETE FROM memory_files WHERE project_id = $1`, projectID); err != nil {
+		return fmt.Errorf("store: clear memory files: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) LastIndexedAt(ctx context.Context, projectID int64) (time.Time, bool, error) {
 	ctx, cancel := withTimeout(ctx)
 	defer cancel()
-	var t time.Time
+	var t *time.Time
 	err := s.pool.QueryRow(ctx, `SELECT max(indexed_at) FROM memory_files WHERE project_id = $1`, projectID).Scan(&t)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -205,8 +217,8 @@ func (s *Store) LastIndexedAt(ctx context.Context, projectID int64) (time.Time, 
 		}
 		return time.Time{}, false, fmt.Errorf("store: last indexed: %w", err)
 	}
-	if t.IsZero() {
+	if t == nil || t.IsZero() {
 		return time.Time{}, false, nil
 	}
-	return t, true, nil
+	return *t, true, nil
 }
