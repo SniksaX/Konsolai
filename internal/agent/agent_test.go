@@ -1309,6 +1309,12 @@ func TestPromptNotes(t *testing.T) {
 	if !strings.Contains(AnswerPrompt, "If the user refers to 'this' or 'here' without content, say you will look at the current folder.") {
 		t.Fatal("answer deictic fallback")
 	}
+	if !strings.Contains(AnswerPrompt, "About Konsolai:") || !strings.Contains(AnswerPrompt, "export PDF/HTML") {
+		t.Fatal("answer about block")
+	}
+	if !strings.Contains(AnswerPrompt, "Never claim you cannot search or run commands") {
+		t.Fatal("answer capability rule")
+	}
 	if ProgressLabel("working", llm.Progress{ReasoningTokens: 1200}) != "thinking · 1.2k tok" {
 		t.Fatal("reasoning label")
 	}
