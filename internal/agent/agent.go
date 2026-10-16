@@ -53,7 +53,17 @@ const (
 	ThinkOff ThinkingPolicy = iota
 	ThinkOn
 	ThinkUntilPlan
+	ThinkPlanStep
 )
+
+func ParseBuildThinking(s string) ThinkingPolicy {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "until_plan":
+		return ThinkUntilPlan
+	default:
+		return ThinkPlanStep
+	}
+}
 
 type Config struct {
 	Client         *llm.Client
@@ -172,9 +182,23 @@ func (p ThinkingPolicy) enabled(planApproved, shellFail bool) bool {
 			return true
 		}
 		return shellFail
+	case ThinkPlanStep:
+		if !planApproved {
+			return false
+		}
+		return shellFail
 	default:
 		return false
 	}
+}
+
+func hasProposePlan(msg llm.Message) bool {
+	for _, c := range msg.ToolCalls {
+		if c.Function.Name == "propose_plan" {
+			return true
+		}
+	}
+	return false
 }
 
 var (
@@ -462,13 +486,17 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		think := cfg.ThinkingPolicy.enabled(planApproved, shellFail)
 		opts := llm.ChatOptions{Thinking: think, Temperature: temp}
 		shellFail = false
+		forcingPlan := toolsGone && cfg.RequirePlan && !planApproved
+		if forcingPlan && cfg.ThinkingPolicy == ThinkPlanStep {
+			think = true
+			opts.Thinking = true
+		}
 		label := "working"
 		if cfg.RequirePlan && !planApproved {
 			label = "planning"
 		} else if think {
 			label = "thinking"
 		}
-		forcingPlan := toolsGone && cfg.RequirePlan && !planApproved
 		if toolsGone && !goneNoteAdded {
 			note := ToolsGoneNote
 			if forcingPlan {
@@ -528,6 +556,73 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		}
 		if err != nil {
 			return err
+		}
+		if cfg.ThinkingPolicy == ThinkPlanStep && !think && !planApproved && hasProposePlan(msg) {
+			if cfg.Trace {
+				var names []string
+				for _, c := range msg.ToolCalls {
+					names = append(names, c.Function.Name)
+				}
+				st.Steps++
+				st.ModelTime += modelElapsed
+				st.PromptTokens += usage.PromptTokens
+				st.CompletionTokens += usage.CompletionTokens
+				PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, cfg.Client.ContextWindow(), names)
+			} else {
+				st.Steps++
+				st.ModelTime += modelElapsed
+				st.PromptTokens += usage.PromptTokens
+				st.CompletionTokens += usage.CompletionTokens
+			}
+			think = true
+			opts.Thinking = true
+			opts.ToolChoice = "propose_plan"
+			stepSpecs = planOnlySpecs(specs)
+			if len(stepSpecs) == 0 {
+				stepSpecs = specs
+			}
+			label = "thinking"
+			_, maxTok, elide, err = PrepareCall(cfg.Client, msgs, stepSpecs, cfg.Intent)
+			if err != nil {
+				return err
+			}
+			if cfg.Trace && elide.Count > 0 {
+				fmt.Fprintln(cfg.Err, FormatElide(elide, cfg.Client.ContextWindow()))
+			}
+			opts.MaxTokens = maxTok
+			live = ui.StartLive(label)
+			opts.OnProgress = func(p llm.Progress) {
+				live.SetLabel(ProgressLabel(label, p))
+			}
+			t0 := time.Now()
+			msg, usage, err = cfg.Client.Complete(ctx, msgs, stepSpecs, opts)
+			modelElapsed = time.Since(t0)
+			live.Stop()
+			if errors.Is(err, llm.ErrTruncated) {
+				msgs = aggressiveTrim(msgs, userIdx)
+				userIdx = lastUserTask(msgs, task)
+				est := cfg.Client.EstimatePromptTokens(msgs, stepSpecs)
+				window := cfg.Client.ContextWindow()
+				room := window - est - contextSafety
+				if room < minOutputTokens {
+					return ErrContextOverflow
+				}
+				opts.MaxTokens = room
+				live = ui.StartLive(label)
+				opts.OnProgress = func(p llm.Progress) {
+					live.SetLabel(ProgressLabel(label, p))
+				}
+				t0 = time.Now()
+				msg, usage, err = cfg.Client.Complete(ctx, msgs, stepSpecs, opts)
+				modelElapsed += time.Since(t0)
+				live.Stop()
+				if errors.Is(err, llm.ErrTruncated) {
+					return ErrContextOverflow
+				}
+			}
+			if err != nil {
+				return err
+			}
 		}
 		if forcingPlan {
 			msg.Content = ""
