@@ -54,6 +54,10 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 		return Result{ExitCode: 1}
 	}
 	client := r.client()
+	if _, err := client.ResolveModel(ctx); err != nil {
+		fmt.Fprintln(r.errw(), "konsolai:", err)
+		return Result{ExitCode: 1}
+	}
 	facts := LoadFactsBlock(ctx, mem, r.Profile.Name, projectID)
 	conf, closeConf, err := r.confirm(req.Yes)
 	if err != nil {
