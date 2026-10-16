@@ -426,6 +426,127 @@ func elidedMarker(tool, summary string) string {
 	return fmt.Sprintf("[tool output elided: %s %s]", tool, summary)
 }
 
+type readSpan struct {
+	abs    string
+	hash   string
+	start  int
+	end    int
+	step   int
+	toolID string
+}
+
+func parseReadRange(raw string) (start, end int) {
+	var a struct {
+		StartLine int `json:"start_line"`
+		EndLine   int `json:"end_line"`
+	}
+	_ = json.Unmarshal([]byte(raw), &a)
+	start = a.StartLine
+	if start < 1 {
+		start = 1
+	}
+	return start, a.EndLine
+}
+
+func parseReadHeader(out string) (start, end int, ok bool) {
+	line, _, _ := strings.Cut(out, "\n")
+	i := strings.LastIndex(line, "(lines ")
+	if i < 0 {
+		return 0, 0, false
+	}
+	rest := strings.TrimSuffix(strings.TrimSpace(line[i+7:]), ")")
+	rest, _, _ = strings.Cut(rest, " of ")
+	var a, b int
+	if _, err := fmt.Sscanf(rest, "%d-%d", &a, &b); err != nil {
+		return 0, 0, false
+	}
+	return a, b, true
+}
+
+func fileSHA256(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(b)
+	return fmt.Sprintf("%x", sum), nil
+}
+
+func fileLineCount(path string) int {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	if len(b) == 0 {
+		return 0
+	}
+	for _, c := range b {
+		if c == '\n' {
+			n++
+		}
+	}
+	if b[len(b)-1] != '\n' {
+		n++
+	}
+	return n
+}
+
+func (s readSpan) covers(start, end int) bool {
+	if s.start > start {
+		return false
+	}
+	return s.end >= end
+}
+
+func findReadSpan(spans []readSpan, abs, hash string, start, end int) (readSpan, bool) {
+	for i := len(spans) - 1; i >= 0; i-- {
+		sp := spans[i]
+		if sp.abs == abs && sp.hash == hash && sp.covers(start, end) {
+			return sp, true
+		}
+	}
+	return readSpan{}, false
+}
+
+func purgeElidedReads(spans []readSpan, msgs []llm.Message) []readSpan {
+	dead := map[string]bool{}
+	for _, m := range msgs {
+		if m.Role == llm.RoleTool && isElided(m.Content) && m.ToolCallID != "" {
+			dead[m.ToolCallID] = true
+		}
+	}
+	if len(dead) == 0 {
+		return spans
+	}
+	out := spans[:0]
+	for _, sp := range spans {
+		if !dead[sp.toolID] {
+			out = append(out, sp)
+		}
+	}
+	return out
+}
+
+func proposePlanValid(reg *tools.Registry, msg llm.Message) bool {
+	if reg == nil {
+		return true
+	}
+	tool, ok := reg.Get("propose_plan")
+	if !ok {
+		return false
+	}
+	for _, c := range msg.ToolCalls {
+		if c.Function.Name != "propose_plan" {
+			continue
+		}
+		if _, err := tool.Prepare(c.Function.Arguments); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
 func elideOneTool(msgs []llm.Message) bool {
 	limit := len(msgs) - protectLastMsgs
 	if limit <= 0 {
@@ -549,6 +670,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	specs := cfg.Tools.Specs()
 	seenFail := make(map[string]struct{})
 	seenRead := make(map[string]struct{})
+	var readSpans []readSpan
 	planApproved := false
 	var planFiles []string
 	var planCmds []string
@@ -618,6 +740,9 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		if cfg.Trace && elide.Count > 0 {
 			fmt.Fprintln(cfg.Err, FormatElide(elide, cfg.Client.ContextWindow()))
 		}
+		if elide.Count > 0 {
+			readSpans = purgeElidedReads(readSpans, msgs)
+		}
 		opts.MaxTokens = maxTok
 		live := ui.StartLive(label)
 		opts.OnProgress = func(p llm.Progress) {
@@ -652,7 +777,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		if err != nil {
 			return err
 		}
-		if cfg.ThinkingPolicy == ThinkPlanStep && !think && !planApproved && hasProposePlan(msg) {
+		if cfg.ThinkingPolicy == ThinkPlanStep && !think && !planApproved && hasProposePlan(msg) && proposePlanValid(cfg.Tools, msg) {
 			if cfg.Trace {
 				st.Steps++
 				st.ModelTime += modelElapsed
@@ -680,6 +805,9 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			}
 			if cfg.Trace && elide.Count > 0 {
 				fmt.Fprintln(cfg.Err, FormatElide(elide, cfg.Client.ContextWindow()))
+			}
+			if elide.Count > 0 {
+				readSpans = purgeElidedReads(readSpans, msgs)
 			}
 			opts.MaxTokens = maxTok
 			live = ui.StartLive(label)
@@ -890,7 +1018,15 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				}
 			}
 			finish := action.Kind() == tools.Final
-			if kind == tools.ReadOnly {
+			if call.Function.Name == "read_file" {
+				if skipped, tm := skipCoveredRead(action, call, readSpans, cfg.Out); skipped {
+					msgs = append(msgs, tm)
+					_ = rec.Message(ctx, tm)
+					lastReadOnly = len(msgs) - 1
+					continue
+				}
+			}
+			if kind == tools.ReadOnly && call.Function.Name != "read_file" {
 				key := call.Function.Name + "\x00" + canonicalJSON(call.Function.Arguments)
 				if _, dup := seenRead[key]; dup {
 					if !finish {
@@ -930,6 +1066,24 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					wroteFile = true
 				case "export_doc":
 					exportedDoc = true
+				case "read_file":
+					if p, ok := action.(interface{ ResolvedPath() string }); ok {
+						if hash, err := fileSHA256(p.ResolvedPath()); err == nil {
+							start, end, okHdr := parseReadHeader(result.Output)
+							if !okHdr {
+								start, end = parseReadRange(call.Function.Arguments)
+								if end < 1 {
+									end = fileLineCount(p.ResolvedPath())
+								}
+							}
+							if start > 0 && end >= start {
+								readSpans = append(readSpans, readSpan{
+									abs: p.ResolvedPath(), hash: hash,
+									start: start, end: end, step: st.Steps, toolID: call.ID,
+								})
+							}
+						}
+					}
 				}
 			}
 			if result.Final {
@@ -1086,6 +1240,36 @@ func canonicalJSON(raw string) string {
 		return raw
 	}
 	return string(b)
+}
+
+func skipCoveredRead(action tools.Action, call llm.ToolCall, spans []readSpan, out io.Writer) (bool, llm.Message) {
+	type hasResolved interface{ ResolvedPath() string }
+	rp, ok := action.(hasResolved)
+	if !ok {
+		return false, llm.Message{}
+	}
+	abs := rp.ResolvedPath()
+	hash, err := fileSHA256(abs)
+	if err != nil {
+		return false, llm.Message{}
+	}
+	start, end := parseReadRange(call.Function.Arguments)
+	if end < 1 {
+		end = fileLineCount(abs)
+	}
+	sp, ok := findReadSpan(spans, abs, hash, start, end)
+	if !ok {
+		return false, llm.Message{}
+	}
+	summary := action.Summary()
+	if out != nil {
+		fmt.Fprintln(out, ui.Current().Accent("▸")+" "+summary+" (already shown, skipped)")
+	}
+	return true, llm.Message{
+		Role:       llm.RoleTool,
+		Content:    fmt.Sprintf("already in context above (step %d, lines %d-%d)", sp.step, sp.start, sp.end),
+		ToolCallID: call.ID,
+	}
 }
 
 func filePathOf(a tools.Action) (string, bool) {
