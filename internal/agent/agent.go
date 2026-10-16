@@ -304,13 +304,18 @@ var (
 )
 
 const (
-	elidedPrefix    = "[tool output elided:"
-	contextSafety   = 1024
-	contextTrigger  = 0.60
-	contextTarget   = 0.40
-	minOutputTokens = 2048
-	protectLastMsgs = 6
-	elideSummaryMax = 80
+	elidedPrefix     = "[tool output elided:"
+	elidedReadPrefix = "[elided] "
+	contextSafety    = 1024
+	contextTrigger   = 0.60
+	contextTarget    = 0.40
+	minOutputTokens  = 2048
+	protectLastMsgs  = 6
+	elideSummaryMax  = 80
+	elideOutlineCap  = 1536
+	postPlanNoteAt   = 4
+	postPlanForceAt  = 6
+	postPlanDocsAt   = 3
 )
 
 type ElideStats struct {
@@ -363,7 +368,7 @@ func shouldElide(estimate, window, cap int) bool {
 }
 
 func isElided(s string) bool {
-	return strings.HasPrefix(s, elidedPrefix)
+	return strings.HasPrefix(s, elidedPrefix) || strings.HasPrefix(s, elidedReadPrefix)
 }
 
 func isPlanTool(msgs []llm.Message, i int) bool {
@@ -384,10 +389,10 @@ func isPlanTool(msgs []llm.Message, i int) bool {
 	return false
 }
 
-func toolNameOf(msgs []llm.Message, i int) string {
+func toolCallOf(msgs []llm.Message, i int) (name, args string) {
 	id := msgs[i].ToolCallID
 	if id == "" {
-		return "tool"
+		return "tool", ""
 	}
 	for j := i - 1; j >= 0; j-- {
 		if msgs[j].Role != llm.RoleAssistant {
@@ -395,14 +400,84 @@ func toolNameOf(msgs []llm.Message, i int) string {
 		}
 		for _, c := range msgs[j].ToolCalls {
 			if c.ID == id {
-				if c.Function.Name != "" {
-					return c.Function.Name
+				n := c.Function.Name
+				if n == "" {
+					n = "tool"
 				}
-				return "tool"
+				return n, c.Function.Arguments
 			}
 		}
 	}
-	return "tool"
+	return "tool", ""
+}
+
+func toolNameOf(msgs []llm.Message, i int) string {
+	n, _ := toolCallOf(msgs, i)
+	return n
+}
+
+func pathFromArgs(raw string) string {
+	var a struct {
+		Path string `json:"path"`
+	}
+	_ = json.Unmarshal([]byte(raw), &a)
+	return a.Path
+}
+
+func dropSpanByID(spans []readSpan, id string) []readSpan {
+	if id == "" {
+		return spans
+	}
+	out := spans[:0]
+	for _, sp := range spans {
+		if sp.toolID != id {
+			out = append(out, sp)
+		}
+	}
+	return out
+}
+
+func spanVisible(sp readSpan, msgs []llm.Message) bool {
+	if sp.toolID == "" {
+		return false
+	}
+	for _, m := range msgs {
+		if m.Role != llm.RoleTool || m.ToolCallID != sp.toolID {
+			continue
+		}
+		if isElided(m.Content) || strings.HasPrefix(m.Content, "already in context") {
+			return false
+		}
+		return true
+	}
+	return false
+}
+
+func capElideOutline(s string) string {
+	if len(s) <= elideOutlineCap {
+		return s
+	}
+	s = s[:elideOutlineCap]
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+func fileElidePlaceholder(abs, rel string) (string, bool) {
+	if abs == "" {
+		return "", false
+	}
+	fi, err := os.Stat(abs)
+	if err != nil || fi.IsDir() {
+		return "", false
+	}
+	if rel == "" {
+		rel = filepath.Base(abs)
+	}
+	n := fileLineCount(abs)
+	outline := capElideOutline(tools.FileOutline(abs, rel))
+	return fmt.Sprintf("[elided] %s (%d lines). Outline:\n%s\nRe-read only the specific line ranges you need.", rel, n, outline), true
 }
 
 func elideSummary(content string) string {
@@ -547,7 +622,7 @@ func proposePlanValid(reg *tools.Registry, msg llm.Message) bool {
 	return true
 }
 
-func elideOneTool(msgs []llm.Message) bool {
+func elideOneTool(msgs []llm.Message, spans *[]readSpan, seen map[string]struct{}) bool {
 	limit := len(msgs) - protectLastMsgs
 	if limit <= 0 {
 		return false
@@ -559,7 +634,42 @@ func elideOneTool(msgs []llm.Message) bool {
 		if isPlanTool(msgs, i) {
 			continue
 		}
-		msgs[i].Content = elidedMarker(toolNameOf(msgs, i), elideSummary(msgs[i].Content))
+		name, args := toolCallOf(msgs, i)
+		rel := pathFromArgs(args)
+		abs := rel
+		id := msgs[i].ToolCallID
+		if spans != nil {
+			for _, sp := range *spans {
+				if sp.toolID == id && sp.abs != "" {
+					abs = sp.abs
+					break
+				}
+			}
+		}
+		if !filepath.IsAbs(abs) && abs != "" {
+			if a, err := filepath.Abs(abs); err == nil {
+				abs = a
+			}
+		}
+		replaced := false
+		if name == "read_file" || name == "outline" {
+			if ph, ok := fileElidePlaceholder(abs, rel); ok {
+				msgs[i].Content = ph
+				replaced = true
+			}
+		}
+		if !replaced {
+			if name == "" {
+				name = "tool"
+			}
+			msgs[i].Content = elidedMarker(name, elideSummary(msgs[i].Content))
+		}
+		if spans != nil {
+			*spans = dropSpanByID(*spans, id)
+		}
+		if seen != nil && name != "" && args != "" {
+			delete(seen, name+"\x00"+canonicalJSON(args))
+		}
 		return true
 	}
 	return false
@@ -619,6 +729,10 @@ func aggressiveTrim(msgs []llm.Message, userIdx int) []llm.Message {
 }
 
 func PrepareCall(client *llm.Client, msgs []llm.Message, tools []llm.ToolSpec, intent string) (estimate, maxTokens int, elide ElideStats, err error) {
+	return prepareCall(client, msgs, tools, intent, nil, nil)
+}
+
+func prepareCall(client *llm.Client, msgs []llm.Message, tools []llm.ToolSpec, intent string, spans *[]readSpan, seen map[string]struct{}) (estimate, maxTokens int, elide ElideStats, err error) {
 	window := client.ContextWindow()
 	cap := ProfileCap(intent)
 	estimate = client.EstimatePromptTokens(msgs, tools)
@@ -629,7 +743,7 @@ func PrepareCall(client *llm.Client, msgs []llm.Message, tools []llm.ToolSpec, i
 			if float64(est) <= contextTarget*float64(window) {
 				break
 			}
-			if !elideOneTool(msgs) {
+			if !elideOneTool(msgs, spans, seen) {
 				break
 			}
 			elide.Count++
@@ -683,6 +797,9 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	wroteFile := false
 	exportedDoc := false
 	docsNudged := false
+	docsWriteNoted := false
+	postPlanReads := 0
+	forceMutating := false
 	shellFail := false
 	var st Stats
 	st.RouterTime = cfg.RouterTime
@@ -732,16 +849,16 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			} else if !cfg.RequirePlan {
 				stepSpecs = nil
 			}
+		} else if forceMutating && planApproved {
+			stepSpecs = mutatingSpecs(specs)
+			opts.ToolChoice = "required"
 		}
-		_, maxTok, elide, err := PrepareCall(cfg.Client, msgs, stepSpecs, cfg.Intent)
+		_, maxTok, elide, err := prepareCall(cfg.Client, msgs, stepSpecs, cfg.Intent, &readSpans, seenRead)
 		if err != nil {
 			return err
 		}
 		if cfg.Trace && elide.Count > 0 {
 			fmt.Fprintln(cfg.Err, FormatElide(elide, cfg.Client.ContextWindow()))
-		}
-		if elide.Count > 0 {
-			readSpans = purgeElidedReads(readSpans, msgs)
 		}
 		opts.MaxTokens = maxTok
 		live := ui.StartLive(label)
@@ -799,15 +916,12 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				stepSpecs = specs
 			}
 			label = "thinking"
-			_, maxTok, elide, err = PrepareCall(cfg.Client, msgs, stepSpecs, cfg.Intent)
+			_, maxTok, elide, err = prepareCall(cfg.Client, msgs, stepSpecs, cfg.Intent, &readSpans, seenRead)
 			if err != nil {
 				return err
 			}
 			if cfg.Trace && elide.Count > 0 {
 				fmt.Fprintln(cfg.Err, FormatElide(elide, cfg.Client.ContextWindow()))
-			}
-			if elide.Count > 0 {
-				readSpans = purgeElidedReads(readSpans, msgs)
 			}
 			opts.MaxTokens = maxTok
 			live = ui.StartLive(label)
@@ -1019,7 +1133,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			}
 			finish := action.Kind() == tools.Final
 			if call.Function.Name == "read_file" {
-				if skipped, tm := skipCoveredRead(action, call, readSpans, cfg.Out); skipped {
+				if skipped, tm := skipCoveredRead(action, call, readSpans, msgs, cfg.Out); skipped {
 					msgs = append(msgs, tm)
 					_ = rec.Message(ctx, tm)
 					lastReadOnly = len(msgs) - 1
@@ -1128,6 +1242,28 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				shellFail = true
 			}
 		}
+		if planApproved && (cfg.RequirePlan || cfg.Intent == "act" || cfg.Intent == "build") {
+			if stepReadOnly > 0 && stepOther == 0 {
+				postPlanReads++
+				if cfg.Task == "docs" && !wroteFile && postPlanReads == postPlanDocsAt && !docsWriteNoted {
+					docsWriteNoted = true
+					nudge := llm.Message{Role: llm.RoleUser, Content: docsPlannedWriteNote(planFiles)}
+					msgs = append(msgs, nudge)
+					_ = rec.Message(ctx, nudge)
+				}
+				if postPlanReads == postPlanNoteAt {
+					nudge := llm.Message{Role: llm.RoleUser, Content: PostPlanNote}
+					msgs = append(msgs, nudge)
+					_ = rec.Message(ctx, nudge)
+				}
+				if postPlanReads >= postPlanForceAt {
+					forceMutating = true
+				}
+			} else if stepOther > 0 {
+				postPlanReads = 0
+				forceMutating = false
+			}
+		}
 		prePlanEvery := !planApproved && (cfg.RequirePlan || cfg.Intent == "act" || cfg.Intent == "build")
 		if prePlanEvery {
 			explore++
@@ -1188,6 +1324,29 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	return ErrMaxSteps
 }
 
+func mutatingSpecs(specs []llm.ToolSpec) []llm.ToolSpec {
+	keep := map[string]bool{
+		"write_file": true, "edit_file": true, "run_shell": true,
+		"export_doc": true, "remember": true, "finish": true,
+	}
+	out := make([]llm.ToolSpec, 0, 6)
+	for _, s := range specs {
+		if keep[s.Function.Name] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func docsPlannedWriteNote(files []string) string {
+	for _, f := range files {
+		if strings.HasSuffix(strings.ToLower(f), ".md") {
+			return "Write " + f + " with write_file now."
+		}
+	}
+	return "Write the planned Markdown file with write_file now."
+}
+
 func planOnlySpecs(specs []llm.ToolSpec) []llm.ToolSpec {
 	for _, s := range specs {
 		if s.Function.Name == "propose_plan" {
@@ -1242,7 +1401,7 @@ func canonicalJSON(raw string) string {
 	return string(b)
 }
 
-func skipCoveredRead(action tools.Action, call llm.ToolCall, spans []readSpan, out io.Writer) (bool, llm.Message) {
+func skipCoveredRead(action tools.Action, call llm.ToolCall, spans []readSpan, msgs []llm.Message, out io.Writer) (bool, llm.Message) {
 	type hasResolved interface{ ResolvedPath() string }
 	rp, ok := action.(hasResolved)
 	if !ok {
@@ -1258,7 +1417,7 @@ func skipCoveredRead(action tools.Action, call llm.ToolCall, spans []readSpan, o
 		end = fileLineCount(abs)
 	}
 	sp, ok := findReadSpan(spans, abs, hash, start, end)
-	if !ok {
+	if !ok || !spanVisible(sp, msgs) {
 		return false, llm.Message{}
 	}
 	summary := action.Summary()
