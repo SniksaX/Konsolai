@@ -248,12 +248,13 @@ func run() int {
 	client := llm.New(prof.Endpoint, prof.Model)
 	client.SetIdleTimeout(time.Duration(prof.LLMIdleTimeoutSeconds) * time.Second)
 	runner := &turn.Runner{
-		Profile: prof,
-		Client:  client,
-		Mem:     mem,
-		Out:     os.Stdout,
-		Err:     os.Stderr,
-		Version: version,
+		Profile:    prof,
+		Client:     client,
+		FastClient: llm.NewFast(prof.FastEndpoint, prof.FastModel),
+		Mem:        mem,
+		Out:        os.Stdout,
+		Err:        os.Stderr,
+		Version:    version,
 	}
 
 	if inv.Slash == "" && inv.Cmd == cmdRequest && strings.TrimSpace(inv.Request) == "" && stdinIsTTY() && stdoutIsTTY() {
@@ -379,7 +380,7 @@ func applyResume(inv invocation, dec intent.Decision, cands []resumeCandidate) r
 }
 
 func thinkingFor(dec intent.Decision, buildThinking string) agent.ThinkingPolicy {
-	return turn.ThinkingFor(dec, buildThinking)
+	return turn.ThinkingFor(dec, buildThinking, turn.ThinkAuto)
 }
 
 func sanitizeAnswerHistory(hist []llm.Message) []llm.Message {
