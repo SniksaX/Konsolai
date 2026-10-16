@@ -2,6 +2,7 @@
 
 ## GIT CONVENTION (applies to every commit, now and in future tasks)
 - Branch: dev. One commit per file changed.
+- All commits go to dev. Never commit to prod; prod only receives merges done by the user.
 - Message format:
  [TYPE|SIZE] Title in imperative mood, max 72 chars
  <blank line>
