@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/siraj/konsolai/internal/agent"
@@ -14,9 +15,34 @@ import (
 	"github.com/siraj/konsolai/internal/ui"
 )
 
+type ThinkMode int
+
+const (
+	ThinkAuto ThinkMode = iota
+	ThinkAlways
+	ThinkNever
+)
+
+func ParseThinkMode(s string) (ThinkMode, bool) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "on":
+		return ThinkAlways, true
+	case "off":
+		return ThinkNever, true
+	case "auto", "":
+		return ThinkAuto, true
+	default:
+		return ThinkAuto, false
+	}
+}
+
 type Runner struct {
 	Profile          config.Profile
 	Client           *llm.Client
+	FastClient       *llm.Client
+	ThinkMode        ThinkMode
+	RouterSource     string
+	RouterModel      string
 	Mem              *memory.Guard
 	Out              io.Writer
 	Err              io.Writer
@@ -81,6 +107,29 @@ func (r *Runner) client() *llm.Client {
 	return c
 }
 
+func (r *Runner) fastClient() *llm.Client {
+	if r.FastClient != nil {
+		return r.FastClient
+	}
+	ep := r.Profile.FastEndpoint
+	if ep == "" {
+		return nil
+	}
+	c := llm.NewFast(ep, r.Profile.FastModel)
+	c.SetIdleTimeout(time.Duration(r.Profile.LLMIdleTimeoutSeconds) * time.Second)
+	r.FastClient = c
+	return c
+}
+
+func (r *Runner) routerClient(ctx context.Context) *llm.Client {
+	if fc := r.fastClient(); fc != nil && fc.Reachable(ctx) {
+		r.RouterSource = "fast"
+		return fc
+	}
+	r.RouterSource = "main"
+	return r.client()
+}
+
 func (r *Runner) mem() *memory.Guard {
 	if r.Mem != nil {
 		return r.Mem
@@ -118,12 +167,45 @@ func (r *Runner) confirm(ctx context.Context, yes bool) (agent.Confirmer, func()
 	return conf, func() { close(stop); closeConf() }, nil
 }
 
-func ThinkingFor(dec intent.Decision, buildThinking string) agent.ThinkingPolicy {
-	if dec.Intent == intent.Build {
-		return agent.ParseBuildThinking(buildThinking)
+var thinkPrefixes = []string{"think hard", "réfléchis bien"}
+
+func StripThinkPrefix(s string) (string, bool) {
+	t := strings.TrimSpace(s)
+	lower := strings.ToLower(t)
+	for _, p := range thinkPrefixes {
+		if strings.HasPrefix(lower, p) {
+			rest := strings.TrimSpace(t[len(p):])
+			rest = strings.TrimLeft(rest, ",:;- ")
+			if rest == "" {
+				return s, true
+			}
+			return rest, true
+		}
 	}
-	if dec.Reasoning {
+	return s, false
+}
+
+func ThinkingFor(dec intent.Decision, buildThinking string, mode ThinkMode) agent.ThinkingPolicy {
+	if mode == ThinkAlways {
 		return agent.ThinkOn
 	}
-	return agent.ThinkOff
+	if mode == ThinkNever {
+		return agent.ThinkOff
+	}
+	switch dec.Intent {
+	case intent.Build, intent.Act:
+		return agent.ParseBuildThinking(buildThinking)
+	case intent.Lookup:
+		return agent.ThinkLookup
+	case intent.Answer:
+		if dec.EffectiveEffort() == intent.EffortHigh {
+			return agent.ThinkOn
+		}
+		return agent.ThinkOff
+	default:
+		if dec.Reasoning {
+			return agent.ThinkOn
+		}
+		return agent.ThinkOff
+	}
 }
