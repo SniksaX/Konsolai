@@ -83,30 +83,50 @@ func (e *HTTPError) Error() string {
 }
 
 type Client struct {
-	baseURL       string
-	model         string
-	http          *http.Client
-	idleTimeout   time.Duration
-	retryWait     time.Duration
-	mu            sync.Mutex
-	contextWindow int
-	windowReady   bool
-	tokensPerChar float64
+	baseURL         string
+	model           string
+	http            *http.Client
+	idleTimeout     time.Duration
+	retryWait       time.Duration
+	mu              sync.Mutex
+	contextWindow   int
+	windowReady     bool
+	tokensPerChar   float64
+	sendThinkKwargs bool
 }
 
 func New(baseURL, model string) *Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.DialContext = (&net.Dialer{Timeout: 5 * time.Second}).DialContext
 	return &Client{
-		baseURL:       strings.TrimRight(baseURL, "/"),
-		model:         model,
-		http:          &http.Client{Transport: tr},
-		idleTimeout:   defaultIdleTimeout,
-		retryWait:     defaultRetryWait,
-		contextWindow: defaultContextWindow,
-		tokensPerChar: defaultTokensPerChar,
+		baseURL:         strings.TrimRight(baseURL, "/"),
+		model:           model,
+		http:            &http.Client{Transport: tr},
+		idleTimeout:     defaultIdleTimeout,
+		retryWait:       defaultRetryWait,
+		contextWindow:   defaultContextWindow,
+		tokensPerChar:   defaultTokensPerChar,
+		sendThinkKwargs: true,
 	}
 }
+
+// NewFast is a client for the lightweight router/answer model.
+// It never sends chat_template_kwargs.
+func NewFast(baseURL, model string) *Client {
+	c := New(baseURL, model)
+	c.sendThinkKwargs = false
+	return c
+}
+
+func (c *Client) BaseURL() string { return c.baseURL }
+
+func (c *Client) ModelID() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.model
+}
+
+func (c *Client) SendsThinkKwargs() bool { return c.sendThinkKwargs }
 
 func (c *Client) ContextWindow() int {
 	c.mu.Lock()
@@ -224,6 +244,9 @@ func (c *Client) ResolveModel(ctx context.Context) (string, error) {
 		Data []struct {
 			ID          string `json:"id"`
 			MaxModelLen int    `json:"max_model_len"`
+			Meta        struct {
+				NCtx int `json:"n_ctx"`
+			} `json:"meta"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
@@ -261,6 +284,9 @@ func (c *Client) ResolveModel(ctx context.Context) (string, error) {
 		c.model = chosen.ID
 	}
 	win := chosen.MaxModelLen
+	if win <= 0 {
+		win = chosen.Meta.NCtx
+	}
 	if win <= 0 {
 		win = defaultContextWindow
 	}
@@ -308,16 +334,16 @@ type jsonSchemaSpec struct {
 }
 
 type chatRequest struct {
-	Model              string             `json:"model"`
-	Messages           []Message          `json:"messages"`
-	Stream             bool               `json:"stream"`
-	Temperature        float64            `json:"temperature"`
-	MaxTokens          int                `json:"max_tokens,omitempty"`
-	ChatTemplateKwargs chatTemplateKwargs `json:"chat_template_kwargs"`
-	Tools              []ToolSpec         `json:"tools,omitempty"`
-	ToolChoice         json.RawMessage    `json:"tool_choice,omitempty"`
-	ResponseFormat     *responseFormat    `json:"response_format,omitempty"`
-	StreamOptions      *streamOptions     `json:"stream_options,omitempty"`
+	Model              string              `json:"model"`
+	Messages           []Message           `json:"messages"`
+	Stream             bool                `json:"stream"`
+	Temperature        float64             `json:"temperature"`
+	MaxTokens          int                 `json:"max_tokens,omitempty"`
+	ChatTemplateKwargs *chatTemplateKwargs `json:"chat_template_kwargs,omitempty"`
+	Tools              []ToolSpec          `json:"tools,omitempty"`
+	ToolChoice         json.RawMessage     `json:"tool_choice,omitempty"`
+	ResponseFormat     *responseFormat     `json:"response_format,omitempty"`
+	StreamOptions      *streamOptions      `json:"stream_options,omitempty"`
 }
 
 type completeResponse struct {
@@ -424,13 +450,15 @@ func (c *Client) completeAttempt(ctx context.Context, msgs []Message, tools []To
 		return Message{}, Usage{}, err, false
 	}
 	reqBody := chatRequest{
-		Model:              model,
-		Messages:           msgs,
-		Stream:             true,
-		Temperature:        opts.Temperature,
-		MaxTokens:          opts.MaxTokens,
-		ChatTemplateKwargs: chatTemplateKwargs{EnableThinking: opts.Thinking},
-		StreamOptions:      &streamOptions{IncludeUsage: true},
+		Model:         model,
+		Messages:      msgs,
+		Stream:        true,
+		Temperature:   opts.Temperature,
+		MaxTokens:     opts.MaxTokens,
+		StreamOptions: &streamOptions{IncludeUsage: true},
+	}
+	if c.sendThinkKwargs {
+		reqBody.ChatTemplateKwargs = &chatTemplateKwargs{EnableThinking: opts.Thinking}
 	}
 	if len(tools) > 0 {
 		reqBody.Tools = tools
