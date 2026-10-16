@@ -16,6 +16,7 @@ import (
 	"github.com/siraj/konsolai/internal/intent"
 	"github.com/siraj/konsolai/internal/llm"
 	"github.com/siraj/konsolai/internal/memory"
+	"github.com/siraj/konsolai/internal/rag"
 	"github.com/siraj/konsolai/internal/repo"
 	"github.com/siraj/konsolai/internal/safety"
 	"github.com/siraj/konsolai/internal/sysctx"
@@ -148,6 +149,13 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	} else {
 		fmt.Fprintln(r.out(), ui.IntentBadge(string(dec.Intent)))
 	}
+	if intent.LooksLikeMemory(req.Text) {
+		dec.NeedsMemory = true
+	}
+	if n, text := r.attachSessionMemory(ctx, mem, projectID, req.Text, dec.NeedsMemory); n > 0 {
+		req.Text = text
+		fmt.Fprintln(r.out(), ui.Current().Muted(fmt.Sprintf("recalled %d memories", n)))
+	}
 	if sessionID == "" && len(history) == 0 {
 		sessionID = CreateSession(ctx, mem, r.Profile, projectID, cwd, string(dec.Intent), req.Text)
 	}
@@ -277,11 +285,18 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			r.Ingest.EnqueueWeb(projectID, url, title, text)
 		}
 	}
+	onRecall := func(ctx context.Context, query, scope string, k int) ([]rag.Hit, error) {
+		if r.Embed == nil || mem.Store() == nil {
+			return nil, nil
+		}
+		return rag.Search(ctx, mem.Store(), r.Embed, r.Embed, r.Profile.Name, projectID, query, scope, k)
+	}
 	reg := tools.NewRegistry(sg, toolOut, lister, memory.NewWebCache(mem), memory.NewFactStore(mem, r.Profile.Name, projectID, sessionID), tools.Options{
 		ReadOnlyShell: dec.Intent == intent.Lookup,
 		DocsTask:      dec.Task == intent.TaskDocs,
 		Request:       req.Text,
 		OnWebFetch:    onWeb,
+		Recall:        onRecall,
 	})
 	cfg := agent.Config{
 		Client:         client,
@@ -320,7 +335,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 	}
 	switch dec.Intent {
 	case intent.Lookup:
-		cfg.Tools = reg.Named("list_dir", "read_file", "outline", "search", "find_files", "web_fetch", "run_shell", "finish")
+		cfg.Tools = reg.Named("list_dir", "read_file", "outline", "search", "find_files", "web_fetch", "recall", "run_shell", "finish")
 		cfg.Prompt = agent.LookupPrompt + "\n" + lang + sub
 		cfg.MaxSteps = 10
 		cfg.ExploreBudget = agent.ExploreBudgetFor("lookup", string(dec.Task))
@@ -567,6 +582,28 @@ func codeContext(ctx context.Context, snap sysctx.Snapshot, root string) string 
 		}
 	}
 	return b.String()
+}
+
+func (r *Runner) attachSessionMemory(ctx context.Context, mem *memory.Guard, projectID *int64, text string, needed bool) (int, string) {
+	if !needed || r.Embed == nil || mem == nil || mem.Store() == nil {
+		return 0, text
+	}
+	st := mem.Store()
+	if !st.RAGAvailable(ctx) {
+		return 0, text
+	}
+	hits, err := rag.Search(ctx, st, r.Embed, r.Embed, r.Profile.Name, projectID, text, "sessions", 4)
+	if err != nil || len(hits) == 0 {
+		return 0, text
+	}
+	return len(hits), rag.PrependMemory(text, hits)
+}
+
+func AttachMemories(user string, hits []rag.Hit) (string, int) {
+	if len(hits) == 0 {
+		return user, 0
+	}
+	return rag.PrependMemory(user, hits), len(hits)
 }
 
 func inSubproject(cwd, root string) bool {
