@@ -270,6 +270,15 @@ func TestDispatchUnknownAndHelp(t *testing.T) {
 	}
 }
 
+func TestSlashLines(t *testing.T) {
+	s := Default().SlashLines()
+	for _, want := range []string{"/help:", "/output:", "/status:", "/think:"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("missing %s in %q", want, s)
+		}
+	}
+}
+
 func TestStatus(t *testing.T) {
 	env, out, _ := testEnv(t)
 	if code := runStatus(context.Background(), env, nil); code != 0 {
