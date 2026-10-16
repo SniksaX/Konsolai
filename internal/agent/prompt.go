@@ -1,5 +1,7 @@
 package agent
 
+import "strings"
+
 const ActPrompt = `You are Konsolai, an agent that performs tasks in the user's terminal by calling tools.
 Use tools for every action. Do not describe commands instead of running them.
 Use non-interactive flags (-y, --yes, --no-input). Never use sudo. If root is required, stop and explain via finish.
@@ -80,3 +82,16 @@ const (
 	ExploreNoteBuild    = "note: exploration budget reached. Call propose_plan now with what you know."
 	AnalysisExploreNote = "read source files before concluding"
 )
+
+func ReplyInstruction(lang string) string {
+	name := "English"
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "fr":
+		name = "French"
+	case "en", "":
+		name = "English"
+	default:
+		name = "English"
+	}
+	return "Reply in " + name + ", the language of the user's latest message."
+}
