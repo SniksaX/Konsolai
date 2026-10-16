@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -312,6 +313,38 @@ func TestStatusWindowFromModels(t *testing.T) {
 	}
 	if client.ContextWindow() != 94208 {
 		t.Fatalf("client window %d", client.ContextWindow())
+	}
+}
+
+func TestReplOnlyRejectedInOneShot(t *testing.T) {
+	env, _, errb := testEnv(t)
+	if code := Default().Dispatch(context.Background(), env, "exit", nil); code != 2 {
+		t.Fatalf("%d", code)
+	}
+	if !strings.Contains(errb.String(), "only available in the REPL") {
+		t.Fatalf("%q", errb.String())
+	}
+}
+
+func TestManualCompact(t *testing.T) {
+	env, out, errb := testEnv(t)
+	if code := Default().Dispatch(context.Background(), env, "compact", nil); code != 2 {
+		t.Fatalf("one-shot %d %s", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "only available in the REPL") {
+		t.Fatalf("%q", errb.String())
+	}
+	errb.Reset()
+	env.InRepl = true
+	env.OnCompact = func(context.Context) int {
+		fmt.Fprintln(env.Out, "compacted 6 messages (ctx 74% -> 18%)")
+		return 0
+	}
+	if code := Default().Dispatch(context.Background(), env, "compact", nil); code != 0 {
+		t.Fatalf("repl compact %d %s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "compacted 6 messages") {
+		t.Fatalf("%q", out.String())
 	}
 }
 
