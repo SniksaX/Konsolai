@@ -22,10 +22,11 @@ type shellTool struct {
 	guard        *safety.Guard
 	out          io.Writer
 	readOnlyOnly bool
+	docsTask     bool
 }
 
-func newShell(g *safety.Guard, out io.Writer, readOnlyOnly bool) *shellTool {
-	return &shellTool{guard: g, out: out, readOnlyOnly: readOnlyOnly}
+func newShell(g *safety.Guard, out io.Writer, readOnlyOnly, docsTask bool) *shellTool {
+	return &shellTool{guard: g, out: out, readOnlyOnly: readOnlyOnly, docsTask: docsTask}
 }
 
 func (t *shellTool) Spec() llm.ToolSpec {
@@ -82,6 +83,9 @@ func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 	ro := safety.IsReadOnlyCommand(args.Cmd)
 	if t.readOnlyOnly && !ro {
 		return nil, errors.New("lookup can only run read-only commands")
+	}
+	if t.docsTask && !ro && docsBlockedCmd(args.Cmd) {
+		return nil, errors.New(DocsSourceReject)
 	}
 	kind := Mutating
 	if ro {
@@ -176,6 +180,15 @@ var exportBins = map[string]bool{
 
 var browserBins = map[string]bool{
 	"chromium": true, "chrome": true, "google-chrome": true, "google-chrome-stable": true, "firefox": true,
+}
+
+func docsBlockedCmd(cmd string) bool {
+	for _, p := range []string{"go run", "go build", "node ", "npx ", "python", "tsx ", "internal/docrender"} {
+		if strings.Contains(cmd, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func blocksExport(cmd string) bool {
