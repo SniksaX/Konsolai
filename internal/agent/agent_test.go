@@ -735,8 +735,8 @@ func TestDuplicateReadonlySkipped(t *testing.T) {
 		t.Fatal(err)
 	}
 	client, rep := newReplay(t, []llm.Message{
-		assistant(call("1", "read_file", `{"path":"a.txt"}`)),
-		assistant(call("2", "read_file", `{"path":"a.txt"}`)),
+		assistant(call("1", "list_dir", `{"path":"."}`)),
+		assistant(call("2", "list_dir", `{"path":"."}`)),
 		{Role: llm.RoleAssistant, Content: "done"},
 	})
 	var buf strings.Builder
@@ -1761,6 +1761,117 @@ func TestNarrationTruncatedInHistory(t *testing.T) {
 	}
 	if utf8.RuneCountInString(got) != 300 {
 		t.Fatalf("want 300 runes, got %d %q", utf8.RuneCountInString(got), got)
+	}
+}
+
+func TestReadDedupeSkipsCoveredRange(t *testing.T) {
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := "one\ntwo\nthree\nfour\nfive\n"
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	client, rep := newReplay(t, []llm.Message{
+		assistant(call("1", "read_file", `{"path":"a.txt"}`)),
+		assistant(call("2", "read_file", `{"path":"a.txt","start_line":2,"end_line":4}`)),
+		{Role: llm.RoleAssistant, Content: "done"},
+	})
+	err = Run(context.Background(), Config{
+		Client: client, Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		Confirmer: stubConfirm{d: ui.Approve}, Out: &out, MaxSteps: 6,
+	}, "sys", "task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "read a.txt (already shown, skipped)") {
+		t.Fatalf("display %q", out.String())
+	}
+	var skip string
+	for _, msgs := range rep.reqs {
+		for _, m := range msgs {
+			if m.Role == llm.RoleTool && m.ToolCallID == "2" {
+				skip = m.Content
+			}
+		}
+	}
+	if !strings.Contains(skip, "already in context above (step 1, lines 1-5)") {
+		t.Fatalf("skip %q", skip)
+	}
+}
+
+func TestReadDedupeRerunsAfterChange(t *testing.T) {
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("old\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "read_file", `{"path":"a.txt"}`)),
+		assistant(call("2", "write_file", `{"path":"a.txt","content":"new\n"}`)),
+		assistant(call("3", "read_file", `{"path":"a.txt"}`)),
+		{Role: llm.RoleAssistant, Content: "done"},
+	}, stubConfirm{d: ui.Approve}, Config{MaxSteps: 8, Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var second string
+	for _, msgs := range rep.reqs {
+		for _, m := range msgs {
+			if m.Role == llm.RoleTool && m.ToolCallID == "3" {
+				second = m.Content
+			}
+		}
+	}
+	if strings.Contains(second, "already in context") {
+		t.Fatalf("changed file was skipped: %q", second)
+	}
+	if !strings.Contains(second, "new") {
+		t.Fatalf("want re-read, got %q", second)
+	}
+}
+
+func TestReadDedupeInvalidatedByElision(t *testing.T) {
+	spans := []readSpan{{abs: "/a", hash: "h", start: 1, end: 10, step: 1, toolID: "t1"}}
+	msgs := []llm.Message{{Role: llm.RoleTool, Content: elidedMarker("read_file", "a"), ToolCallID: "t1"}}
+	got := purgeElidedReads(spans, msgs)
+	if len(got) != 0 {
+		t.Fatalf("want purged, got %+v", got)
+	}
+	if _, ok := findReadSpan(spans, "/a", "h", 2, 5); !ok {
+		t.Fatal("subset should be covered before purge")
+	}
+}
+
+func TestPlanStepInvalidPlanNoRetry(t *testing.T) {
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "propose_plan", `{"summary":"x"}`)),
+		assistant(call("2", "finish", `{"summary":"stopped"}`)),
+	}, stubConfirm{d: ui.Approve}, Config{
+		RequirePlan: true, AutoApprove: true, ThinkingPolicy: ThinkPlanStep, MaxSteps: 6,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.think) != 2 || rep.think[0] || rep.think[1] {
+		t.Fatalf("think %v", rep.think)
+	}
+	got := ""
+	for _, msgs := range rep.reqs {
+		for _, m := range msgs {
+			if m.Role == llm.RoleTool && m.ToolCallID == "1" {
+				got = m.Content
+			}
+		}
+	}
+	if !strings.Contains(got, "error:") {
+		t.Fatalf("want prepare error, got %q", got)
 	}
 }
 
