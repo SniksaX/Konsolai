@@ -28,6 +28,14 @@ func defaultStdinTTY() bool {
 	return fi.Mode()&os.ModeCharDevice != 0
 }
 
+func stdoutIsTTY() bool {
+	fi, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
 func defaultReadTTY() (string, error) {
 	fmt.Fprintln(os.Stderr, ui.Dim("› type your request, Ctrl+D to send"))
 	f, err := os.Open("/dev/tty")
