@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -129,9 +130,22 @@ func TestBaseRelativeTools(t *testing.T) {
 		t.Fatalf("../sibling: %v %q", err, res.Output)
 	}
 
-	_, err = read.Prepare(`{"path":"../../outside"}`)
+	outside := t.TempDir()
+	outFile := filepath.Join(outside, "out.txt")
+	if err := os.WriteFile(outFile, []byte("out-of-root"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	act, err = read.Prepare(`{"path":` + strconv.Quote(outFile) + `}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err = act.Run(context.Background())
+	if err != nil || res.IsError || !strings.Contains(res.Output, "out-of-root") {
+		t.Fatalf("read outside: %v %q", err, res.Output)
+	}
+	_, err = write.Prepare(`{"path":` + strconv.Quote(filepath.Join(outside, "x.txt")) + `,"content":"nope"}`)
 	if err == nil {
-		t.Fatal("escape: want deny")
+		t.Fatal("write outside: want deny")
 	}
 
 	other := filepath.Join(root, "other")
