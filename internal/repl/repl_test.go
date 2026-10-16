@@ -1,0 +1,151 @@
+package repl
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/siraj/konsolai/internal/commands"
+	"github.com/siraj/konsolai/internal/config"
+	"github.com/siraj/konsolai/internal/turn"
+)
+
+type scriptReader struct {
+	lines []string
+	i     int
+}
+
+func (s *scriptReader) ReadLine(context.Context, string) (string, error) {
+	if s.i >= len(s.lines) {
+		return "", ErrEOF
+	}
+	line := s.lines[s.i]
+	s.i++
+	return line, nil
+}
+
+func (s *scriptReader) Close() error { return nil }
+
+func TestReplCommandsAndExit(t *testing.T) {
+	var out, errb bytes.Buffer
+	env := &commands.Env{
+		Profile: config.Profile{Name: "default", Model: "m", Endpoint: "http://127.0.0.1:9/v1"},
+		Out:     &out,
+		Err:     &errb,
+		Cwd:     t.TempDir(),
+		Version: "test",
+	}
+	code := Run(context.Background(), Config{
+		Runner:  &turn.Runner{Profile: env.Profile, Out: &out, Err: &errb},
+		Env:     env,
+		Reg:     commands.Default(),
+		Reader:  &scriptReader{lines: []string{"/help", "/exit"}},
+		Version: "test",
+		Model:   "m",
+		Out:     &out,
+		Err:     &errb,
+	})
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "konsolai test · m · /help") {
+		t.Fatalf("banner %q", out.String())
+	}
+	if !strings.Contains(out.String(), "/help") {
+		t.Fatalf("help %q", out.String())
+	}
+}
+
+func TestReplInterruptEmpty(t *testing.T) {
+	var out, errb bytes.Buffer
+	env := &commands.Env{Out: &out, Err: &errb, Cwd: t.TempDir(), Profile: config.Profile{Name: "p"}}
+	n := 0
+	rd := &fnReader{fn: func() (string, error) {
+		n++
+		if n == 1 {
+			return "", ErrInterrupt
+		}
+		return "", ErrEOF
+	}}
+	code := Run(context.Background(), Config{
+		Env: env, Reg: commands.Default(), Reader: rd, Out: &out, Err: &errb, Version: "v",
+	})
+	if code != 0 {
+		t.Fatalf("%d", code)
+	}
+	if !strings.Contains(out.String(), "press Ctrl+D or type /exit to quit") {
+		t.Fatalf("%q", out.String())
+	}
+}
+
+type fnReader struct{ fn func() (string, error) }
+
+func (f *fnReader) ReadLine(context.Context, string) (string, error) { return f.fn() }
+func (f *fnReader) Close() error                                     { return nil }
+
+func TestGitBranchFromHEAD(t *testing.T) {
+	dir := t.TempDir()
+	if err := osMkdirGit(dir, "ref: refs/heads/dev\n"); err != nil {
+		t.Fatal(err)
+	}
+	if gitBranch(dir) != "dev" {
+		t.Fatalf("%q", gitBranch(dir))
+	}
+}
+
+func osMkdirGit(dir, head string) error {
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, ".git", "HEAD"), []byte(head), 0644)
+}
+
+func TestFormatPrompt(t *testing.T) {
+	s := formatPrompt("/tmp/kp", 12, true, true)
+	if !strings.Contains(s, "kp") || !strings.Contains(s, "ctx 12%") || !strings.Contains(s, "●") {
+		t.Fatalf("%q", s)
+	}
+}
+
+func TestSplitCmd(t *testing.T) {
+	n, a := splitCmd(`/resume 3 "and then?"`)
+	if n != "resume" || len(a) != 2 || a[1] != "and then?" {
+		t.Fatalf("%s %v", n, a)
+	}
+}
+
+func TestHistoryWriteRedacts(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+	h := loadFileHistory(HistoryPath())
+	if _, err := h.Write("token ghp_abcdefghijklmnopqrstuvwxyz012345"); err != nil {
+		t.Fatal(err)
+	}
+	if h.Len() != 1 || strings.Contains(h.lines[0], "ghp_") {
+		t.Fatalf("%v", h.lines)
+	}
+}
+
+func TestCompleterSlashAndAt(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	fn := Completer(commands.Default(), func() string { return dir })
+	_ = fn([]rune("/yes o"), 6)
+	_ = fn([]rune("/copy a"), 7)
+	_ = fn([]rune("@ma"), 3)
+	if lastTokenStart("foo @bar") != 4 {
+		t.Fatalf("token start %d", lastTokenStart("foo @bar"))
+	}
+}
+
+func TestErrs(t *testing.T) {
+	if !errors.Is(ErrInterrupt, ErrInterrupt) || !errors.Is(ErrEOF, ErrEOF) {
+		t.Fatal("sentinel")
+	}
+}
