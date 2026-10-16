@@ -706,6 +706,7 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 		Prompt:         agent.ActPrompt + "\n" + lang,
 		ThinkingPolicy: thinkingFor(dec, prof.BuildThinking),
 		Trace:          inv.Trace,
+		SessionID:      sessionID,
 		Intent:         string(dec.Intent),
 		RouterTime:     routerTime,
 		Err:            os.Stderr,
