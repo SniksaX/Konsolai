@@ -27,6 +27,11 @@ func runStatus(ctx context.Context, env *Env, _ []string) int {
 	model := env.Profile.Model
 	win := 0
 	if env.Runner != nil && env.Runner.Client != nil {
+		if id, err := env.Runner.Client.ResolveModel(ctx); err == nil {
+			if model == "" {
+				model = id
+			}
+		}
 		win = env.Runner.Client.ContextWindow()
 	}
 	if model == "" {
