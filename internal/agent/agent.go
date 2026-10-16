@@ -304,18 +304,20 @@ var (
 )
 
 const (
-	elidedPrefix     = "[tool output elided:"
-	elidedReadPrefix = "[elided] "
-	contextSafety    = 1024
-	contextTrigger   = 0.60
-	contextTarget    = 0.40
-	minOutputTokens  = 2048
-	protectLastMsgs  = 6
-	elideSummaryMax  = 80
-	elideOutlineCap  = 1536
-	postPlanNoteAt   = 4
-	postPlanForceAt  = 6
-	postPlanDocsAt   = 3
+	elidedPrefix      = "[tool output elided:"
+	elidedReadPrefix  = "[elided] "
+	contextSafety     = 1024
+	contextTrigger    = 0.60
+	contextTarget     = 0.40
+	minOutputTokens   = 2048
+	protectLastMsgs   = 6
+	elideSummaryMax   = 80
+	elideOutlineCap   = 1536
+	postPlanNoteAt    = 4
+	postPlanForceAt   = 6
+	postPlanDocsAt    = 3
+	docsExportNoteAt  = 2
+	docsExportForceAt = 3
 )
 
 type ElideStats struct {
@@ -798,8 +800,11 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	exportedDoc := false
 	docsNudged := false
 	docsWriteNoted := false
+	docsExportNoted := false
+	docsExportWait := 0
 	postPlanReads := 0
 	forceMutating := false
+	forceExport := false
 	shellFail := false
 	var st Stats
 	st.RouterTime = cfg.RouterTime
@@ -849,6 +854,9 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			} else if !cfg.RequirePlan {
 				stepSpecs = nil
 			}
+		} else if forceExport && planApproved && !exportedDoc {
+			stepSpecs = exportOnlySpecs(specs)
+			opts.ToolChoice = "export_doc"
 		} else if forceMutating && planApproved {
 			stepSpecs = mutatingSpecs(specs)
 			opts.ToolChoice = "required"
@@ -1025,9 +1033,16 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			action, err := tool.Prepare(call.Function.Arguments)
 			if err != nil {
 				printReject(cfg.Out, call.Function.Name, call.Function.Arguments, err.Error())
+				content := "error: " + err.Error()
+				failKey := call.Function.Name + call.Function.Arguments + "prep"
+				if _, dup := seenFail[failKey]; dup {
+					content += "\n\nnote: this exact call already failed with identical output. Do not retry it; inspect files or change approach."
+				} else {
+					seenFail[failKey] = struct{}{}
+				}
 				tm := llm.Message{
 					Role:       llm.RoleTool,
-					Content:    "error: " + err.Error(),
+					Content:    content,
 					ToolCallID: call.ID,
 				}
 				msgs = append(msgs, tm)
@@ -1264,6 +1279,21 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				forceMutating = false
 			}
 		}
+		if cfg.Task == "docs" && wroteFile && !exportedDoc {
+			docsExportWait++
+			if docsExportWait == docsExportNoteAt && !docsExportNoted {
+				docsExportNoted = true
+				nudge := llm.Message{Role: llm.RoleUser, Content: DocsExportNote}
+				msgs = append(msgs, nudge)
+				_ = rec.Message(ctx, nudge)
+			}
+			if docsExportWait >= docsExportForceAt {
+				forceExport = true
+			}
+		} else if exportedDoc {
+			docsExportWait = 0
+			forceExport = false
+		}
 		prePlanEvery := !planApproved && (cfg.RequirePlan || cfg.Intent == "act" || cfg.Intent == "build")
 		if prePlanEvery {
 			explore++
@@ -1332,6 +1362,16 @@ func mutatingSpecs(specs []llm.ToolSpec) []llm.ToolSpec {
 	out := make([]llm.ToolSpec, 0, 6)
 	for _, s := range specs {
 		if keep[s.Function.Name] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func exportOnlySpecs(specs []llm.ToolSpec) []llm.ToolSpec {
+	out := make([]llm.ToolSpec, 0, 2)
+	for _, s := range specs {
+		if s.Function.Name == "export_doc" || s.Function.Name == "finish" {
 			out = append(out, s)
 		}
 	}
