@@ -232,6 +232,11 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		fmt.Fprintln(r.errw(), "konsolai:", err)
 		return 1, "", 0
 	}
+	home, _ := os.UserHomeDir()
+	extras := safety.NamedRoots(req.Text, home)
+	if len(extras) > 0 {
+		sg.AllowRoots(extras)
+	}
 	lister := func(ctx context.Context) ([]string, error) {
 		return repo.Files(ctx, root)
 	}
@@ -264,6 +269,9 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		Stats:          &agent.Stats{},
 	}
 	sys := snap.String() + facts
+	if len(extras) > 0 {
+		sys += "\nAlso allowed this turn (named by the user): " + safety.DisplayRoots(extras, home)
+	}
 	sub := ""
 	if inSubproject(cwd, root) {
 		sub = "\n" + agent.SubprojectNote
