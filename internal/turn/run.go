@@ -222,7 +222,11 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		if thinkMode == ThinkNever {
 			think = false
 		}
-		return r.runAnswer(ctx, answerClient, snap, history, rec, req.Text, agent.AnswerPrompt+"\n"+lang, think, req, dec, routerTime)
+		prompt := agent.AnswerPrompt + "\n" + lang
+		if r.SlashHelp != "" {
+			prompt += "\nSlash commands:\n" + r.SlashHelp
+		}
+		return r.runAnswer(ctx, answerClient, snap, history, rec, req.Text, prompt, think, req, dec, routerTime)
 	}
 
 	root := repo.Root(cwd)
