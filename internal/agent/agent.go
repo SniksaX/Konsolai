@@ -95,6 +95,10 @@ type Config struct {
 	Plain          bool
 	OnShell        func(output string)
 	Guard          *safety.Guard
+	ResumePlan     bool
+	PlanFiles      []string
+	PlanCmds       []string
+	PlanText       string
 }
 
 type Stats struct {
@@ -102,6 +106,7 @@ type Stats struct {
 	ModelTime        time.Duration
 	ToolTime         time.Duration
 	PromptTokens     int
+	LastPromptTokens int
 	CompletionTokens int
 	RouterTime       time.Duration
 }
@@ -833,10 +838,13 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	seenFail := make(map[string]struct{})
 	seenRead := make(map[string]struct{})
 	var readSpans []readSpan
-	planApproved := false
-	var planFiles []string
-	var planCmds []string
-	var planText string
+	planApproved := cfg.ResumePlan
+	planFiles := cfg.PlanFiles
+	planCmds := cfg.PlanCmds
+	planText := cfg.PlanText
+	if planApproved && cfg.Guard != nil {
+		cfg.Guard.AllowPlanFiles(planFiles)
+	}
 	explore := 0
 	noteSent := false
 	readonlyAfterNote := 0
@@ -961,6 +969,9 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				st.ModelTime += modelElapsed
 				st.PromptTokens += usage.PromptTokens
 				st.CompletionTokens += usage.CompletionTokens
+				if usage.PromptTokens > 0 {
+					st.LastPromptTokens = usage.PromptTokens
+				}
 				dumpTrace(cfg.SessionID, st.Steps, msg)
 				PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, cfg.Client.ContextWindow(), FormatTraceCalls(msg.ToolCalls))
 			} else {
@@ -968,6 +979,9 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				st.ModelTime += modelElapsed
 				st.PromptTokens += usage.PromptTokens
 				st.CompletionTokens += usage.CompletionTokens
+				if usage.PromptTokens > 0 {
+					st.LastPromptTokens = usage.PromptTokens
+				}
 			}
 			think = true
 			opts.Thinking = true
@@ -1026,6 +1040,9 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		st.ModelTime += modelElapsed
 		st.PromptTokens += usage.PromptTokens
 		st.CompletionTokens += usage.CompletionTokens
+		if usage.PromptTokens > 0 {
+			st.LastPromptTokens = usage.PromptTokens
+		}
 		if cfg.Trace {
 			dumpTrace(cfg.SessionID, st.Steps, msg)
 			PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, cfg.Client.ContextWindow(), FormatTraceCalls(msg.ToolCalls))
@@ -1433,11 +1450,18 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		OnProgress: func(p llm.Progress) { live.SetLabel(ProgressLabel("thinking", p)) },
 	})
 	live.Stop()
-	if err == nil {
+	if err != nil {
+		if cfg.Trace {
+			fmt.Fprintln(cfg.Err, "max-steps summary:", err)
+		}
+	} else {
 		st.Steps++
 		st.ModelTime += time.Since(t0)
 		st.PromptTokens += usage.PromptTokens
 		st.CompletionTokens += usage.CompletionTokens
+		if usage.PromptTokens > 0 {
+			st.LastPromptTokens = usage.PromptTokens
+		}
 		text := trimLeadingBlanks(msg.Content)
 		if strings.TrimSpace(text) != "" {
 			fmt.Fprintln(cfg.Out)
@@ -1602,6 +1626,45 @@ func planCmdsOf(a tools.Action) []string {
 		return nil
 	}
 	return p.PlanCommands()
+}
+
+func RestoreApprovedPlan(msgs []llm.Message) (files, cmds []string, text string, ok bool) {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if m.Role != llm.RoleAssistant {
+			continue
+		}
+		for _, tc := range m.ToolCalls {
+			if tc.Function.Name != "propose_plan" {
+				continue
+			}
+			approved := false
+			for j := i + 1; j < len(msgs); j++ {
+				if msgs[j].Role == llm.RoleTool && msgs[j].ToolCallID == tc.ID && strings.Contains(msgs[j].Content, "plan approved") {
+					approved = true
+					break
+				}
+				if msgs[j].Role == llm.RoleAssistant {
+					break
+				}
+			}
+			if !approved {
+				continue
+			}
+			var args struct {
+				Summary  string   `json:"summary"`
+				Steps    []string `json:"steps"`
+				Files    []string `json:"files"`
+				Commands []string `json:"commands"`
+			}
+			if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+				continue
+			}
+			text = args.Summary + "\n" + strings.Join(args.Steps, "\n") + "\n" + strings.Join(args.Files, "\n") + "\n" + strings.Join(args.Commands, "\n")
+			return args.Files, args.Commands, text, true
+		}
+	}
+	return nil, nil, "", false
 }
 
 func planTextOf(a tools.Action) string {
