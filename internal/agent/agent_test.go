@@ -862,6 +862,68 @@ func TestUntilPlanThinkingSchedule(t *testing.T) {
 	}
 }
 
+func TestPlanStepThinkingSchedule(t *testing.T) {
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "list_dir", `{"path":"."}`)),
+		assistant(call("2", "propose_plan", `{"summary":"add a.txt","steps":["write"],"files":["a.txt"]}`)),
+		assistant(call("3", "propose_plan", `{"summary":"add a.txt","steps":["write"],"files":["a.txt"]}`)),
+		assistant(call("4", "write_file", `{"path":"a.txt","content":"x"}`)),
+		assistant(call("5", "run_shell", `{"cmd":"false"}`)),
+		assistant(call("6", "write_file", `{"path":"a.txt","content":"y"}`)),
+		assistant(call("7", "finish", `{"summary":"done"}`)),
+	}, stubConfirm{d: ui.Approve}, Config{
+		RequirePlan:    true,
+		AutoApprove:    true,
+		ThinkingPolicy: ThinkPlanStep,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []bool{false, false, true, false, false, true, false}
+	if len(rep.think) != len(want) {
+		t.Fatalf("think calls %v want %v", rep.think, want)
+	}
+	for i, g := range rep.think {
+		if g != want[i] {
+			t.Fatalf("think[%d]=%v want %v (%v)", i, g, want[i], rep.think)
+		}
+	}
+	var choice struct {
+		Type     string `json:"type"`
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(rep.toolChoices[2], &choice); err != nil || choice.Function.Name != "propose_plan" {
+		t.Fatalf("retry tool_choice %s", rep.toolChoices[2])
+	}
+	if !samePrefix(rep.reqs[1], rep.reqs[2]) {
+		t.Fatal("plan retry must re-issue the same messages")
+	}
+}
+
+func TestPlanStepForcedPlanThinks(t *testing.T) {
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "list_dir", `{"path":"."}`)),
+		assistant(call("2", "list_dir", `{"path":"."}`)),
+		assistant(call("3", "list_dir", `{"path":"."}`)),
+		assistant(call("4", "propose_plan", `{"summary":"x","steps":["y"],"files":["a.txt"]}`)),
+		assistant(call("5", "finish", `{"summary":"done"}`)),
+	}, stubConfirm{d: ui.Approve}, Config{
+		RequirePlan: true, ExploreBudget: 1, ExploreNote: ExploreNoteBuild, MaxSteps: 8,
+		ThinkingPolicy: ThinkPlanStep,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.think) < 4 {
+		t.Fatalf("think %v", rep.think)
+	}
+	if !rep.think[3] {
+		t.Fatalf("forced plan should think: %v", rep.think)
+	}
+}
+
 func TestFormatSummaryAndTrace(t *testing.T) {
 	s := Stats{
 		Steps:            12,
@@ -1201,6 +1263,11 @@ func TestPromptNotes(t *testing.T) {
 		}
 		if !strings.Contains(p, FenceRule) {
 			t.Fatal("prompt missing fence rule")
+		}
+	}
+	for _, p := range []string{ActPrompt, CodePrompt, LookupPrompt} {
+		if !strings.Contains(p, batchReads) {
+			t.Fatal("prompt missing batch-reads rule")
 		}
 	}
 }
