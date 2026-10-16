@@ -503,3 +503,24 @@ func TestClosedSessionsHiddenFromResume(t *testing.T) {
 		t.Fatalf("schema %d err=%v", ver, err)
 	}
 }
+
+func TestSessionCompactFields(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	id, err := s.CreateSession(ctx, NewSession{
+		Profile: "home", CWD: "/tmp/c", Mode: "answer", Model: "m", Title: "t",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendMessage(ctx, id, 1, Message{Role: "user", Content: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCompact(ctx, id, 1, "summary here"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.SessionByID(ctx, id)
+	if err != nil || got.CompactSummary != "summary here" || got.CompactedUpto == nil || *got.CompactedUpto != 1 {
+		t.Fatalf("%+v err=%v", got, err)
+	}
+}
