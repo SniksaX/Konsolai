@@ -89,6 +89,7 @@ type Options struct {
 	ReadOnlyShell bool
 	DocsTask      bool
 	Request       string
+	OnWebFetch    func(url, title, text string)
 }
 
 const DocsSourceReject = "docs tasks may not create or modify source files; write Markdown and use export_doc for PDF/HTML"
@@ -130,7 +131,7 @@ func NewRegistry(g *safety.Guard, out io.Writer, files FileLister, cache WebCach
 		newEditFile(g, o.DocsTask),
 		newProposePlan(o.DocsTask, o.Request),
 		newRemember(facts),
-		newWebFetch(cache),
+		newWebFetch(cache, o.OnWebFetch),
 		newExportDoc(g),
 		newOutline(g, files),
 		newFinish(),
