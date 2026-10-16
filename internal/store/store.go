@@ -16,9 +16,10 @@ import (
 )
 
 const (
-	queryTimeout = 2 * time.Second
-	maxOutput    = 8 * 1024
-	maxBefore    = 1 << 20
+	queryTimeout  = 2 * time.Second
+	maxOutput     = 8 * 1024
+	maxFullOutput = 256 * 1024
+	maxBefore     = 1 << 20
 )
 
 type Store struct {
@@ -72,6 +73,7 @@ type ActionIn struct {
 	Meta         string
 	Duration     time.Duration
 	Output       string
+	FullOutput   string
 }
 
 type FileChangeIn struct {
@@ -394,18 +396,20 @@ func (s *Store) RecordAction(ctx context.Context, a ActionIn) error {
 		args = []byte("{}")
 	}
 	args = redact.JSON(args)
-	out := redact.String(a.Output)
-	if len(out) > maxOutput {
-		out = out[:maxOutput]
+	out := clipString(redact.String(a.Output), maxOutput)
+	full := a.FullOutput
+	if full == "" {
+		full = a.Output
 	}
+	full = clipString(redact.String(full), maxFullOutput)
 	var reason *string
 	if a.RejectReason != "" {
 		reason = &a.RejectReason
 	}
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO actions (session_id, seq, tool, args, kind, decision, reject_reason, is_error, meta, duration_ms, output)
-		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-		a.SessionID, a.Seq, a.Tool, args, a.Kind, a.Decision, reason, a.IsError, a.Meta, int(a.Duration/time.Millisecond), out)
+		INSERT INTO actions (session_id, seq, tool, args, kind, decision, reject_reason, is_error, meta, duration_ms, output, full_output)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		a.SessionID, a.Seq, a.Tool, args, a.Kind, a.Decision, reason, a.IsError, a.Meta, int(a.Duration/time.Millisecond), out, full)
 	if err != nil {
 		return fmt.Errorf("store: record action: %w", err)
 	}
@@ -795,6 +799,48 @@ func (s *Store) ListFileChanges(ctx context.Context, sessionID string) ([]FileCh
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) RecentShellOutputs(ctx context.Context, profile string, limit int) ([]string, error) {
+	ctx, cancel := withTimeout(ctx)
+	defer cancel()
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > 5 {
+		limit = 5
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT COALESCE(NULLIF(full_output, ''), output)
+		FROM actions a
+		JOIN sessions s ON s.id = a.session_id
+		WHERE s.profile = $1 AND a.tool = 'run_shell'
+		ORDER BY a.created_at DESC, a.seq DESC
+		LIMIT $2`, profile, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: recent shell outputs: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			return nil, fmt.Errorf("store: scan shell output: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+func clipString(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	s = s[:n]
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
 }
 
 func withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
