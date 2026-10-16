@@ -202,6 +202,33 @@ func TestSearchMasksEnv(t *testing.T) {
 	}
 }
 
+func TestReadFileSensitiveRefused(t *testing.T) {
+	_, reg, root := fsRegistry(t)
+	if err := os.WriteFile(filepath.Join(root, "tls.pem"), []byte("secret"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ok.txt"), []byte("ok"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	read := mustTool(t, reg, "read_file")
+	_, err := read.Prepare(`{"path":"tls.pem"}`)
+	if err == nil || err.Error() != safety.ErrSensitiveFile.Error() {
+		t.Fatalf("pem: %v", err)
+	}
+	list := mustTool(t, reg, "list_dir")
+	act, err := list.Prepare(`{"path":"."}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := act.Run(context.Background())
+	if err != nil || res.IsError {
+		t.Fatalf("list: %v %s", err, res.Output)
+	}
+	if !strings.Contains(res.Output, "tls.pem") {
+		t.Fatalf("list should show name: %q", res.Output)
+	}
+}
+
 func TestDocsTaskRejectsSourceWrite(t *testing.T) {
 	g, err := safety.New(t.TempDir())
 	if err != nil {
