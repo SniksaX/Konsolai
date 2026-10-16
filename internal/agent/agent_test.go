@@ -582,6 +582,24 @@ func TestRunCDPrepareError(t *testing.T) {
 	}
 }
 
+func TestToolLayoutIndents(t *testing.T) {
+	var out bytes.Buffer
+	_, _, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "list_dir", `{"path":"."}`)),
+		{Role: llm.RoleAssistant, Content: "done"},
+	}, nil, Config{Out: &out, MaxSteps: 4, Intent: "act"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := out.String()
+	if !strings.Contains(s, "  ▸") {
+		t.Fatalf("tool call indent: %q", s)
+	}
+	if !strings.Contains(s, "    ✓") && !strings.Contains(s, "    ✗") {
+		t.Fatalf("meta indent: %q", s)
+	}
+}
+
 func TestPrepareRejectPrintsBothLines(t *testing.T) {
 	var out bytes.Buffer
 	_, _, err := setupCfg(t, []llm.Message{
