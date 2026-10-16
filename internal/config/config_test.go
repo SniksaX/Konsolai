@@ -78,6 +78,37 @@ func TestResolveBuiltinDefault(t *testing.T) {
 	if p.FastEndpoint != defaultFastEndpoint || p.FastModel != "" {
 		t.Fatalf("fast %+v", p)
 	}
+	if len(p.Languages) != 2 || p.Languages[0] != "en" || p.Languages[1] != "fr" {
+		t.Fatalf("languages %+v", p.Languages)
+	}
+	if p.DefaultLanguage != "en" {
+		t.Fatalf("default_language %q", p.DefaultLanguage)
+	}
+}
+
+func TestResolveLanguageFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"profiles":{"default":{"languages":["fr","en"],"default_language":"fr"}}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := f.Resolve("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.DefaultLanguage != "fr" || len(p.Languages) != 2 || p.Languages[0] != "fr" {
+		t.Fatalf("got %+v", p)
+	}
+	p, err = File{Profiles: map[string]Profile{"default": {DefaultLanguage: "es"}}}.Resolve("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.DefaultLanguage != "en" {
+		t.Fatalf("es clamped to list, got %q", p.DefaultLanguage)
+	}
 }
 
 func TestResolveFastEnv(t *testing.T) {
