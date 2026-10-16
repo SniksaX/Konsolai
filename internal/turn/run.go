@@ -63,6 +63,11 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 		fmt.Fprintln(r.errw(), "konsolai:", err)
 		return Result{ExitCode: 1}
 	}
+	thinkMode := r.ThinkMode
+	if text, hard := StripThinkPrefix(req.Text); hard {
+		req.Text = text
+		thinkMode = ThinkAlways
+	}
 	facts := LoadFactsBlock(ctx, mem, r.Profile.Name, projectID)
 	conf, closeConf, err := r.confirm(ctx, req.Yes)
 	if err != nil {
@@ -83,9 +88,22 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	}
 	routedAt := time.Now()
 	understand := ui.Start("understanding")
-	dec := DecideIntent(ctx, client, req.Intent, req.Text, req.New, routerCands, inRepo)
+	routeClient := r.routerClient(ctx)
+	dec := DecideIntent(ctx, routeClient, req.Intent, req.Text, req.New, routerCands, inRepo)
 	understand()
 	routerTime := time.Since(routedAt)
+	if thinkMode == ThinkAlways {
+		dec.Effort = intent.EffortHigh
+	}
+	r.RouterModel = routeClient.ModelID()
+	if r.RouterModel == "" {
+		if id, err := routeClient.ResolveModel(ctx); err == nil {
+			r.RouterModel = id
+		}
+	}
+	if req.Trace {
+		agent.PrintRouter(r.errw(), r.RouterModel, routerTime, string(dec.EffectiveEffort()))
+	}
 
 	var picked ResumeCandidate
 	if req.ResumeSession != "" {
@@ -127,7 +145,7 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	if len(tap.msgs) > 20 {
 		tap.msgs = tap.msgs[len(tap.msgs)-20:]
 	}
-	code, answer, ptok := r.runProfile(ctx, client, snap, facts, history, tap, mem, sessionID, projectID, req, cwd, conf, dec, routerTime)
+	code, answer, ptok := r.runProfile(ctx, client, snap, facts, history, tap, mem, sessionID, projectID, req, cwd, conf, dec, routerTime, thinkMode)
 	if tap.answer != "" {
 		answer = tap.answer
 	}
@@ -191,10 +209,20 @@ func langLine(d intent.Decision) string {
 	return "Reply in the user's language (" + lang + ")."
 }
 
-func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, mem *memory.Guard, sessionID string, projectID *int64, req Request, cwd string, confirmer agent.Confirmer, dec intent.Decision, routerTime time.Duration) (int, string, int) {
+func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, mem *memory.Guard, sessionID string, projectID *int64, req Request, cwd string, confirmer agent.Confirmer, dec intent.Decision, routerTime time.Duration, thinkMode ThinkMode) (int, string, int) {
 	lang := langLine(dec)
 	if dec.Intent == intent.Answer {
-		return r.runAnswer(ctx, client, snap, history, rec, req.Text, agent.AnswerPrompt+"\n"+lang, dec.Reasoning, req, dec, routerTime)
+		answerClient := client
+		if dec.EffectiveEffort() == intent.EffortNone {
+			if fc := r.fastClient(); fc != nil && fc.Reachable(ctx) {
+				answerClient = fc
+			}
+		}
+		think := dec.EffectiveEffort() == intent.EffortHigh || thinkMode == ThinkAlways
+		if thinkMode == ThinkNever {
+			think = false
+		}
+		return r.runAnswer(ctx, answerClient, snap, history, rec, req.Text, agent.AnswerPrompt+"\n"+lang, think, req, dec, routerTime)
 	}
 
 	root := repo.Root(cwd)
@@ -225,7 +253,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		History:        history,
 		AutoApprove:    req.Yes,
 		Prompt:         agent.ActPrompt + "\n" + lang,
-		ThinkingPolicy: ThinkingFor(dec, r.Profile.BuildThinking),
+		ThinkingPolicy: ThinkingFor(dec, r.Profile.BuildThinking, thinkMode),
 		Trace:          req.Trace,
 		SessionID:      sessionID,
 		Intent:         string(dec.Intent),
