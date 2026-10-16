@@ -19,6 +19,7 @@ import (
 	"github.com/siraj/konsolai/internal/intent"
 	"github.com/siraj/konsolai/internal/llm"
 	"github.com/siraj/konsolai/internal/memory"
+	"github.com/siraj/konsolai/internal/repl"
 	"github.com/siraj/konsolai/internal/store"
 	"github.com/siraj/konsolai/internal/turn"
 	"github.com/siraj/konsolai/internal/ui"
@@ -191,7 +192,7 @@ func run() int {
 		return 0
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 	defer stop()
 
 	file, err := config.Load("")
@@ -255,51 +256,21 @@ func run() int {
 		Version: version,
 	}
 
-	if inv.Slash != "" || inv.Cmd != cmdRequest {
-		env := &commands.Env{
-			Runner:  runner,
-			Mem:     mem,
-			Profile: prof,
-			Out:     os.Stdout,
-			Err:     os.Stderr,
-			Cwd:     cwd,
-			Yes:     inv.Yes,
-			Version: version,
-			Plain:   inv.Plain,
-			Undo: func(ctx context.Context) int {
-				return runUndo(ctx, mem, projectID, cwd, inv.Yes)
-			},
-			Remember: func(ctx context.Context, args []string) int {
-				scope := "user"
-				if len(args) > 0 && args[0] == "--project" {
-					scope = "project"
-					args = args[1:]
-				}
-				if len(args) != 1 || strings.TrimSpace(args[0]) == "" {
-					fmt.Fprintln(os.Stderr, `usage: /remember [--project] "<fact>"`)
-					return 2
-				}
-				return runRemember(ctx, mem, prof.Name, projectID, args[0], scope)
-			},
-			Facts: func(ctx context.Context) int {
-				return runFacts(ctx, mem, prof.Name, projectID)
-			},
-			Forget: func(ctx context.Context, args []string) int {
-				if len(args) != 2 {
-					fmt.Fprintln(os.Stderr, "usage: /forget user|project <id>")
-					return 2
-				}
-				id, err := strconv.ParseInt(args[1], 10, 64)
-				if err != nil || id < 1 {
-					fmt.Fprintln(os.Stderr, "usage: /forget user|project <id>")
-					return 2
-				}
-				return runForget(ctx, mem, args[0], id)
-			},
-			Prune: func(ctx context.Context) int {
-				return runPrune(ctx, mem, prof.RetentionDays)
-			},
+	if inv.Slash == "" && inv.Cmd == cmdRequest && strings.TrimSpace(inv.Request) == "" && stdinIsTTY() && stdoutIsTTY() {
+		env := commandEnv(runner, mem, prof, cwd, projectID, inv)
+		env.InRepl = true
+		model := prof.Model
+		if id, err := client.ResolveModel(ctx); err == nil && id != "" {
+			model = id
 		}
+		return repl.Run(ctx, repl.Config{
+			Runner: runner, Env: env, Reg: commands.Default(),
+			Version: version, Model: model, Out: os.Stdout, Err: os.Stderr,
+		})
+	}
+
+	if inv.Slash != "" || inv.Cmd != cmdRequest {
+		env := commandEnv(runner, mem, prof, cwd, projectID, inv)
 		name, args := inv.Slash, inv.SlashArgs[:inv.SlashN]
 		if inv.Slash == "" {
 			name, args = bareCommand(inv)
@@ -315,11 +286,60 @@ func run() int {
 		return 2
 	}
 
-	res := runner.RunTurn(ctx, turn.Request{
+	turnCtx, cancel := signal.NotifyContext(ctx, os.Interrupt)
+	defer cancel()
+	res := runner.RunTurn(turnCtx, turn.Request{
 		Text: inv.Request, Intent: inv.Intent, Yes: inv.Yes,
 		Trace: inv.Trace, Plain: inv.Plain, New: inv.New, Cwd: cwd,
 	})
 	return res.ExitCode
+}
+
+func commandEnv(runner *turn.Runner, mem *memory.Guard, prof config.Profile, cwd string, projectID *int64, inv invocation) *commands.Env {
+	return &commands.Env{
+		Runner:  runner,
+		Mem:     mem,
+		Profile: prof,
+		Out:     os.Stdout,
+		Err:     os.Stderr,
+		Cwd:     cwd,
+		Yes:     inv.Yes,
+		Version: version,
+		Plain:   inv.Plain,
+		Undo: func(ctx context.Context) int {
+			return runUndo(ctx, mem, projectID, cwd, inv.Yes)
+		},
+		Remember: func(ctx context.Context, args []string) int {
+			scope := "user"
+			if len(args) > 0 && args[0] == "--project" {
+				scope = "project"
+				args = args[1:]
+			}
+			if len(args) != 1 || strings.TrimSpace(args[0]) == "" {
+				fmt.Fprintln(os.Stderr, `usage: /remember [--project] "<fact>"`)
+				return 2
+			}
+			return runRemember(ctx, mem, prof.Name, projectID, args[0], scope)
+		},
+		Facts: func(ctx context.Context) int {
+			return runFacts(ctx, mem, prof.Name, projectID)
+		},
+		Forget: func(ctx context.Context, args []string) int {
+			if len(args) != 2 {
+				fmt.Fprintln(os.Stderr, "usage: /forget user|project <id>")
+				return 2
+			}
+			id, err := strconv.ParseInt(args[1], 10, 64)
+			if err != nil || id < 1 {
+				fmt.Fprintln(os.Stderr, "usage: /forget user|project <id>")
+				return 2
+			}
+			return runForget(ctx, mem, args[0], id)
+		},
+		Prune: func(ctx context.Context) int {
+			return runPrune(ctx, mem, prof.RetentionDays)
+		},
+	}
 }
 
 func bareCommand(inv invocation) (string, []string) {
