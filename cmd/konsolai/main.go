@@ -268,6 +268,7 @@ func run() int {
 		return repl.Run(ctx, repl.Config{
 			Runner: runner, Env: env, Reg: commands.Default(),
 			Version: version, Model: model, Out: os.Stdout, Err: os.Stderr,
+			Trace: inv.Trace,
 		})
 	}
 
