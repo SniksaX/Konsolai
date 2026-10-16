@@ -51,6 +51,8 @@ type Env struct {
 	OnNewSession func()
 	OnCompact    func(ctx context.Context) int
 	OnExit       func() int
+	OnCmd        func() int
+	OnCmdClear   func()
 }
 
 func (e *Env) out() io.Writer {
@@ -218,6 +220,7 @@ func Default() *Registry {
 		Command{Name: "quit", Usage: "quit", Summary: "Leave the REPL", ReplOnly: true, Run: runExit},
 		Command{Name: "clear", Usage: "clear", Summary: "Clear the screen", ReplOnly: true, Run: runClear},
 		Command{Name: "cd", Usage: "cd <dir>", Summary: "Change the working directory", ReplOnly: true, Run: runCD},
+		Command{Name: "cmd", Usage: "cmd [clear]", Summary: "Toggle shell mode", ReplOnly: true, Run: runCmd},
 		Command{Name: "yes", Usage: "yes on|off", Summary: "Auto-approve for this REPL session", ReplOnly: true, Run: runYes},
 		Command{Name: "trace", Usage: "trace on|off", Summary: "Toggle per-call traces", ReplOnly: true, Run: runTrace},
 		Command{Name: "think", Usage: "think on|off|auto", Summary: "Override thinking for this session", ReplOnly: true, Run: runThink},
