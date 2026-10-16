@@ -155,6 +155,26 @@ func TestClosingFenceWithInfoDoesNotClose(t *testing.T) {
 	}
 }
 
+func TestLenientShorterCloserOnFlush(t *testing.T) {
+	restore := ForceTheme(Palette{})
+	defer restore()
+	var buf bytes.Buffer
+	r := NewRenderer(&buf, false)
+	src := "````bash\nfind . -type f\n```"
+	_, _ = r.Write([]byte(src))
+	_ = r.Flush()
+	got := buf.String()
+	if !strings.Contains(got, "find . -type f") {
+		t.Fatalf("body %q", got)
+	}
+	if strings.Contains(got, "```") {
+		t.Fatalf("short closer must not print: %q", got)
+	}
+	if strings.Count(got, "─ bash") != 1 {
+		t.Fatalf("want one fence: %q", got)
+	}
+}
+
 func TestThemeNOCOLOR(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	t.Setenv("COLORTERM", "truecolor")
