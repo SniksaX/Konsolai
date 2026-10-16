@@ -1315,6 +1315,15 @@ func TestPromptNotes(t *testing.T) {
 	if !strings.Contains(AnswerPrompt, "Never claim you cannot search or run commands") {
 		t.Fatal("answer capability rule")
 	}
+	if ReplyInstruction("fr") != "Reply in French, the language of the user's latest message." {
+		t.Fatalf("fr %q", ReplyInstruction("fr"))
+	}
+	if ReplyInstruction("en") != "Reply in English, the language of the user's latest message." {
+		t.Fatalf("en %q", ReplyInstruction("en"))
+	}
+	if strings.Contains(ReplyInstruction("es"), "Spanish") {
+		t.Fatalf("es leaked %q", ReplyInstruction("es"))
+	}
 	if ProgressLabel("working", llm.Progress{ReasoningTokens: 1200}) != "thinking · 1.2k tok" {
 		t.Fatal("reasoning label")
 	}
