@@ -89,6 +89,15 @@ func (p Palette) Error(s string) string { return p.paint("31", s) }
 
 func (p Palette) Warn(s string) string { return p.paint("33", s) }
 
+func RejectCall(tool, argSummary, reason string) (callLine, rejectLine string) {
+	pal := Current()
+	head := tool
+	if strings.TrimSpace(argSummary) != "" {
+		head += " " + argSummary
+	}
+	return pal.Accent("▸") + " " + head, pal.Warn("✗ rejected: " + reason)
+}
+
 func (p Palette) Link(s string) string { return p.paint("4;34", s) }
 
 func (p Palette) Italic(s string) string { return p.paint("3", s) }
