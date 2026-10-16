@@ -18,6 +18,7 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions) (
 	sh := readline.NewShell()
 	_ = sh.Config.Set("enable-bracketed-paste", true)
 	_ = sh.Config.Set("history-size", histCap)
+	_ = sh.Config.Set("cursor-position-probe", false)
 	sh.History.Add("repl", loadFileHistory(HistoryPath()))
 	sh.Keymap.Register(map[string]func(){
 		"insert-newline": func() {
