@@ -226,9 +226,11 @@ func (t *readFileTool) Prepare(rawArgs string) (Action, error) {
 	return &readFileAction{path: resolved, display: args.Path, startLine: args.StartLine, endLine: args.EndLine}, nil
 }
 
-func (a *readFileAction) Summary() string  { return "read " + a.display }
-func (a *readFileAction) Preview() string  { return "" }
-func (a *readFileAction) Kind() ActionKind { return ReadOnly }
+func (a *readFileAction) Summary() string      { return "read " + a.display }
+func (a *readFileAction) Preview() string      { return "" }
+func (a *readFileAction) Kind() ActionKind     { return ReadOnly }
+func (a *readFileAction) FilePath() string     { return a.display }
+func (a *readFileAction) ResolvedPath() string { return a.path }
 
 func (a *readFileAction) Run(ctx context.Context) (Result, error) {
 	if err := ctx.Err(); err != nil {
