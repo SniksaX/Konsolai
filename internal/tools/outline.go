@@ -140,6 +140,11 @@ func (a *outlineAction) Run(ctx context.Context) (Result, error) {
 	return Result{Output: out, Meta: fmt.Sprintf("%d decls", decls)}, nil
 }
 
+func FileOutline(abs, rel string) string {
+	s, _ := outlineFile(abs, rel)
+	return s
+}
+
 func outlineFile(abs, rel string) (string, int) {
 	ext := strings.ToLower(filepath.Ext(abs))
 	switch ext {
