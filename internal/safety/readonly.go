@@ -115,11 +115,11 @@ func isReadOnlySegment(seg string) bool {
 	case "[[":
 		return words[len(words)-1] == "]]"
 	case "ls", "pwd", "cat", "head", "tail", "wc", "file", "stat", "du", "df", "free",
-		"uname", "whoami", "id", "hostname", "date", "uptime", "which", "type",
+		"uname", "whoami", "id", "hostname", "date", "uptime", "which", "whereis", "type",
 		"env", "printenv", "echo", "ps", "pgrep", "ss", "lsof", "ip", "dig", "nslookup",
 		"grep", "rg", "tree", "sort", "uniq", "cut", "tr", "jq", "diff", "cmp",
 		"md5sum", "sha256sum", "realpath", "readlink", "basename", "dirname",
-		"journalctl":
+		"journalctl", "desktop-file-validate", "dpkg-query":
 		return true
 	case "xargs":
 		return false
@@ -156,6 +156,22 @@ func isReadOnlySegment(seg string) bool {
 		return hasWord(args, "--version")
 	case "pacman":
 		return pacmanOK(args)
+	case "yay", "paru":
+		return aurOK(args)
+	case "dpkg":
+		return dpkgOK(args)
+	case "rpm":
+		return rpmOK(args)
+	case "flatpak":
+		sub := firstSub(args)
+		return sub == "list" || sub == "info"
+	case "snap":
+		return firstSub(args) == "list"
+	case "apt":
+		sub := firstSub(args)
+		return sub == "list" || sub == "show" || sub == "policy"
+	case "xdg-mime":
+		return firstSub(args) == "query"
 	default:
 		return false
 	}
@@ -193,14 +209,153 @@ func dockerOK(args []string) bool {
 
 func gitOK(args []string) bool {
 	sub := firstSub(args)
+	rest := afterSub(args, sub)
 	switch sub {
-	case "status", "log", "diff", "show", "branch", "rev-parse", "ls-files", "blame":
+	case "status", "log", "diff", "show", "ls-files", "blame",
+		"ls-tree", "show-ref", "for-each-ref", "rev-list", "rev-parse",
+		"describe", "shortlog", "ls-remote", "merge-base", "name-rev":
 		return true
+	case "cat-file":
+		return hasWord(args, "-p") || hasWord(args, "-t") || hasWord(args, "-s")
+	case "branch":
+		return gitBranchListOK(rest)
+	case "tag":
+		return gitTagListOK(rest)
+	case "stash":
+		return firstSub(rest) == "list"
+	case "config":
+		return gitConfigReadOK(rest)
+	case "worktree":
+		return firstSub(rest) == "list"
 	case "remote":
 		return hasWord(args, "-v") || hasWord(args, "--verbose")
 	default:
 		return false
 	}
+}
+
+func afterSub(args []string, sub string) []string {
+	for i, w := range args {
+		if w == sub {
+			return args[i+1:]
+		}
+	}
+	return nil
+}
+
+func gitBranchListOK(args []string) bool {
+	needVal := false
+	sawList := false
+	for _, w := range args {
+		if needVal {
+			needVal = false
+			continue
+		}
+		switch w {
+		case "-a", "-r", "-v", "-vv", "-l", "--list", "--show-current":
+			sawList = true
+			continue
+		case "--contains", "--merged", "--no-merged":
+			needVal = true
+			continue
+		}
+		if strings.HasPrefix(w, "--contains=") || strings.HasPrefix(w, "--merged=") {
+			continue
+		}
+		if gitBranchCombo(w) {
+			continue
+		}
+		if strings.HasPrefix(w, "-") {
+			return false
+		}
+		if sawList {
+			continue
+		}
+		return false
+	}
+	return !needVal
+}
+
+func gitBranchCombo(w string) bool {
+	if !strings.HasPrefix(w, "-") || strings.HasPrefix(w, "--") || len(w) < 2 {
+		return false
+	}
+	for _, r := range w[1:] {
+		switch r {
+		case 'a', 'r', 'v', 'l':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func gitTagListOK(args []string) bool {
+	if len(args) == 0 {
+		return true
+	}
+	sawList := false
+	for _, w := range args {
+		switch {
+		case w == "-l" || w == "--list" || strings.HasPrefix(w, "--list="):
+			sawList = true
+		case strings.HasPrefix(w, "-"):
+			return false
+		default:
+			if !sawList {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func gitConfigReadOK(args []string) bool {
+	for _, w := range args {
+		if w == "--list" || w == "-l" || w == "--get" || strings.HasPrefix(w, "--get=") {
+			return true
+		}
+	}
+	return false
+}
+
+func dpkgOK(args []string) bool {
+	for _, w := range args {
+		if w == "-l" || w == "-L" || w == "-S" || w == "--list" || w == "--listfiles" || w == "--search" {
+			return true
+		}
+		if strings.HasPrefix(w, "-") && !strings.HasPrefix(w, "--") && len(w) > 1 {
+			ok := true
+			for _, r := range w[1:] {
+				if r != 'l' && r != 'L' && r != 'S' {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func rpmOK(args []string) bool {
+	for _, w := range args {
+		if strings.HasPrefix(w, "-q") || strings.HasPrefix(w, "--query") {
+			return true
+		}
+	}
+	return false
+}
+
+func aurOK(args []string) bool {
+	for _, w := range args {
+		if strings.HasPrefix(w, "-Q") || w == "-Ss" || w == "-Si" {
+			return true
+		}
+	}
+	return false
 }
 
 func goOK(args []string) bool {
