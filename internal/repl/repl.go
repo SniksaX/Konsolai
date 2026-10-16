@@ -12,8 +12,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/reeflective/readline"
 	"github.com/siraj/konsolai/internal/commands"
 	"github.com/siraj/konsolai/internal/config"
+	"github.com/siraj/konsolai/internal/repo"
+	"github.com/siraj/konsolai/internal/safety"
+	"github.com/siraj/konsolai/internal/shellmode"
 	"github.com/siraj/konsolai/internal/store"
 	"github.com/siraj/konsolai/internal/turn"
 	"github.com/siraj/konsolai/internal/ui"
@@ -43,6 +47,7 @@ type session struct {
 	showCtx bool
 	shell   bool
 	pastes  *PasteStore
+	mode    *shellmode.Session
 	cancel  context.CancelFunc
 	warns   []string
 }
@@ -99,6 +104,13 @@ func Run(ctx context.Context, cfg Config) int {
 		pastes = NewPasteStore()
 	}
 	st := &session{cwd: cwd, yes: env.Yes, trace: cfg.Trace, pastes: pastes}
+	st.mode = shellmode.New(cwd)
+	st.mode.Stdout = tracked
+	st.mode.Stderr = errw
+	st.mode.Stdin = os.Stdin
+	if g, err := safety.NewAt(repo.Root(cwd), cwd); err == nil {
+		st.mode.Guard = g
+	}
 	env.InRepl = true
 	env.Cwd = cwd
 	wireEnv(env, st, cfg)
@@ -117,8 +129,18 @@ func Run(ctx context.Context, cfg Config) int {
 
 	rd := cfg.Reader
 	if rd == nil {
+		inner := Completer(reg, func() string { return st.cwd })
+		completer := func(line []rune, cursor int) readline.Completions {
+			st.mu.Lock()
+			shell := st.shell
+			st.mu.Unlock()
+			if shell && st.mode != nil {
+				return st.mode.Complete(string(line), cursor)
+			}
+			return inner(line, cursor)
+		}
 		var err error
-		rd, err = NewReadline(Completer(reg, func() string { return st.cwd }), func() string {
+		rd, err = NewReadline(completer, func() string {
 			return sessionFooter(st, cfg)
 		}, st.pastes)
 		if err != nil {
@@ -127,6 +149,26 @@ func Run(ctx context.Context, cfg Config) int {
 		}
 	}
 	defer func() { _ = rd.Close() }()
+	setShell := func(on bool) {
+		st.mu.Lock()
+		st.shell = on
+		st.mu.Unlock()
+		if s, ok := rd.(interface{ SetShellMode(bool) }); ok {
+			s.SetShellMode(on)
+		}
+	}
+	env.OnCmd = func() int {
+		st.mu.Lock()
+		on := !st.shell
+		st.mu.Unlock()
+		setShell(on)
+		return 0
+	}
+	env.OnCmdClear = func() {
+		if st.mode != nil {
+			st.mode.Hist.Clear()
+		}
+	}
 
 	for {
 		select {
@@ -145,6 +187,10 @@ func Run(ctx context.Context, cfg Config) int {
 		line, err := rd.ReadLine(ctx, prompt)
 		if err != nil {
 			if err == ErrEOF {
+				if shell {
+					setShell(false)
+					continue
+				}
 				endSession(ctx, env, st)
 				return 0
 			}
@@ -162,7 +208,35 @@ func Run(ctx context.Context, cfg Config) int {
 			continue
 		}
 		line = st.pastes.Expand(line)
-		if strings.HasPrefix(strings.TrimSpace(line), "/") {
+		trim := strings.TrimSpace(line)
+		if shell {
+			if trim == "/cmd" || trim == "exit" {
+				setShell(false)
+				fmt.Fprintln(out)
+				continue
+			}
+			if strings.HasPrefix(trim, "/") {
+				code := dispatchLine(ctx, reg, env, line)
+				if code == -1 {
+					endSession(ctx, env, st)
+					return 0
+				}
+				fmt.Fprintln(out)
+				continue
+			}
+			toAI, _ := st.mode.Handle(ctx, line)
+			if toAI {
+				setShell(false)
+			}
+			fmt.Fprintln(out)
+			continue
+		}
+		if strings.HasPrefix(trim, "!") {
+			_, _ = st.mode.Handle(ctx, strings.TrimPrefix(trim, "!"))
+			fmt.Fprintln(out)
+			continue
+		}
+		if strings.HasPrefix(trim, "/") {
 			code := dispatchLine(ctx, reg, env, line)
 			if code == -1 {
 				endSession(ctx, env, st)
@@ -170,6 +244,16 @@ func Run(ctx context.Context, cfg Config) int {
 			}
 			fmt.Fprintln(out)
 			continue
+		}
+		if st.mode != nil && st.mode.Hist.Len() > 0 {
+			n := st.mode.Hist.Len()
+			noun := "commands"
+			if n == 1 {
+				noun = "command"
+			}
+			fmt.Fprintln(out, p.Muted(fmt.Sprintf("including %d shell %s as context", n, noun)))
+			line = st.mode.Hist.Format() + line
+			st.mode.Hist.Clear()
 		}
 		turnCtx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 		st.mu.Lock()
@@ -264,6 +348,12 @@ func wireEnv(env *commands.Env, st *session, cfg Config) {
 		}
 		st.cwd = abs
 		env.Cwd = abs
+		if st.mode != nil {
+			st.mode.Cwd = abs
+			if st.mode.Guard != nil {
+				_ = st.mode.Guard.SetBase(abs)
+			}
+		}
 		return nil
 	}
 	env.OnYes = func(on bool) { st.yes = on; env.Yes = on }
