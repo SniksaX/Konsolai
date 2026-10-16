@@ -260,6 +260,99 @@ func TestShellCtrlDReturnsToAI(t *testing.T) {
 	}
 }
 
+func TestSubmittedInputNotEchoed(t *testing.T) {
+	var out, errb bytes.Buffer
+	env := &commands.Env{
+		Profile: config.Profile{Name: "p", Model: "m", Endpoint: "http://127.0.0.1:9/v1"},
+		Out:     &out,
+		Err:     &errb,
+		Cwd:     t.TempDir(),
+		Version: "test",
+	}
+	unique := "unique-scrollback-echo-xyz"
+	code := Run(context.Background(), Config{
+		Runner:  &turn.Runner{Profile: env.Profile, Out: &out, Err: &errb},
+		Env:     env,
+		Reg:     commands.Default(),
+		Reader:  &scriptReader{lines: []string{unique, "/exit"}},
+		Version: "test",
+		Model:   "m",
+		Out:     &out,
+		Err:     &errb,
+	})
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, errb.String())
+	}
+	if strings.Contains(out.String(), unique) {
+		t.Fatalf("submitted input echoed into scrollback: %q", out.String())
+	}
+}
+
+type promptCountReader struct {
+	prompts []string
+	lines   []string
+	i       int
+}
+
+func (p *promptCountReader) ReadLine(_ context.Context, prompt string) (string, error) {
+	p.prompts = append(p.prompts, prompt)
+	if p.i >= len(p.lines) {
+		return "", ErrEOF
+	}
+	line := p.lines[p.i]
+	p.i++
+	return line, nil
+}
+
+func (p *promptCountReader) Close() error { return nil }
+
+func TestNoEmptyPromptInScrollback(t *testing.T) {
+	var out, errb bytes.Buffer
+	env := &commands.Env{Out: &out, Err: &errb, Cwd: t.TempDir(), Profile: config.Profile{Name: "p"}}
+	n := 0
+	rd := &fnReader{fn: func() (string, error) {
+		n++
+		switch n {
+		case 1:
+			return "", ErrInterrupt
+		case 2:
+			return "/exit", nil
+		default:
+			return "", ErrEOF
+		}
+	}}
+	code := Run(context.Background(), Config{
+		Env: env, Reg: commands.Default(), Reader: rd, Out: &out, Err: &errb, Version: "v",
+	})
+	if code != 0 {
+		t.Fatalf("%d", code)
+	}
+	if strings.Contains(out.String(), "›") {
+		t.Fatalf("empty prompt leaked into scrollback: %q", out.String())
+	}
+	if n != 2 {
+		t.Fatalf("prompt renders %d want 2", n)
+	}
+}
+
+func TestPromptRenderCount(t *testing.T) {
+	var out, errb bytes.Buffer
+	env := &commands.Env{Out: &out, Err: &errb, Cwd: t.TempDir(), Profile: config.Profile{Name: "p"}}
+	rd := &promptCountReader{lines: []string{"/help", "/exit"}}
+	code := Run(context.Background(), Config{
+		Env: env, Reg: commands.Default(), Reader: rd, Out: &out, Err: &errb, Version: "v",
+	})
+	if code != 0 {
+		t.Fatalf("%d %s", code, errb.String())
+	}
+	if len(rd.prompts) != 2 {
+		t.Fatalf("prompt renders %d want 2: %q", len(rd.prompts), rd.prompts)
+	}
+	if strings.Contains(out.String(), "›") {
+		t.Fatalf("prompt leaked into scrollback: %q", out.String())
+	}
+}
+
 func TestErrs(t *testing.T) {
 	if !errors.Is(ErrInterrupt, ErrInterrupt) || !errors.Is(ErrEOF, ErrEOF) {
 		t.Fatal("sentinel")
