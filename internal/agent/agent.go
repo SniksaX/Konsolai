@@ -92,6 +92,7 @@ type Config struct {
 	Err            io.Writer
 	Stats          *Stats
 	Plain          bool
+	OnShell        func(output string)
 }
 
 type Stats struct {
@@ -319,6 +320,24 @@ func hasProposePlan(msg llm.Message) bool {
 		}
 	}
 	return false
+}
+
+func hasFinishCall(msg llm.Message) bool {
+	for _, c := range msg.ToolCalls {
+		if c.Function.Name == "finish" {
+			return true
+		}
+	}
+	return false
+}
+
+func longerText(a, b string) string {
+	a = trimLeadingBlanks(a)
+	b = trimLeadingBlanks(b)
+	if utf8.RuneCountInString(a) > utf8.RuneCountInString(b) {
+		return a
+	}
+	return b
 }
 
 var (
@@ -1008,8 +1027,9 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			dumpTrace(cfg.SessionID, st.Steps, msg)
 			PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, cfg.Client.ContextWindow(), FormatTraceCalls(msg.ToolCalls))
 		}
-		if text := trimLeadingBlanks(msg.Content); strings.TrimSpace(text) != "" && len(msg.ToolCalls) > 0 {
-			fmt.Fprintln(cfg.Out, ui.Current().Muted(text))
+		narration := trimLeadingBlanks(msg.Content)
+		if strings.TrimSpace(narration) != "" && len(msg.ToolCalls) > 0 && !hasFinishCall(msg) {
+			fmt.Fprintln(cfg.Out, ui.Current().Muted(narration))
 		}
 		if len(msg.ToolCalls) > 0 {
 			msg.Content = truncateNarration(msg.Content)
@@ -1224,6 +1244,12 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			st.ToolTime += elapsed
 			if err != nil {
 				return err
+			}
+			if result.Final {
+				result.Output = longerText(narration, result.Output)
+			}
+			if call.Function.Name == "run_shell" && cfg.OnShell != nil {
+				cfg.OnShell(result.Output)
 			}
 			_ = rec.Action(ctx, ActionRecord{
 				Tool: call.Function.Name, Args: args, Kind: kind, Decision: decision,
