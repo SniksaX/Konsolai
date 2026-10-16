@@ -16,13 +16,13 @@ func TestHistoryWithSummary(t *testing.T) {
 		{Role: llm.RoleUser, Content: "new"},
 	}
 	got := HistoryWithSummary(msgs, "we decided X", 2)
-	if len(got) != 2 {
-		t.Fatalf("len %d", len(got))
+	if len(got) != 1 {
+		t.Fatalf("len %d %+v", len(got), got)
 	}
-	if !strings.Contains(got[0].Content, "Summary of earlier conversation: we decided X") {
+	if !strings.Contains(got[0].Content, "Summary of earlier conversation: we decided X") || !strings.Contains(got[0].Content, "new") {
 		t.Fatalf("%q", got[0].Content)
 	}
-	if got[0].Role != llm.RoleUser || got[1].Content != "new" {
+	if got[0].Role != llm.RoleUser {
 		t.Fatalf("%+v", got)
 	}
 }
@@ -44,14 +44,36 @@ func TestLoadCompactedLocalSummary(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := LoadCompacted(context.Background(), memory.NewGuard(nil, nil), "", "p", cwd)
-	if len(got) != 4 {
+	if len(got) != 3 {
 		t.Fatalf("len %d %+v", len(got), got)
 	}
-	if !strings.Contains(got[0].Content, "Summary of earlier conversation: we decided X") {
+	if !strings.Contains(got[0].Content, "Summary of earlier conversation: we decided X") || !strings.Contains(got[0].Content, "next") {
 		t.Fatalf("%q", got[0].Content)
 	}
-	if got[1].Content != "next" {
-		t.Fatalf("%q", got[1].Content)
+}
+
+func TestCompactionContinueAlternatingRoles(t *testing.T) {
+	hist := []llm.Message{
+		{Role: llm.RoleUser, Content: "old1"},
+		{Role: llm.RoleAssistant, Content: "old2"},
+		{Role: llm.RoleUser, Content: "keep"},
+		{Role: llm.RoleAssistant, Content: "ok"},
+	}
+	got := HistoryWithSummary(hist, "we decided X", 2)
+	got = append(got, llm.Message{Role: llm.RoleUser, Content: "continue"})
+	got = llm.Normalize(got)
+	prev := llm.Role("")
+	for _, m := range got {
+		if m.Role == llm.RoleSystem {
+			continue
+		}
+		if m.Role == prev {
+			t.Fatalf("consecutive %s", m.Role)
+		}
+		prev = m.Role
+	}
+	if got[0].Role != llm.RoleUser {
+		t.Fatal("first must be user")
 	}
 }
 
