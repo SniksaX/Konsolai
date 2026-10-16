@@ -78,6 +78,12 @@ func TestResolveBuiltinDefault(t *testing.T) {
 	if p.FastEndpoint != defaultFastEndpoint || p.FastModel != "" {
 		t.Fatalf("fast %+v", p)
 	}
+	if p.EmbedEndpoint != defaultEmbedEndpoint || p.RerankEndpoint != defaultRerankEndpoint {
+		t.Fatalf("rag endpoints %+v", p)
+	}
+	if !p.RAGEnabled() {
+		t.Fatal("memory_rag default")
+	}
 	if len(p.Languages) != 2 || p.Languages[0] != "en" || p.Languages[1] != "fr" {
 		t.Fatalf("languages %+v", p.Languages)
 	}
@@ -120,6 +126,29 @@ func TestResolveFastEnv(t *testing.T) {
 	}
 	if p.FastEndpoint != "http://fast/v1" || p.FastModel != "mini" {
 		t.Fatalf("got %+v", p)
+	}
+}
+
+func TestResolveEmbedRerankEnv(t *testing.T) {
+	t.Setenv("KONSOLAI_EMBED_ENDPOINT", "http://embed:9")
+	t.Setenv("KONSOLAI_RERANK_ENDPOINT", "http://rerank:9")
+	p, err := File{}.Resolve("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.EmbedEndpoint != "http://embed:9" || p.RerankEndpoint != "http://rerank:9" {
+		t.Fatalf("got %+v", p)
+	}
+}
+
+func TestResolveMemoryRAGFalse(t *testing.T) {
+	off := false
+	p, err := File{Profiles: map[string]Profile{"default": {MemoryRAG: &off}}}.Resolve("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.RAGEnabled() {
+		t.Fatal("want disabled")
 	}
 }
 
