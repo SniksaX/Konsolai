@@ -201,3 +201,28 @@ func TestSearchMasksEnv(t *testing.T) {
 		t.Fatalf("meta %q", res.Meta)
 	}
 }
+
+func TestDocsTaskRejectsSourceWrite(t *testing.T) {
+	g, err := safety.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := NewRegistry(g, os.Stdout, nil, nil, nil, Options{DocsTask: true})
+	tool, _ := reg.Get("write_file")
+	_, err = tool.Prepare(`{"path":"main.go","content":"package main"}`)
+	if err == nil || err.Error() != DocsSourceReject {
+		t.Fatalf("go: %v", err)
+	}
+	_, err = tool.Prepare(`{"path":"cmd/x.ts","content":"x"}`)
+	if err == nil || !strings.Contains(err.Error(), DocsSourceReject) {
+		t.Fatalf("ts: %v", err)
+	}
+	if _, err := tool.Prepare(`{"path":"docs/OVERVIEW.md","content":"# x"}`); err != nil {
+		t.Fatalf("md: %v", err)
+	}
+	plain := NewRegistry(g, os.Stdout, nil, nil, nil)
+	w, _ := plain.Get("write_file")
+	if _, err := w.Prepare(`{"path":"main.go","content":"package main"}`); err != nil {
+		t.Fatalf("non-docs: %v", err)
+	}
+}
