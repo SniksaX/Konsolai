@@ -36,16 +36,18 @@ type File struct {
 }
 
 type Profile struct {
-	Name                  string `json:"-"`
-	DatabaseURL           string `json:"database_url"`
-	Endpoint              string `json:"endpoint"`
-	Model                 string `json:"model"`
-	FastEndpoint          string `json:"fast_endpoint"`
-	FastModel             string `json:"fast_model"`
-	SessionIdleMinutes    int    `json:"session_idle_minutes"`
-	RetentionDays         int    `json:"retention_days"`
-	LLMIdleTimeoutSeconds int    `json:"llm_idle_timeout_seconds"`
-	BuildThinking         string `json:"build_thinking"`
+	Name                  string   `json:"-"`
+	DatabaseURL           string   `json:"database_url"`
+	Endpoint              string   `json:"endpoint"`
+	Model                 string   `json:"model"`
+	FastEndpoint          string   `json:"fast_endpoint"`
+	FastModel             string   `json:"fast_model"`
+	SessionIdleMinutes    int      `json:"session_idle_minutes"`
+	RetentionDays         int      `json:"retention_days"`
+	LLMIdleTimeoutSeconds int      `json:"llm_idle_timeout_seconds"`
+	BuildThinking         string   `json:"build_thinking"`
+	Languages             []string `json:"languages"`
+	DefaultLanguage       string   `json:"default_language"`
 }
 
 func DefaultPath() string {
@@ -133,7 +135,38 @@ func (f File) Resolve(name string) (Profile, error) {
 	if p.BuildThinking == "" {
 		p.BuildThinking = "plan_step"
 	}
+	if len(p.Languages) == 0 {
+		p.Languages = []string{"en", "fr"}
+	} else {
+		out := make([]string, 0, len(p.Languages))
+		for _, l := range p.Languages {
+			l = strings.ToLower(strings.TrimSpace(l))
+			if l != "" {
+				out = append(out, l)
+			}
+		}
+		if len(out) == 0 {
+			out = []string{"en", "fr"}
+		}
+		p.Languages = out
+	}
+	p.DefaultLanguage = strings.ToLower(strings.TrimSpace(p.DefaultLanguage))
+	if p.DefaultLanguage == "" {
+		p.DefaultLanguage = "en"
+	}
+	if !langAllowed(p.DefaultLanguage, p.Languages) {
+		p.DefaultLanguage = p.Languages[0]
+	}
 	return p, nil
+}
+
+func langAllowed(code string, langs []string) bool {
+	for _, l := range langs {
+		if l == code {
+			return true
+		}
+	}
+	return false
 }
 
 // Location returns host/dbname for display. It never includes the URL or secrets.
