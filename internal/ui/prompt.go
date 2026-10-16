@@ -88,7 +88,11 @@ func (p *Prompter) confirm(summary, preview string, force bool) (Decision, strin
 	for {
 		fmt.Fprintln(w, Current().Strong(summary))
 		if preview != "" {
-			fmt.Fprintln(w, ColorDiff(preview))
+			if isDiffPreview(preview) {
+				fmt.Fprintln(w, ColorDiff(preview))
+			} else {
+				fmt.Fprint(w, Numbered(preview))
+			}
 		}
 		fmt.Fprint(w, PromptOptions())
 		line, err := p.in.ReadString('\n')
