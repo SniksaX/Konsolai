@@ -235,6 +235,7 @@ func Default() *Registry {
 		Command{Name: "output", Usage: "output [n]", Summary: "Reprint the full output of a recent command", Run: runOutput},
 		Command{Name: "status", Usage: "status", Summary: "Show version, model, database and environment", Run: runStatus},
 		Command{Name: "index", Usage: "index [path]|status|clear", Summary: "Index the project for recall", Run: runIndex},
+		Command{Name: "recall", Usage: "recall \"<query>\" [--scope X]", Summary: "Search indexed memory without calling the model", Run: runRecall},
 		Command{Name: "remember", Usage: "remember [--project] \"<fact>\"", Summary: "Store a fact", Run: runRemember},
 		Command{Name: "facts", Usage: "facts", Summary: "List remembered facts", Run: runFacts},
 		Command{Name: "forget", Usage: "forget user|project <id>", Summary: "Delete a fact", Run: runForget},
