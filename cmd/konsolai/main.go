@@ -307,7 +307,7 @@ func run() int {
 	if len(tap.msgs) > 20 {
 		tap.msgs = tap.msgs[len(tap.msgs)-20:]
 	}
-	code := runProfile(ctx, client, snap, facts, history, tap, mem, sessionID, projectID, prof.Name, inv, cwd, prompter, dec, routerTime)
+	code := runProfile(ctx, client, snap, facts, history, tap, mem, sessionID, projectID, prof, inv, cwd, prompter, dec, routerTime)
 	if sessionID != "" {
 		if s := mem.Store(); s != nil {
 			endCtx, cancel := memory.Isolated(ctx)
@@ -511,9 +511,9 @@ func langLine(d intent.Decision) string {
 	return "Reply in the user's language (" + lang + ")."
 }
 
-func thinkingFor(dec intent.Decision) agent.ThinkingPolicy {
+func thinkingFor(dec intent.Decision, buildThinking string) agent.ThinkingPolicy {
 	if dec.Intent == intent.Build {
-		return agent.ThinkUntilPlan
+		return agent.ParseBuildThinking(buildThinking)
 	}
 	if dec.Reasoning {
 		return agent.ThinkOn
@@ -670,7 +670,7 @@ func (t *sessionTap) FileChange(ctx context.Context, c tools.FileChange) error {
 	return nil
 }
 
-func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, mem *memory.Guard, sessionID string, projectID *int64, profile string, inv invocation, cwd string, prompter *ui.Prompter, dec intent.Decision, routerTime time.Duration) int {
+func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, mem *memory.Guard, sessionID string, projectID *int64, prof config.Profile, inv invocation, cwd string, prompter *ui.Prompter, dec intent.Decision, routerTime time.Duration) int {
 	defer prompter.Close()
 	lang := langLine(dec)
 	if dec.Intent == intent.Answer {
@@ -691,7 +691,7 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 	if !inv.Plain {
 		toolOut = ui.NewGutter(os.Stdout)
 	}
-	reg := tools.NewRegistry(sg, toolOut, lister, memory.NewWebCache(mem), memory.NewFactStore(mem, profile, projectID, sessionID), tools.Options{
+	reg := tools.NewRegistry(sg, toolOut, lister, memory.NewWebCache(mem), memory.NewFactStore(mem, prof.Name, projectID, sessionID), tools.Options{
 		ReadOnlyShell: dec.Intent == intent.Lookup,
 		DocsTask:      dec.Task == intent.TaskDocs,
 	})
@@ -704,7 +704,7 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 		History:        history,
 		AutoApprove:    inv.Yes,
 		Prompt:         agent.ActPrompt + "\n" + lang,
-		ThinkingPolicy: thinkingFor(dec),
+		ThinkingPolicy: thinkingFor(dec, prof.BuildThinking),
 		Trace:          inv.Trace,
 		Intent:         string(dec.Intent),
 		RouterTime:     routerTime,
