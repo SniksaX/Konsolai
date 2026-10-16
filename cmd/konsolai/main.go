@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/siraj/konsolai/internal/agent"
+	"github.com/siraj/konsolai/internal/commands"
 	"github.com/siraj/konsolai/internal/config"
 	"github.com/siraj/konsolai/internal/intent"
 	"github.com/siraj/konsolai/internal/llm"
@@ -25,8 +26,11 @@ import (
 
 var _ agent.Confirmer = (*ui.Prompter)(nil)
 
+var version = "dev"
+
 const (
-	usageText = `usage: konsolai [--yes] [--profile NAME] [--intent answer|lookup|act|build] [--trace] [--plain] [new] ["<request>"]`
+	usageText = `usage: konsolai [--yes] [--profile NAME] [--intent answer|lookup|act|build] [--trace] [--plain] [--version] [new] ["<request>"]
+       konsolai /<command> [args]`
 
 	noMemory = "memory is not configured (see ~/.config/konsolai/config.json)"
 )
@@ -56,6 +60,10 @@ type invocation struct {
 	FactID    int64
 	Fact      string
 	Endpoint  string
+	Version   bool
+	Slash     string
+	SlashArgs [8]string
+	SlashN    int
 }
 
 var errRequest = errors.New(`request must be a single argument in double quotes, e.g. konsolai code "add a /health endpoint"`)
@@ -71,6 +79,7 @@ func parseArgs(args []string) (invocation, error) {
 	intent := fs.String("intent", "", "skip the router")
 	trace := fs.Bool("trace", false, "print per-call timing and tokens")
 	plain := fs.Bool("plain", false, "disable styled output")
+	showVer := fs.Bool("version", false, "print version and exit")
 	project := fs.Bool("project", false, "project-scoped fact")
 	if err := fs.Parse(args); err != nil {
 		return invocation{}, err
@@ -79,8 +88,21 @@ func parseArgs(args []string) (invocation, error) {
 		return invocation{}, errRequest
 	}
 	rest := fs.Args()
-	inv := invocation{Yes: *yes, Profile: *profile, Intent: *intent, Trace: *trace, Plain: *plain}
+	inv := invocation{Yes: *yes, Profile: *profile, Intent: *intent, Trace: *trace, Plain: *plain, Version: *showVer}
 	if len(rest) == 0 {
+		return inv, nil
+	}
+	if strings.HasPrefix(rest[0], "/") {
+		inv.Slash = strings.TrimPrefix(rest[0], "/")
+		args := rest[1:]
+		if *project {
+			args = append([]string{"--project"}, args...)
+		}
+		if len(args) > 8 {
+			args = args[:8]
+		}
+		inv.SlashN = len(args)
+		copy(inv.SlashArgs[:], args)
 		return inv, nil
 	}
 	switch rest[0] {
@@ -164,6 +186,10 @@ func run() int {
 		}
 		return 2
 	}
+	if inv.Version {
+		fmt.Println(version)
+		return 0
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -180,7 +206,7 @@ func run() int {
 	}
 	inv.Endpoint = prof.Endpoint
 
-	needMem := inv.Cmd != cmdRequest
+	needMem := inv.Cmd == cmdUndo || inv.Cmd == cmdFacts || inv.Cmd == cmdPrune || inv.Cmd == cmdRemember || inv.Cmd == cmdForget
 	var st *store.Store
 	if prof.DatabaseURL == "" {
 		if needMem {
@@ -218,19 +244,68 @@ func run() int {
 	}
 	projectID := upsertProject(ctx, mem, cwd)
 
-	switch inv.Cmd {
-	case cmdHistory:
-		return runHistory(ctx, mem, prof.Name)
-	case cmdUndo:
-		return runUndo(ctx, mem, projectID, cwd, inv.Yes)
-	case cmdFacts:
-		return runFacts(ctx, mem, prof.Name, projectID)
-	case cmdPrune:
-		return runPrune(ctx, mem, prof.RetentionDays)
-	case cmdRemember:
-		return runRemember(ctx, mem, prof.Name, projectID, inv.Fact, inv.FactScope)
-	case cmdForget:
-		return runForget(ctx, mem, inv.FactScope, inv.FactID)
+	client := llm.New(prof.Endpoint, prof.Model)
+	client.SetIdleTimeout(time.Duration(prof.LLMIdleTimeoutSeconds) * time.Second)
+	runner := &turn.Runner{
+		Profile: prof,
+		Client:  client,
+		Mem:     mem,
+		Out:     os.Stdout,
+		Err:     os.Stderr,
+		Version: version,
+	}
+
+	if inv.Slash != "" || inv.Cmd != cmdRequest {
+		env := &commands.Env{
+			Runner:  runner,
+			Mem:     mem,
+			Profile: prof,
+			Out:     os.Stdout,
+			Err:     os.Stderr,
+			Cwd:     cwd,
+			Yes:     inv.Yes,
+			Version: version,
+			Plain:   inv.Plain,
+			Undo: func(ctx context.Context) int {
+				return runUndo(ctx, mem, projectID, cwd, inv.Yes)
+			},
+			Remember: func(ctx context.Context, args []string) int {
+				scope := "user"
+				if len(args) > 0 && args[0] == "--project" {
+					scope = "project"
+					args = args[1:]
+				}
+				if len(args) != 1 || strings.TrimSpace(args[0]) == "" {
+					fmt.Fprintln(os.Stderr, `usage: /remember [--project] "<fact>"`)
+					return 2
+				}
+				return runRemember(ctx, mem, prof.Name, projectID, args[0], scope)
+			},
+			Facts: func(ctx context.Context) int {
+				return runFacts(ctx, mem, prof.Name, projectID)
+			},
+			Forget: func(ctx context.Context, args []string) int {
+				if len(args) != 2 {
+					fmt.Fprintln(os.Stderr, "usage: /forget user|project <id>")
+					return 2
+				}
+				id, err := strconv.ParseInt(args[1], 10, 64)
+				if err != nil || id < 1 {
+					fmt.Fprintln(os.Stderr, "usage: /forget user|project <id>")
+					return 2
+				}
+				return runForget(ctx, mem, args[0], id)
+			},
+			Prune: func(ctx context.Context) int {
+				return runPrune(ctx, mem, prof.RetentionDays)
+			},
+		}
+		name, args := inv.Slash, inv.SlashArgs[:inv.SlashN]
+		if inv.Slash == "" {
+			name, args = bareCommand(inv)
+			commands.NoteUseSlash(os.Stderr, name)
+		}
+		return commands.Default().Dispatch(ctx, env, name, args)
 	}
 
 	inv, err = resolveRequest(inv)
@@ -240,19 +315,33 @@ func run() int {
 		return 2
 	}
 
-	client := llm.New(prof.Endpoint, prof.Model)
-	client.SetIdleTimeout(time.Duration(prof.LLMIdleTimeoutSeconds) * time.Second)
-	res := (&turn.Runner{
-		Profile: prof,
-		Client:  client,
-		Mem:     mem,
-		Out:     os.Stdout,
-		Err:     os.Stderr,
-	}).RunTurn(ctx, turn.Request{
+	res := runner.RunTurn(ctx, turn.Request{
 		Text: inv.Request, Intent: inv.Intent, Yes: inv.Yes,
 		Trace: inv.Trace, Plain: inv.Plain, New: inv.New, Cwd: cwd,
 	})
 	return res.ExitCode
+}
+
+func bareCommand(inv invocation) (string, []string) {
+	switch inv.Cmd {
+	case cmdHistory:
+		return "history", nil
+	case cmdUndo:
+		return "undo", nil
+	case cmdFacts:
+		return "facts", nil
+	case cmdPrune:
+		return "prune", nil
+	case cmdRemember:
+		if inv.FactScope == "project" {
+			return "remember", []string{"--project", inv.Fact}
+		}
+		return "remember", []string{inv.Fact}
+	case cmdForget:
+		return "forget", []string{inv.FactScope, strconv.FormatInt(inv.FactID, 10)}
+	default:
+		return "", nil
+	}
 }
 
 func upsertProject(ctx context.Context, mem *memory.Guard, cwd string) *int64 {
