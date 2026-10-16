@@ -10,6 +10,7 @@ import (
 
 	"github.com/siraj/konsolai/internal/agent"
 	"github.com/siraj/konsolai/internal/config"
+	"github.com/siraj/konsolai/internal/embed"
 	"github.com/siraj/konsolai/internal/intent"
 	"github.com/siraj/konsolai/internal/llm"
 	"github.com/siraj/konsolai/internal/memory"
@@ -55,6 +56,7 @@ type Runner struct {
 	LastWindow       int
 	SlashHelp        string
 	Ingest           *rag.Ingester
+	Embed            *embed.Client
 	shellOut         []string
 	lastCode         int
 	lastIntent       intent.Intent
