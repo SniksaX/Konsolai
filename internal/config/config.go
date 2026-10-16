@@ -42,6 +42,7 @@ type Profile struct {
 	SessionIdleMinutes    int    `json:"session_idle_minutes"`
 	RetentionDays         int    `json:"retention_days"`
 	LLMIdleTimeoutSeconds int    `json:"llm_idle_timeout_seconds"`
+	BuildThinking         string `json:"build_thinking"`
 }
 
 func DefaultPath() string {
@@ -113,6 +114,12 @@ func (f File) Resolve(name string) (Profile, error) {
 	}
 	if v := os.Getenv("KONSOLAI_MODEL"); v != "" {
 		p.Model = v
+	}
+	if v := os.Getenv("KONSOLAI_BUILD_THINKING"); v != "" {
+		p.BuildThinking = v
+	}
+	if p.BuildThinking == "" {
+		p.BuildThinking = "plan_step"
 	}
 	return p, nil
 }
