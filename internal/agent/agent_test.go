@@ -353,7 +353,7 @@ func TestContextElision(t *testing.T) {
 	}
 	replies = append(replies, llm.Message{Role: llm.RoleAssistant, Content: "done"})
 	client, rep := newReplay(t, replies)
-	rep.promptTokens = []int{25000, 25000, 25000, 25000, 25000, 25000, 25000, 25000, 25000}
+	rep.promptTokens = []int{32000, 32000, 32000, 32000, 32000, 32000, 32000, 32000, 32000}
 	err = Run(context.Background(), Config{
 		Client:    client,
 		Tools:     tools.NewRegistry(g, io.Discard, list, nil, nil),
@@ -1383,6 +1383,9 @@ func TestPromptNotes(t *testing.T) {
 	for _, p := range []string{ActPrompt, CodePrompt, LookupPrompt} {
 		if !strings.Contains(p, batchReads) {
 			t.Fatal("prompt missing batch-reads rule")
+		}
+		if !strings.Contains(p, "pacman -Qo") || !strings.Contains(p, "Never launch GUI") || !strings.Contains(p, "Run these yourself:") {
+			t.Fatal("prompt missing sys rules")
 		}
 	}
 }
