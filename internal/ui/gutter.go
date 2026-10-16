@@ -2,7 +2,10 @@ package ui
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"strconv"
+	"strings"
 )
 
 // Gutter prefixes each line with a muted bar for live tool output.
@@ -33,6 +36,33 @@ func (g *Gutter) emit(line []byte) error {
 	p := Current()
 	_, err := io.WriteString(g.w, p.Muted("│ ")+p.Muted(string(line))+"\n")
 	return err
+}
+
+// Numbered prefixes each line with a muted line number.
+func Numbered(s string) string {
+	s = strings.TrimRight(s, "\n")
+	if s == "" {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	width := len(strconv.Itoa(len(lines)))
+	p := Current()
+	var b strings.Builder
+	for i, line := range lines {
+		b.WriteString(p.Muted(fmt.Sprintf("%*d", width, i+1)))
+		b.WriteByte(' ')
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func isDiffPreview(s string) bool {
+	t := strings.TrimSpace(s)
+	if strings.HasPrefix(t, "diff ") || strings.HasPrefix(t, "--- ") || strings.HasPrefix(t, "@@ ") {
+		return true
+	}
+	return strings.Contains(s, "\n@@ ") || strings.Contains(s, "\n+++ ")
 }
 
 func ColorDiff(s string) string {
