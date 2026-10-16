@@ -579,6 +579,24 @@ func TestRunCDPrepareError(t *testing.T) {
 	}
 }
 
+func TestPrepareRejectPrintsBothLines(t *testing.T) {
+	var out bytes.Buffer
+	_, _, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "run_shell", `{"cmd":"cd src"}`)),
+		{Role: llm.RoleAssistant, Content: "ok"},
+	}, nil, Config{Out: &out, MaxSteps: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := out.String()
+	if !strings.Contains(s, "▸") || !strings.Contains(s, "run_shell") || !strings.Contains(s, "cd src") {
+		t.Fatalf("missing call line: %q", s)
+	}
+	if !strings.Contains(s, "✗ rejected:") || !strings.Contains(s, "do not use cd") {
+		t.Fatalf("missing reject line: %q", s)
+	}
+}
+
 type collectRec struct {
 	mu    sync.Mutex
 	msgs  []llm.Message
