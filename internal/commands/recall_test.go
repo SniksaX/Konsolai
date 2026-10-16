@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/siraj/konsolai/internal/config"
 	"github.com/siraj/konsolai/internal/embed"
@@ -53,7 +54,7 @@ func TestRecallFormatting(t *testing.T) {
 	}
 	vec := make([]float32, store.EmbeddingDim)
 	vec[0] = 1
-	content := "plan gate is enforced in internal/agent before mutating tools run " + t.Name()
+	content := "plan gate is enforced in internal/agent before mutating tools run " + time.Now().Format("20060102150405.000000000")
 	ok, err := st.InsertChunk(ctx, store.ChunkIn{
 		Profile:   "recalltest",
 		ProjectID: &pid,
