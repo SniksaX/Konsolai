@@ -28,6 +28,7 @@ type Config struct {
 	Model   string
 	Out     io.Writer
 	Err     io.Writer
+	Trace   bool
 }
 
 type session struct {
@@ -90,7 +91,7 @@ func Run(ctx context.Context, cfg Config) int {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	st := &session{cwd: cwd, yes: env.Yes, trace: false}
+	st := &session{cwd: cwd, yes: env.Yes, trace: cfg.Trace}
 	env.InRepl = true
 	env.Cwd = cwd
 	wireEnv(env, st, cfg)
