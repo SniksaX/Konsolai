@@ -4,9 +4,11 @@ go 1.27.1
 
 require (
 	github.com/alecthomas/chroma/v2 v2.27.0
+	github.com/creack/pty v1.1.24
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/reeflective/readline v1.3.0
 	github.com/yuin/goldmark v1.8.6
+	golang.org/x/sys v0.45.0
 )
 
 require (
@@ -16,6 +18,5 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
 )
