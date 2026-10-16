@@ -216,3 +216,84 @@ func TestShellRunningSpinner(t *testing.T) {
 		t.Fatalf("spinner %q", buf.String())
 	}
 }
+
+func TestCommandHeadlineAndPreview(t *testing.T) {
+	if CommandHeadline("echo hi") != "echo hi" {
+		t.Fatalf("%q", CommandHeadline("echo hi"))
+	}
+	if CommandHeadline("echo a\necho b\necho c") != "echo a (+2 lines)" {
+		t.Fatalf("%q", CommandHeadline("echo a\necho b\necho c"))
+	}
+	act, err := shellToolFor(t).Prepare("{\"cmd\":\"echo a\\necho b\"}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if act.Summary() != "run: echo a (+1 lines)" {
+		t.Fatalf("summary %q", act.Summary())
+	}
+	if act.Preview() != "echo a\necho b" {
+		t.Fatalf("preview %q", act.Preview())
+	}
+	act, err = shellToolFor(t).Prepare(`{"cmd":"echo hi"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if act.Preview() != "" {
+		t.Fatalf("single-line preview %q", act.Preview())
+	}
+}
+
+func TestPipelineCutBy(t *testing.T) {
+	if cut, ok := pipelineCutBy("yes | head -3"); !ok || cut != "head" {
+		t.Fatalf("head %q %v", cut, ok)
+	}
+	if cut, ok := pipelineCutBy("yes | tail -n 2"); !ok || cut != "tail" {
+		t.Fatalf("tail %q %v", cut, ok)
+	}
+	if cut, ok := pipelineCutBy("yes | grep -m 1 x"); !ok || cut != "grep" {
+		t.Fatalf("grep %q %v", cut, ok)
+	}
+	if cut, ok := pipelineCutBy("yes | sed -n 1p"); !ok || cut != "sed" {
+		t.Fatalf("sed %q %v", cut, ok)
+	}
+	if _, ok := pipelineCutBy("head -3"); ok {
+		t.Fatal("no pipeline")
+	}
+	if _, ok := pipelineCutBy("yes | wc -l"); ok {
+		t.Fatal("wc is not a cutter")
+	}
+}
+
+func TestShellExit141HeadSuccess(t *testing.T) {
+	act, err := shellToolFor(t).Prepare(`{"cmd":"yes | head -3"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := act.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.IsError {
+		t.Fatalf("want success: %+v", res)
+	}
+	if res.Meta != "exit 141 (output cut by head)" {
+		t.Fatalf("Meta %q", res.Meta)
+	}
+	if !strings.Contains(res.Output, "exit_code: 141") {
+		t.Fatalf("Output %q", res.Output)
+	}
+}
+
+func TestShellExit141BareIsError(t *testing.T) {
+	act, err := shellToolFor(t).Prepare(`{"cmd":"exit 141"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := act.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || res.Meta != "exit 141" {
+		t.Fatalf("%+v", res)
+	}
+}
