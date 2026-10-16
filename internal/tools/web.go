@@ -26,12 +26,14 @@ const (
 type webFetchTool struct {
 	cache  WebCache
 	client *http.Client
+	onWeb  func(url, title, text string)
 }
 
-func newWebFetch(cache WebCache) *webFetchTool {
+func newWebFetch(cache WebCache, onWeb func(url, title, text string)) *webFetchTool {
 	return &webFetchTool{
 		cache:  cache,
 		client: &http.Client{Timeout: webFetchTimeout},
+		onWeb:  onWeb,
 	}
 }
 
@@ -55,6 +57,7 @@ type webFetchAction struct {
 	client *http.Client
 	url    string
 	kind   ActionKind
+	onWeb  func(url, title, text string)
 }
 
 var fetchAllowSuffixes = []string{
@@ -143,7 +146,7 @@ func (t *webFetchTool) Prepare(rawArgs string) (Action, error) {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, errors.New("tools: web_fetch: url must be an absolute http or https URL")
 	}
-	return &webFetchAction{cache: t.cache, client: t.client, url: u.String(), kind: classifyFetchURL(u)}, nil
+	return &webFetchAction{cache: t.cache, client: t.client, url: u.String(), kind: classifyFetchURL(u), onWeb: t.onWeb}, nil
 }
 
 func (a *webFetchAction) Summary() string  { return "fetch " + a.url }
@@ -185,6 +188,9 @@ func (a *webFetchAction) Run(ctx context.Context) (Result, error) {
 	}
 	title, text := extractPage(string(body), resp.Header.Get("Content-Type"))
 	_ = a.cache.Put(ctx, a.url, title, text, webFetchTTL)
+	if a.onWeb != nil && strings.TrimSpace(text) != "" {
+		a.onWeb(a.url, title, text)
+	}
 	out := formatFetched(title, text)
 	return Result{Output: out, Meta: formatSize(int64(len(out)))}, nil
 }
