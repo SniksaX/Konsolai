@@ -84,6 +84,14 @@ func LoadLast(profile, cwd string, idle time.Duration) (LastSession, bool) {
 	return s, true
 }
 
+func ClearLast() error {
+	err := os.Remove(LastPath())
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
 func SaveLast(s LastSession) error {
 	dir := StateDir()
 	if err := os.MkdirAll(dir, 0700); err != nil {
