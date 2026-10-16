@@ -75,6 +75,21 @@ func TestResolveBuiltinDefault(t *testing.T) {
 	if p.BuildThinking != "plan_step" {
 		t.Fatalf("build_thinking %q", p.BuildThinking)
 	}
+	if p.FastEndpoint != defaultFastEndpoint || p.FastModel != "" {
+		t.Fatalf("fast %+v", p)
+	}
+}
+
+func TestResolveFastEnv(t *testing.T) {
+	t.Setenv("KONSOLAI_FAST_ENDPOINT", "http://fast/v1")
+	t.Setenv("KONSOLAI_FAST_MODEL", "mini")
+	p, err := File{}.Resolve("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.FastEndpoint != "http://fast/v1" || p.FastModel != "mini" {
+		t.Fatalf("got %+v", p)
+	}
 }
 
 func TestResolveBuildThinkingEnv(t *testing.T) {
