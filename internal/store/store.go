@@ -173,6 +173,7 @@ func (s *Store) FindResumableSession(ctx context.Context, profile string, projec
 		FROM sessions
 		WHERE profile = $1
 		  AND status IN ('active', 'finished', 'failed')
+		  AND NOT closed
 		  AND last_activity_at >= now() - make_interval(mins => $2)
 		  AND (
 		    ($3::bigint IS NOT NULL AND project_id = $3)
@@ -218,6 +219,7 @@ func (s *Store) RecentSessions(ctx context.Context, profile string, projectID *i
 		FROM sessions s
 		WHERE s.profile = $1
 		  AND s.status IN ('active', 'finished', 'failed')
+		  AND NOT s.closed
 		  AND s.last_activity_at >= now() - make_interval(mins => $2)
 		  AND (
 		    ($3::bigint IS NOT NULL AND s.project_id = $3)
@@ -649,6 +651,120 @@ func (s *Store) PruneIfDue(ctx context.Context, retentionDays int) error {
 		return fmt.Errorf("store: record prune: %w", err)
 	}
 	return nil
+}
+
+func (s *Store) HistorySessions(ctx context.Context, profile string, projectID *int64, cwd string, limit int) ([]Session, error) {
+	ctx, cancel := withTimeout(ctx)
+	defer cancel()
+	if limit < 1 {
+		limit = 10
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, profile, project_id, cwd, mode, model, title, status,
+		       started_at, last_activity_at, ended_at
+		FROM sessions
+		WHERE profile = $1
+		  AND NOT closed
+		  AND (
+		    ($2::bigint IS NOT NULL AND project_id = $2)
+		    OR ($2::bigint IS NULL AND cwd = $3)
+		  )
+		ORDER BY last_activity_at DESC
+		LIMIT $4`, profile, projectID, cwd, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: history sessions: %w", err)
+	}
+	defer rows.Close()
+	var out []Session
+	for rows.Next() {
+		var sess Session
+		if err := rows.Scan(&sess.ID, &sess.Profile, &sess.ProjectID, &sess.CWD, &sess.Mode, &sess.Model, &sess.Title, &sess.Status,
+			&sess.StartedAt, &sess.LastActivity, &sess.EndedAt); err != nil {
+			return nil, fmt.Errorf("store: scan history session: %w", err)
+		}
+		out = append(out, sess)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) CloseSessions(ctx context.Context, profile string, projectID *int64, cwd string) (int64, error) {
+	ctx, cancel := withTimeout(ctx)
+	defer cancel()
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE sessions SET closed = true
+		WHERE profile = $1
+		  AND NOT closed
+		  AND (
+		    ($2::bigint IS NOT NULL AND project_id = $2)
+		    OR ($2::bigint IS NULL AND cwd = $3)
+		  )`, profile, projectID, cwd)
+	if err != nil {
+		return 0, fmt.Errorf("store: close sessions: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+func (s *Store) SchemaVersion(ctx context.Context) (int, error) {
+	ctx, cancel := withTimeout(ctx)
+	defer cancel()
+	var v int
+	err := s.pool.QueryRow(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&v)
+	if err != nil {
+		return 0, fmt.Errorf("store: schema version: %w", err)
+	}
+	return v, nil
+}
+
+type ActionRow struct {
+	Seq    int
+	Tool   string
+	Args   []byte
+	Kind   string
+	Output string
+}
+
+func (s *Store) ListActions(ctx context.Context, sessionID string) ([]ActionRow, error) {
+	ctx, cancel := withTimeout(ctx)
+	defer cancel()
+	rows, err := s.pool.Query(ctx, `
+		SELECT seq, tool, args, kind, output FROM actions
+		WHERE session_id = $1::uuid ORDER BY seq`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list actions: %w", err)
+	}
+	defer rows.Close()
+	var out []ActionRow
+	for rows.Next() {
+		var a ActionRow
+		if err := rows.Scan(&a.Seq, &a.Tool, &a.Args, &a.Kind, &a.Output); err != nil {
+			return nil, fmt.Errorf("store: scan action: %w", err)
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListFileChanges(ctx context.Context, sessionID string) ([]FileChangeRow, error) {
+	ctx, cancel := withTimeout(ctx)
+	defer cancel()
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, session_id::text, seq, path, existed_before, COALESCE(before_content, ''::bytea),
+		       COALESCE(before_hash, ''), after_hash, diff, COALESCE(undo_blocked, '')
+		FROM file_changes WHERE session_id = $1::uuid AND reverted_at IS NULL
+		ORDER BY seq`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list file changes: %w", err)
+	}
+	defer rows.Close()
+	var out []FileChangeRow
+	for rows.Next() {
+		var c FileChangeRow
+		if err := rows.Scan(&c.ID, &c.SessionID, &c.Seq, &c.Path, &c.ExistedBefore, &c.BeforeContent, &c.BeforeHash, &c.AfterHash, &c.Diff, &c.UndoBlocked); err != nil {
+			return nil, fmt.Errorf("store: scan file change: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 func withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
