@@ -16,6 +16,10 @@ func HistoryPath() string {
 	return filepath.Join(memory.StateDir(), "repl_history")
 }
 
+func ShellHistoryPath() string {
+	return filepath.Join(memory.StateDir(), "shell_history")
+}
+
 type fileHistory struct {
 	path  string
 	lines []string
