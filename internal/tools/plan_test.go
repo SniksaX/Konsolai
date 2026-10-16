@@ -88,3 +88,18 @@ func TestProposePlanRejectsPlaceholderCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestProposePlanRejectsSudo(t *testing.T) {
+	g, err := safety.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool, ok := NewRegistry(g, nil, nil, nil, nil).Get("propose_plan")
+	if !ok {
+		t.Fatal("missing")
+	}
+	_, err = tool.Prepare(`{"summary":"s","steps":["install"],"files":["a"],"commands":["sudo pacman -S foo"]}`)
+	if err == nil || err.Error() != safety.PrivilegedPlanMsg {
+		t.Fatalf("sudo: %v", err)
+	}
+}
