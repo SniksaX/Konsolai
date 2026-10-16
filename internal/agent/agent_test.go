@@ -15,6 +15,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/siraj/konsolai/internal/llm"
 	"github.com/siraj/konsolai/internal/safety"
@@ -417,6 +418,7 @@ func TestHysteresisElisionOnePass(t *testing.T) {
 	client, rep := newReplay(t, replies)
 	rep.modelLen = 32768
 	rep.promptTokens = make([]int, len(replies))
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	reg := tools.NewRegistry(g, io.Discard, nil, nil, nil).Named("read_file")
 	var errW strings.Builder
 	err = Run(context.Background(), Config{
@@ -946,9 +948,18 @@ func TestFormatSummaryAndTrace(t *testing.T) {
 	if !strings.Contains(tr, "think=off") || !strings.Contains(tr, "ctx 0%") || !strings.Contains(tr, "->") {
 		t.Fatalf("off %q", tr)
 	}
+	labels := FormatTraceCalls([]llm.ToolCall{call("1", "export_doc", strings.Repeat("a", 4100))})
+	if len(labels) != 1 || labels[0] != "export_doc(args 4.1KB)" {
+		t.Fatalf("labels %v", labels)
+	}
+	small := FormatTraceCalls([]llm.ToolCall{call("1", "export_doc", `{"path":"docs/OVERVIEW.pdf","format":"pdf"}`)})
+	if len(small) != 1 || !strings.HasPrefix(small[0], "export_doc(args ") || !strings.HasSuffix(small[0], "B)") {
+		t.Fatalf("small %v", small)
+	}
 }
 
 func TestRunAccumulatesStats(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var st Stats
 	var errW strings.Builder
 	_, _, err := setupCfg(t, []llm.Message{
@@ -1674,5 +1685,79 @@ func TestLeanResumeKeepsToolProtocol(t *testing.T) {
 		if !found {
 			t.Fatalf("tool %s has no matching tool_call", m.ToolCallID)
 		}
+	}
+}
+
+func TestTraceDumpWritesRedactedJSON(t *testing.T) {
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	huge := `{"path":"docs/OVERVIEW.pdf","format":"pdf","content":"` + strings.Repeat("hello world ", 300) + `"}`
+	_, _, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "export_doc", huge)),
+		{Role: llm.RoleAssistant, Content: "done"},
+	}, nil, Config{Trace: true, SessionID: "sess1", MaxSteps: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(state, "konsolai", "trace", "sess1-1.json")
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0600 {
+		t.Fatalf("mode %v", fi.Mode().Perm())
+	}
+	if !strings.Contains(string(b), "export_doc") || !strings.Contains(string(b), `"content"`) {
+		t.Fatalf("dump %s", b)
+	}
+	if len(huge) < 3000 {
+		t.Fatalf("fixture too small: %d", len(huge))
+	}
+}
+
+func TestNarrationTruncatedInHistory(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	long := strings.Repeat("word ", 200)
+	if utf8.RuneCountInString(long) <= 500 {
+		t.Fatalf("need >500 runes, got %d", utf8.RuneCountInString(long))
+	}
+	_, rep, err := setupCfg(t, []llm.Message{
+		{Role: llm.RoleAssistant, Content: long, ToolCalls: []llm.ToolCall{call("1", "list_dir", `{"path":"."}`)}},
+		{Role: llm.RoleAssistant, Content: "done"},
+	}, nil, Config{MaxSteps: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.reqs) < 2 {
+		t.Fatalf("reqs %d", len(rep.reqs))
+	}
+	var got string
+	for _, m := range rep.reqs[1] {
+		if m.Role == llm.RoleAssistant && len(m.ToolCalls) > 0 {
+			got = m.Content
+		}
+	}
+	if utf8.RuneCountInString(got) != 300 {
+		t.Fatalf("want 300 runes, got %d %q", utf8.RuneCountInString(got), got)
+	}
+}
+
+func TestExportDocUnknownContentRejected(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	args := `{"path":"out.html","format":"html","content":"` + strings.Repeat("x", 800) + `"}`
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "export_doc", args)),
+		{Role: llm.RoleAssistant, Content: "ok"},
+	}, nil, Config{MaxSteps: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := rep.lastTool()
+	if !strings.Contains(got.Content, "unknown field") {
+		t.Fatalf("want unknown field reject, got %q", got.Content)
 	}
 }
