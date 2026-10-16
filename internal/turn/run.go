@@ -271,6 +271,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		Task:           string(dec.Task),
 		Stats:          &agent.Stats{},
 		OnShell:        r.RememberShell,
+		Guard:          sg,
 	}
 	sys := snap.String() + facts
 	if len(extras) > 0 {
