@@ -232,6 +232,34 @@ func (c *checkNLReader) ReadLine(context.Context, string) (string, error) {
 
 func (c *checkNLReader) Close() error { return nil }
 
+func TestShellCtrlDReturnsToAI(t *testing.T) {
+	var out, errb bytes.Buffer
+	env := &commands.Env{Out: &out, Err: &errb, Cwd: t.TempDir(), Profile: config.Profile{Name: "p"}}
+	n := 0
+	rd := &fnReader{fn: func() (string, error) {
+		n++
+		switch n {
+		case 1:
+			return "/cmd", nil
+		case 2:
+			return "", ErrEOF
+		case 3:
+			return "/exit", nil
+		default:
+			return "", ErrEOF
+		}
+	}}
+	code := Run(context.Background(), Config{
+		Env: env, Reg: commands.Default(), Reader: rd, Out: &out, Err: &errb, Version: "v",
+	})
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, errb.String())
+	}
+	if n < 3 {
+		t.Fatalf("Ctrl+D quit the REPL instead of leaving shell mode; calls=%d", n)
+	}
+}
+
 func TestErrs(t *testing.T) {
 	if !errors.Is(ErrInterrupt, ErrInterrupt) || !errors.Is(ErrEOF, ErrEOF) {
 		t.Fatal("sentinel")
