@@ -138,6 +138,8 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 			fmt.Fprintln(r.out(), ui.Dim("↻ continuing session: "+picked.Title))
 		}
 	}
+	ui.BeforeOutput()
+	fmt.Fprintln(r.out())
 	if req.Plain {
 		fmt.Fprintln(r.out(), "· "+string(dec.Intent))
 	} else {
@@ -490,6 +492,7 @@ func StreamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 		s := filter.Write(delta)
 		if first && s != "" {
 			live.Stop()
+			ui.BeforeOutput()
 			first = false
 			_, _ = io.WriteString(outw, "\n")
 		}
