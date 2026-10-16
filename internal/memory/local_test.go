@@ -106,3 +106,22 @@ func TestSaveLastCapsTwenty(t *testing.T) {
 		t.Fatalf("raw %d", len(raw.Messages))
 	}
 }
+
+func TestClearLast(t *testing.T) {
+	withStateHome(t)
+	if err := SaveLast(LastSession{Profile: "p", CWD: "/c", Title: "t", Messages: []llm.Message{{Role: llm.RoleUser, Content: "x"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := LoadLast("p", "/c", 0); !ok {
+		t.Fatal("want last")
+	}
+	if err := ClearLast(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := LoadLast("p", "/c", 0); ok {
+		t.Fatal("cleared")
+	}
+	if err := ClearLast(); err != nil {
+		t.Fatal(err)
+	}
+}
