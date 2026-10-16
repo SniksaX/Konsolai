@@ -91,6 +91,13 @@ func runResume(ctx context.Context, env *Env, args []string) int {
 }
 
 func runNew(ctx context.Context, env *Env, _ []string) int {
+	if env.InRepl {
+		if env.OnNewSession != nil {
+			env.OnNewSession()
+		}
+		fmt.Fprintln(env.out(), "next request starts a new session")
+		return 0
+	}
 	if env.CloseAll != nil {
 		if err := env.CloseAll(ctx); err != nil {
 			fmt.Fprintln(env.errw(), "konsolai:", err)
