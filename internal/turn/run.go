@@ -89,7 +89,12 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	routedAt := time.Now()
 	understand := ui.Start("understanding")
 	routeClient := r.routerClient(ctx)
-	dec := DecideIntent(ctx, routeClient, req.Intent, req.Text, req.New, routerCands, inRepo)
+	dec, continued := r.continueDecision(req.Text)
+	if !continued {
+		dec = DecideIntent(ctx, routeClient, req.Intent, req.Text, req.New, routerCands, inRepo)
+	} else {
+		req.Text = strings.TrimSpace(req.Text) + "\n\n" + continueNote
+	}
 	understand()
 	routerTime := time.Since(routedAt)
 	if thinkMode == ThinkAlways {
@@ -116,6 +121,7 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	}
 	sessionID, history := picked.ID, picked.Messages
 	win := client.ContextWindow()
+	r.LastWindow = win
 	if ShouldCompact(r.LastPromptTokens, win) && len(history) > compactKeep {
 		before := client.EstimatePromptTokens(history, nil)
 		sum, upto, cerr := CompactMessages(ctx, client, history)
@@ -145,12 +151,19 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	if len(tap.msgs) > 20 {
 		tap.msgs = tap.msgs[len(tap.msgs)-20:]
 	}
-	code, answer, ptok := r.runProfile(ctx, client, snap, facts, history, tap, mem, sessionID, projectID, req, cwd, conf, dec, routerTime, thinkMode)
+	code, answer, ptok, usedMain := r.runProfile(ctx, client, snap, facts, history, tap, mem, sessionID, projectID, req, cwd, conf, dec, routerTime, thinkMode)
 	if tap.answer != "" {
 		answer = tap.answer
 	}
-	r.LastPromptTokens = ptok
 	r.LastWindow = client.ContextWindow()
+	if usedMain && ptok > 0 {
+		r.LastPromptTokens = ptok
+	}
+	r.lastCode = code
+	r.lastIntent = dec.Intent
+	r.lastLang = dec.Language
+	r.lastEffort = dec.EffectiveEffort()
+	r.lastTask = dec.Task
 	if sessionID != "" && !req.KeepOpen {
 		if s := mem.Store(); s != nil {
 			endCtx, cancel := memory.Isolated(ctx)
@@ -201,7 +214,7 @@ func loadSessionByID(ctx context.Context, mem *memory.Guard, id string, cands []
 	return ResumeCandidate{ID: id, Messages: msgs}
 }
 
-func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, mem *memory.Guard, sessionID string, projectID *int64, req Request, cwd string, confirmer agent.Confirmer, dec intent.Decision, routerTime time.Duration, thinkMode ThinkMode) (int, string, int) {
+func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, mem *memory.Guard, sessionID string, projectID *int64, req Request, cwd string, confirmer agent.Confirmer, dec intent.Decision, routerTime time.Duration, thinkMode ThinkMode) (int, string, int, bool) {
 	dec.Language = intent.ResolveLanguage(req.Text, lastUserOf(history), dec.Language, r.Profile.DefaultLanguage, r.Profile.Languages)
 	lang := agent.ReplyInstruction(dec.Language)
 	if dec.Intent == intent.Answer {
@@ -225,7 +238,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		if thinkMode == ThinkNever {
 			think = false
 		}
-		return r.runAnswer(ctx, answerClient, snap, history, rec, req.Text, prompt, think, req, dec, routerTime)
+		return r.runAnswer(ctx, client, answerClient, snap, history, rec, req.Text, prompt, think, req, dec, routerTime)
 	}
 
 	root := repo.Root(cwd)
@@ -233,7 +246,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 	sg, err := safety.NewAt(root, cwd)
 	if err != nil {
 		fmt.Fprintln(r.errw(), "konsolai:", err)
-		return 1, "", 0
+		return 1, "", 0, true
 	}
 	home, _ := os.UserHomeDir()
 	extras := safety.NamedRoots(req.Text, home)
@@ -272,6 +285,12 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		Stats:          &agent.Stats{},
 		OnShell:        r.RememberShell,
 		Guard:          sg,
+	}
+	if files, cmds, text, ok := agent.RestoreApprovedPlan(history); ok && strings.Contains(req.Text, continueNote) {
+		cfg.ResumePlan = true
+		cfg.PlanFiles = files
+		cfg.PlanCmds = cmds
+		cfg.PlanText = text
 	}
 	sys := snap.String() + facts
 	if len(extras) > 0 {
@@ -312,32 +331,32 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 	}
 	tok := 0
 	if cfg.Stats != nil {
-		tok = cfg.Stats.PromptTokens
+		tok = cfg.Stats.LastPromptTokens
 	}
 	if err == nil {
-		return 0, "", tok
+		return 0, "", tok, true
 	}
 	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
-		return 130, "", tok
+		return 130, "", tok, true
 	}
 	if errors.Is(err, agent.ErrAborted) {
 		fmt.Fprintln(r.errw(), "konsolai: aborted")
-		return 3, "", tok
+		return 3, "", tok, true
 	}
 	if errors.Is(err, agent.ErrMaxSteps) {
 		fmt.Fprintf(r.errw(), "konsolai: stopped after %d steps without finishing\n", cfg.MaxSteps)
-		return 4, "", tok
+		return 4, "", tok, true
 	}
 	if errors.Is(err, agent.ErrNoAnswer) {
 		fmt.Fprintln(r.errw(), "konsolai: the model returned no answer")
-		return 1, "", tok
+		return 1, "", tok, true
 	}
 	if errors.Is(err, agent.ErrContextOverflow) {
 		fmt.Fprintln(r.errw(), err.Error())
-		return 1, "", tok
+		return 1, "", tok, true
 	}
 	fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.Endpoint, err, req.Trace))
-	return 1, "", tok
+	return 1, "", tok, true
 }
 
 const fastWindowFillPct = 60
@@ -359,7 +378,7 @@ func (r *Runner) fastPromptTooLarge(ctx context.Context, fc *llm.Client, snap sy
 	return FastWindowTooFull(fc.EstimatePromptTokens(msgs, nil), fc.ContextWindow())
 }
 
-func (r *Runner) runAnswer(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, history []llm.Message, rec agent.Recorder, query, extra string, think bool, req Request, dec intent.Decision, routerTime time.Duration) (int, string, int) {
+func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap sysctx.Snapshot, history []llm.Message, rec agent.Recorder, query, extra string, think bool, req Request, dec intent.Decision, routerTime time.Duration) (int, string, int, bool) {
 	if rec == nil {
 		rec = agent.NopRecorder{}
 	}
@@ -370,8 +389,17 @@ func (r *Runner) runAnswer(ctx context.Context, client *llm.Client, snap sysctx.
 	msgs = append(msgs, user)
 	_ = rec.Message(ctx, user)
 
+	usedMain := client == main
 	t0 := time.Now()
 	out, usage, streamErr := StreamAnswer(ctx, client, msgs, think, req.Plain, r.out(), r.errw())
+	if streamErr != nil && !usedMain {
+		if req.Trace {
+			fmt.Fprintln(r.errw(), "fast model failed; retrying on main")
+		}
+		client = main
+		usedMain = true
+		out, usage, streamErr = StreamAnswer(ctx, client, msgs, think, req.Plain, r.out(), r.errw())
+	}
 	if streamErr == nil && strings.TrimSpace(out) == "" {
 		out, usage, streamErr = StreamAnswer(ctx, client, []llm.Message{system, user}, think, req.Plain, r.out(), r.errw())
 	}
@@ -381,30 +409,35 @@ func (r *Runner) runAnswer(ctx context.Context, client *llm.Client, snap sysctx.
 		Steps:            1,
 		ModelTime:        modelTime,
 		PromptTokens:     usage.PromptTokens,
+		LastPromptTokens: usage.PromptTokens,
 		CompletionTokens: usage.CompletionTokens,
 		RouterTime:       routerTime,
 	}
 	if req.Trace {
-		agent.PrintTrace(r.errw(), 1, think, modelTime, usage.PromptTokens, usage.CompletionTokens, client.ContextWindow(), nil)
+		agent.PrintTrace(r.errw(), 1, think, modelTime, usage.PromptTokens, usage.CompletionTokens, main.ContextWindow(), nil)
 	}
 	agent.PrintSummary(r.errw(), string(dec.Intent), st)
 
+	ptok := 0
+	if usedMain {
+		ptok = usage.PromptTokens
+	}
 	if streamErr != nil {
 		if errors.Is(streamErr, context.Canceled) {
-			return 130, out, usage.PromptTokens
+			return 130, out, ptok, usedMain
 		}
 		if errors.Is(streamErr, agent.ErrContextOverflow) {
 			fmt.Fprintln(r.errw(), streamErr.Error())
-			return 1, out, usage.PromptTokens
+			return 1, out, ptok, usedMain
 		}
 		fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.Endpoint, streamErr, req.Trace))
-		return 1, out, usage.PromptTokens
+		return 1, out, ptok, usedMain
 	}
 	if strings.TrimSpace(out) == "" {
 		fmt.Fprintln(r.errw(), "konsolai: the model returned no answer")
-		return 1, out, usage.PromptTokens
+		return 1, out, ptok, usedMain
 	}
-	return 0, out, usage.PromptTokens
+	return 0, out, ptok, usedMain
 }
 
 func SanitizeAnswerHistory(hist []llm.Message) []llm.Message {
