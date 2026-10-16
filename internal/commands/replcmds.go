@@ -56,6 +56,23 @@ func runYes(ctx context.Context, env *Env, args []string) int {
 	return 0
 }
 
+func runThink(ctx context.Context, env *Env, args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(env.errw(), "usage: /think on|off|auto")
+		return 2
+	}
+	mode, ok := turn.ParseThinkMode(args[0])
+	if !ok {
+		fmt.Fprintln(env.errw(), "usage: /think on|off|auto")
+		return 2
+	}
+	if env.Runner != nil {
+		env.Runner.ThinkMode = mode
+	}
+	fmt.Fprintln(env.out(), "think "+strings.ToLower(args[0]))
+	return 0
+}
+
 func runTrace(ctx context.Context, env *Env, args []string) int {
 	on, ok := parseOnOff(args)
 	if !ok {
