@@ -11,6 +11,7 @@ import (
 )
 
 const PlanExportReject = "plan must produce the PDF/HTML with the export_doc tool (write Markdown first, then export_doc)"
+const PlanCommandReject = "list the exact command lines you will run; for a multi-line script, put the whole script as one command entry"
 
 type proposePlanTool struct {
 	docsTask bool
@@ -75,7 +76,26 @@ func (t *proposePlanTool) Prepare(rawArgs string) (Action, error) {
 	if t.docsTask && mentionsDocExport(t.request) && !mentionsExportDoc(args.Summary, args.Steps) {
 		return nil, errors.New(PlanExportReject)
 	}
+	for _, c := range args.Commands {
+		if placeholderCmd(c) {
+			return nil, errors.New(PlanCommandReject)
+		}
+	}
 	return &proposePlanAction{summary: args.Summary, steps: args.Steps, files: args.Files, commands: args.Commands}, nil
+}
+
+func placeholderCmd(s string) bool {
+	if strings.Contains(s, "(all") || strings.Contains(s, "…") || strings.Contains(s, "...") || strings.Contains(s, "<...>") {
+		return true
+	}
+	low := strings.ToLower(s)
+	for _, w := range strings.Fields(low) {
+		w = strings.Trim(w, ".,:;()[]")
+		if w == "listed" || w == "each" || w == "etc" {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *proposePlanAction) PlanFiles() []string    { return a.files }
