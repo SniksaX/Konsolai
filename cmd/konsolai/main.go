@@ -694,6 +694,7 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 	reg := tools.NewRegistry(sg, toolOut, lister, memory.NewWebCache(mem), memory.NewFactStore(mem, prof.Name, projectID, sessionID), tools.Options{
 		ReadOnlyShell: dec.Intent == intent.Lookup,
 		DocsTask:      dec.Task == intent.TaskDocs,
+		Request:       inv.Request,
 	})
 	cfg := agent.Config{
 		Client:         client,
