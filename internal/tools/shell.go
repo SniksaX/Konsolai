@@ -109,8 +109,13 @@ func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 	return &shellAction{cmd: args.Cmd, cwd: resolved, timeout: time.Duration(sec) * time.Second, out: t.out, kind: kind}, nil
 }
 
-func (a *shellAction) Summary() string     { return "run: " + a.cmd }
-func (a *shellAction) Preview() string     { return "" }
+func (a *shellAction) Summary() string { return "run: " + CommandHeadline(a.cmd) }
+func (a *shellAction) Preview() string {
+	if strings.Count(strings.TrimRight(a.cmd, "\n"), "\n") == 0 {
+		return ""
+	}
+	return a.cmd
+}
 func (a *shellAction) Kind() ActionKind    { return a.kind }
 func (a *shellAction) PlanCommand() string { return a.cmd }
 
@@ -167,11 +172,93 @@ func (a *shellAction) Run(ctx context.Context) (Result, error) {
 		}
 		code = ee.ExitCode()
 	}
+	if code == 141 {
+		if cut, ok := pipelineCutBy(a.cmd); ok {
+			return Result{
+				Output:  fmt.Sprintf("exit_code: 141\n%s", cap.String()),
+				IsError: false,
+				Meta:    fmt.Sprintf("exit 141 (output cut by %s)", cut),
+			}, nil
+		}
+	}
 	return Result{
 		Output:  fmt.Sprintf("exit_code: %d\n%s", code, cap.String()),
 		IsError: code != 0,
 		Meta:    fmt.Sprintf("exit %d", code),
 	}, nil
+}
+
+// CommandHeadline is the first line of cmd, plus "(+N lines)" when multi-line.
+func CommandHeadline(cmd string) string {
+	lines := strings.Split(strings.TrimRight(cmd, "\n"), "\n")
+	if len(lines) <= 1 {
+		return cmd
+	}
+	return lines[0] + fmt.Sprintf(" (+%d lines)", len(lines)-1)
+}
+
+func pipelineCutBy(cmd string) (string, bool) {
+	segs := safety.SplitSegments(cmd)
+	if len(segs) < 2 {
+		return "", false
+	}
+	last := strings.TrimSpace(segs[len(segs)-1])
+	bin := safety.SegmentBinary(last)
+	fields := strings.Fields(last)
+	switch bin {
+	case "head", "less":
+		return bin, true
+	case "tail":
+		if hasDashFlag(fields, "-n") {
+			return bin, true
+		}
+	case "grep":
+		if hasDashFlag(fields, "-m") {
+			return bin, true
+		}
+	case "sed":
+		if sedNPrint(fields) {
+			return bin, true
+		}
+	}
+	return "", false
+}
+
+func hasDashFlag(fields []string, flag string) bool {
+	for _, f := range fields {
+		if f == flag || strings.HasPrefix(f, flag) {
+			return true
+		}
+	}
+	return false
+}
+
+func sedNPrint(fields []string) bool {
+	sawN := false
+	for _, f := range fields[1:] {
+		if strings.HasPrefix(f, "-n") {
+			sawN = true
+			continue
+		}
+		if !sawN {
+			continue
+		}
+		t := strings.Trim(f, `'"`)
+		if len(t) < 2 || t[len(t)-1] != 'p' {
+			continue
+		}
+		ok := true
+		for _, c := range t[:len(t)-1] {
+			if c < '0' || c > '9' {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return true
+		}
+	}
+	return false
 }
 
 var exportBins = map[string]bool{
