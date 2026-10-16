@@ -206,6 +206,31 @@ func TestResolveFromBase(t *testing.T) {
 	}
 }
 
+func TestSetBase(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "sub")
+	if err := os.Mkdir(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+	g, err := NewAt(root, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.SetBase(sub); err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Base() != want {
+		t.Fatalf("base %q want %q", g.Base(), want)
+	}
+	if err := g.SetBase(t.TempDir()); err == nil {
+		t.Fatal("outside root: want error")
+	}
+}
+
 func TestNamedRoots(t *testing.T) {
 	home := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(home, "test"), 0755); err != nil {
