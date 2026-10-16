@@ -1,0 +1,66 @@
+package turn
+
+import (
+	"errors"
+	"net"
+	"net/url"
+	"strings"
+
+	"github.com/siraj/konsolai/internal/llm"
+)
+
+func ModelErrorLine(endpoint string, err error, trace bool) string {
+	if err == nil {
+		return "konsolai: unknown error"
+	}
+	if trace {
+		return "konsolai: " + err.Error()
+	}
+	host := EndpointHost(endpoint)
+	if errors.Is(err, llm.ErrIdleTimeout) {
+		return "konsolai: the model server stopped responding (" + host + "). Try again, or check the server."
+	}
+	if errors.Is(err, llm.ErrTruncated) {
+		return "konsolai: the model's answer was cut off; try a narrower request."
+	}
+	var he *llm.HTTPError
+	if errors.As(err, &he) && he.Status >= 400 && he.Status < 500 {
+		return "konsolai: the model server rejected the request: " + firstErrLine(he.Body)
+	}
+	if isDialErr(err) {
+		return "konsolai: cannot reach the model server at " + host + "."
+	}
+	return "konsolai: " + err.Error()
+}
+
+func EndpointHost(endpoint string) string {
+	u, err := url.Parse(endpoint)
+	if err == nil && u.Host != "" {
+		return u.Host
+	}
+	s := strings.TrimPrefix(strings.TrimPrefix(endpoint, "http://"), "https://")
+	if i := strings.IndexByte(s, '/'); i >= 0 {
+		s = s[:i]
+	}
+	if s == "" {
+		return "the model server"
+	}
+	return s
+}
+
+func firstErrLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
+}
+
+func isDialErr(err error) bool {
+	var op *net.OpError
+	if errors.As(err, &op) {
+		return true
+	}
+	s := err.Error()
+	return strings.Contains(s, "connection refused") || strings.Contains(s, "no such host") || strings.Contains(s, "dial tcp")
+}
