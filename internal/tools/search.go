@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -51,13 +52,14 @@ type searchArgs struct {
 }
 
 type searchAction struct {
-	guard   *safety.Guard
-	files   FileLister
-	re      *regexp.Regexp
-	prefix  string
-	glob    string
-	globRe  *regexp.Regexp
-	pattern string
+	guard    *safety.Guard
+	files    FileLister
+	re       *regexp.Regexp
+	prefix   string
+	glob     string
+	globRe   *regexp.Regexp
+	pattern  string
+	walkRoot string
 }
 
 func (t *searchTool) Prepare(rawArgs string) (Action, error) {
@@ -70,9 +72,22 @@ func (t *searchTool) Prepare(rawArgs string) (Action, error) {
 	if args.Pattern == "" {
 		return nil, errors.New("tools: search: pattern is required")
 	}
-	prefix, err := relPrefix(t.guard, args.Path)
-	if err != nil {
-		return nil, err
+	var prefix, walk string
+	if args.Path != "" {
+		abs, err := t.guard.ResolveReadDir(args.Path)
+		if err != nil {
+			return nil, err
+		}
+		if !t.guard.Contains(abs) {
+			walk = abs
+		}
+	}
+	if walk == "" {
+		var err error
+		prefix, err = relPrefix(t.guard, args.Path)
+		if err != nil {
+			return nil, err
+		}
 	}
 	pat := args.Pattern
 	if args.CaseInsensitive {
@@ -89,7 +104,7 @@ func (t *searchTool) Prepare(rawArgs string) (Action, error) {
 			return nil, fmt.Errorf("tools: search glob: %w", err)
 		}
 	}
-	return &searchAction{guard: t.guard, files: t.files, re: re, prefix: prefix, glob: args.Glob, globRe: globRe, pattern: args.Pattern}, nil
+	return &searchAction{guard: t.guard, files: t.files, re: re, prefix: prefix, glob: args.Glob, globRe: globRe, pattern: args.Pattern, walkRoot: walk}, nil
 }
 
 func (a *searchAction) Summary() string  { return "search " + a.pattern }
@@ -100,39 +115,63 @@ func (a *searchAction) Run(ctx context.Context) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
-	files, err := a.files(ctx)
-	if err != nil {
-		return Result{Output: err.Error(), IsError: true}, nil
-	}
 	var hits []string
 	total := 0
 	masked := 0
-	for _, rel := range files {
-		if err := ctx.Err(); err != nil {
-			return Result{}, err
+	searchOne := func(resolved, display, rel string) {
+		if safety.SensitiveRead(resolved) {
+			return
 		}
-		if !hasPathPrefix(rel, a.prefix) {
-			continue
-		}
-		if a.globRe != nil && !matchGlob(a.globRe, a.glob, rel) {
-			continue
-		}
-		resolved, err := a.guard.ResolveFromRoot(rel)
-		if err != nil {
-			continue
-		}
-		n, skip, err := searchFile(resolved, a.guard.Display(rel), rel, a.re, searchCap-len(hits))
-		if err != nil {
-			continue
-		}
-		if skip {
-			continue
+		n, skip, err := searchFile(resolved, display, rel, a.re, searchCap-len(hits))
+		if err != nil || skip {
+			return
 		}
 		total += n.count
 		masked += n.masked
 		hits = append(hits, n.lines...)
-		if len(hits) >= searchCap {
-			break
+	}
+	if a.walkRoot != "" {
+		_ = filepath.WalkDir(a.walkRoot, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if len(hits) >= searchCap {
+				return filepath.SkipAll
+			}
+			rel, _ := filepath.Rel(a.walkRoot, path)
+			rel = filepath.ToSlash(rel)
+			if a.globRe != nil && !matchGlob(a.globRe, a.glob, rel) {
+				return nil
+			}
+			searchOne(path, rel, rel)
+			return nil
+		})
+	} else {
+		files, err := a.files(ctx)
+		if err != nil {
+			return Result{Output: err.Error(), IsError: true}, nil
+		}
+		for _, rel := range files {
+			if err := ctx.Err(); err != nil {
+				return Result{}, err
+			}
+			if !hasPathPrefix(rel, a.prefix) {
+				continue
+			}
+			if a.globRe != nil && !matchGlob(a.globRe, a.glob, rel) {
+				continue
+			}
+			resolved, err := a.guard.ResolveFromRoot(rel)
+			if err != nil {
+				continue
+			}
+			searchOne(resolved, a.guard.Display(rel), rel)
+			if len(hits) >= searchCap {
+				break
+			}
 		}
 	}
 	more := total - len(hits)
