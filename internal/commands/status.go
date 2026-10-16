@@ -46,6 +46,28 @@ func runStatus(ctx context.Context, env *Env, _ []string) int {
 	} else {
 		fmt.Fprintln(env.out(), "context        unknown")
 	}
+	fastEp := env.Profile.FastEndpoint
+	fastReach, fastModel := modelsProbe(ctx, fastEp)
+	if env.Runner != nil && env.Runner.FastClient != nil {
+		if id, err := env.Runner.FastClient.ResolveModel(ctx); err == nil && id != "" {
+			fastModel = id
+		}
+	}
+	if env.Profile.FastModel != "" && fastModel == "" {
+		fastModel = env.Profile.FastModel
+	}
+	if fastModel == "" {
+		fastModel = "-"
+	}
+	fmt.Fprintf(env.out(), "fast_endpoint  %s  %s\n", turn.EndpointHost(fastEp), fastReach)
+	fmt.Fprintf(env.out(), "fast_model     %s\n", fastModel)
+	routing := "main"
+	if env.Runner != nil && env.Runner.RouterSource != "" {
+		routing = env.Runner.RouterSource
+	} else if strings.HasPrefix(fastReach, "ok") {
+		routing = "fast"
+	}
+	fmt.Fprintf(env.out(), "routing        %s\n", routing)
 	fmt.Fprintf(env.out(), "database       %s\n", dbStatus(ctx, env))
 	cwd := env.Cwd
 	if cwd == "" {
