@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -197,6 +198,9 @@ func (t *sessionTap) Message(ctx context.Context, m llm.Message) error {
 }
 
 func (t *sessionTap) Action(ctx context.Context, a agent.ActionRecord) error {
+	if a.Tool == "finish" && strings.TrimSpace(a.Output) != "" {
+		t.answer = a.Output
+	}
 	if t.inner != nil {
 		return t.inner.Action(ctx, a)
 	}
