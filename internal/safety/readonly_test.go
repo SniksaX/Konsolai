@@ -134,6 +134,14 @@ func TestIsReadOnlyCommand(t *testing.T) {
 		{"pip install x", false},
 		{"pnpm install", false},
 		{"", false},
+		{"true", true},
+		{"false", true},
+		{`test -e "$HOME/test"`, true},
+		{`[ -e "$HOME/test" ]`, true},
+		{`[[ -e "$HOME/test" ]]`, true},
+		{`if [ -e "$HOME/test" ]; then echo EXISTS; ls -la "$HOME/test"; else echo NO; fi`, true},
+		{`if [ -e "$HOME/test" ]; then rm -rf "$HOME/test"; else echo NO; fi`, false},
+		{`if [ -e x ]; then echo hi > out; fi`, false},
 	}
 	if len(cases) < 40 {
 		t.Fatalf("need at least 40 cases, have %d", len(cases))
