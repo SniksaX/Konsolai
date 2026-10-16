@@ -22,12 +22,14 @@ var (
 )
 
 const (
-	defaultEndpoint     = "http://fatboy:11436/v1"
-	defaultFastEndpoint = "http://fatboy:11435/v1"
-	defaultIdleMinutes  = 30
-	defaultRetention    = 90
-	defaultLLMIdle      = 120
-	builtinProfile      = "default"
+	defaultEndpoint       = "http://fatboy:11436/v1"
+	defaultFastEndpoint   = "http://fatboy:11435/v1"
+	defaultEmbedEndpoint  = "http://fatboy:9502"
+	defaultRerankEndpoint = "http://fatboy:9501"
+	defaultIdleMinutes    = 30
+	defaultRetention      = 90
+	defaultLLMIdle        = 120
+	builtinProfile        = "default"
 )
 
 type File struct {
@@ -48,6 +50,9 @@ type Profile struct {
 	BuildThinking         string   `json:"build_thinking"`
 	Languages             []string `json:"languages"`
 	DefaultLanguage       string   `json:"default_language"`
+	EmbedEndpoint         string   `json:"embed_endpoint"`
+	RerankEndpoint        string   `json:"rerank_endpoint"`
+	MemoryRAG             *bool    `json:"memory_rag"`
 }
 
 func DefaultPath() string {
@@ -114,6 +119,16 @@ func (f File) Resolve(name string) (Profile, error) {
 	if p.LLMIdleTimeoutSeconds == 0 {
 		p.LLMIdleTimeoutSeconds = defaultLLMIdle
 	}
+	if p.EmbedEndpoint == "" {
+		p.EmbedEndpoint = defaultEmbedEndpoint
+	}
+	if p.RerankEndpoint == "" {
+		p.RerankEndpoint = defaultRerankEndpoint
+	}
+	if p.MemoryRAG == nil {
+		on := true
+		p.MemoryRAG = &on
+	}
 	if v := os.Getenv("KONSOLAI_DATABASE_URL"); v != "" {
 		p.DatabaseURL = v
 	}
@@ -131,6 +146,12 @@ func (f File) Resolve(name string) (Profile, error) {
 	}
 	if v := os.Getenv("KONSOLAI_BUILD_THINKING"); v != "" {
 		p.BuildThinking = v
+	}
+	if v := os.Getenv("KONSOLAI_EMBED_ENDPOINT"); v != "" {
+		p.EmbedEndpoint = v
+	}
+	if v := os.Getenv("KONSOLAI_RERANK_ENDPOINT"); v != "" {
+		p.RerankEndpoint = v
 	}
 	if p.BuildThinking == "" {
 		p.BuildThinking = "plan_step"
@@ -158,6 +179,13 @@ func (f File) Resolve(name string) (Profile, error) {
 		p.DefaultLanguage = p.Languages[0]
 	}
 	return p, nil
+}
+
+func (p Profile) RAGEnabled() bool {
+	if p.MemoryRAG == nil {
+		return true
+	}
+	return *p.MemoryRAG
 }
 
 func langAllowed(code string, langs []string) bool {
