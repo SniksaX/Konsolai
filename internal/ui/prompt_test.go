@@ -99,6 +99,34 @@ func TestConfirmInvalidWarns(t *testing.T) {
 	}
 }
 
+func TestConfirmScriptGutter(t *testing.T) {
+	p, w, out := testPrompter(t)
+	done := make(chan Decision, 1)
+	go func() {
+		d, _, err := p.Confirm("run: echo a (+1 lines)", "echo a\necho b")
+		if err != nil {
+			t.Error(err)
+		}
+		done <- d
+	}()
+	waitPrompt(t, out, "echo a")
+	if _, err := w.Write([]byte("y\n")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case d := <-done:
+		if d != Approve {
+			t.Fatalf("%v", d)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout")
+	}
+	s := out.String()
+	if !strings.Contains(s, "1 ") || !strings.Contains(s, "2 ") || !strings.Contains(s, "echo b") {
+		t.Fatalf("gutter %q", s)
+	}
+}
+
 func waitPrompt(t *testing.T, out *bytes.Buffer, needle string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
