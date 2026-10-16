@@ -26,17 +26,19 @@ type Store struct {
 }
 
 type Session struct {
-	ID           string
-	Profile      string
-	ProjectID    *int64
-	CWD          string
-	Mode         string
-	Model        string
-	Title        string
-	Status       string
-	StartedAt    time.Time
-	LastActivity time.Time
-	EndedAt      *time.Time
+	ID             string
+	Profile        string
+	ProjectID      *int64
+	CWD            string
+	Mode           string
+	Model          string
+	Title          string
+	Status         string
+	StartedAt      time.Time
+	LastActivity   time.Time
+	EndedAt        *time.Time
+	CompactedUpto  *int
+	CompactSummary string
 }
 
 type NewSession struct {
@@ -331,6 +333,34 @@ func (s *Store) AppendMessage(ctx context.Context, sessionID string, seq int, m 
 		sessionID, seq, m.Role, content, nullableJSON(calls), toolCallID, tok, m.CWD)
 	if err != nil {
 		return fmt.Errorf("store: append message: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) SessionByID(ctx context.Context, id string) (Session, error) {
+	ctx, cancel := withTimeout(ctx)
+	defer cancel()
+	var sess Session
+	err := s.pool.QueryRow(ctx, `
+		SELECT id::text, profile, project_id, cwd, mode, model, title, status,
+		       started_at, last_activity_at, ended_at, compacted_upto, COALESCE(compact_summary, '')
+		FROM sessions WHERE id = $1::uuid`, id).Scan(
+		&sess.ID, &sess.Profile, &sess.ProjectID, &sess.CWD, &sess.Mode, &sess.Model, &sess.Title, &sess.Status,
+		&sess.StartedAt, &sess.LastActivity, &sess.EndedAt, &sess.CompactedUpto, &sess.CompactSummary)
+	if err != nil {
+		return Session{}, fmt.Errorf("store: session by id: %w", err)
+	}
+	return sess, nil
+}
+
+func (s *Store) SetCompact(ctx context.Context, id string, upto int, summary string) error {
+	ctx, cancel := withTimeout(ctx)
+	defer cancel()
+	_, err := s.pool.Exec(ctx, `
+		UPDATE sessions SET compacted_upto = $2, compact_summary = $3, last_activity_at = now()
+		WHERE id = $1::uuid`, id, upto, summary)
+	if err != nil {
+		return fmt.Errorf("store: set compact: %w", err)
 	}
 	return nil
 }
