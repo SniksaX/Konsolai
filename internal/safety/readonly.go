@@ -28,6 +28,9 @@ func IsReadOnlyCommand(cmd string) bool {
 	if hasBadRedirect(cmd) || hasBareAmpersand(cmd) || hasSubshellAssignment(cmd) {
 		return false
 	}
+	if isIfCommand(cmd) {
+		return ifReadOnly(cmd)
+	}
 	segs := SplitSegments(cmd)
 	if len(segs) == 0 {
 		return false
@@ -103,6 +106,14 @@ func isReadOnlySegment(seg string) bool {
 	cmd := filepath.Base(words[0])
 	args := words[1:]
 	switch cmd {
+	case "true", "false":
+		return true
+	case "test":
+		return true
+	case "[":
+		return words[len(words)-1] == "]"
+	case "[[":
+		return words[len(words)-1] == "]]"
 	case "ls", "pwd", "cat", "head", "tail", "wc", "file", "stat", "du", "df", "free",
 		"uname", "whoami", "id", "hostname", "date", "uptime", "which", "type",
 		"env", "printenv", "echo", "ps", "pgrep", "ss", "lsof", "ip", "dig", "nslookup",
@@ -295,6 +306,124 @@ func hasSubshellAssignment(s string) bool {
 		i = end
 	}
 	return false
+}
+
+func isIfCommand(cmd string) bool {
+	cmd = strings.TrimSpace(cmd)
+	return strings.HasPrefix(cmd, "if ") || strings.HasPrefix(cmd, "if\t")
+}
+
+func ifReadOnly(cmd string) bool {
+	parts, ok := splitIf(cmd)
+	if !ok {
+		return false
+	}
+	for _, p := range parts {
+		if !IsReadOnlyCommand(p) {
+			return false
+		}
+	}
+	return true
+}
+
+type shellWord struct {
+	word       string
+	start, end int
+}
+
+func tokenizeWords(s string) []shellWord {
+	var out []shellWord
+	var b strings.Builder
+	start := -1
+	var quote byte
+	flush := func(end int) {
+		if start < 0 {
+			return
+		}
+		out = append(out, shellWord{word: b.String(), start: start, end: end})
+		b.Reset()
+		start = -1
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if quote != 0 {
+			b.WriteByte(c)
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		if c == '\'' || c == '"' {
+			if start < 0 {
+				start = i
+			}
+			quote = c
+			b.WriteByte(c)
+			continue
+		}
+		if c == ' ' || c == '\t' || c == '\n' || c == ';' {
+			flush(i)
+			continue
+		}
+		if start < 0 {
+			start = i
+		}
+		b.WriteByte(c)
+	}
+	flush(len(s))
+	return out
+}
+
+func splitIf(cmd string) ([]string, bool) {
+	toks := tokenizeWords(cmd)
+	var parts []string
+	condStart, thenStart, elseStart := 0, 0, 0
+	stage := 0
+	for _, t := range toks {
+		switch t.word {
+		case "if":
+			if stage != 0 {
+				return nil, false
+			}
+			stage = 1
+			condStart = t.end
+		case "then":
+			if stage != 1 {
+				return nil, false
+			}
+			parts = append(parts, strings.TrimSpace(cmd[condStart:t.start]))
+			stage = 2
+			thenStart = t.end
+		case "else":
+			if stage != 2 {
+				return nil, false
+			}
+			parts = append(parts, strings.TrimSpace(cmd[thenStart:t.start]))
+			stage = 3
+			elseStart = t.end
+		case "elif":
+			return nil, false
+		case "fi":
+			switch stage {
+			case 2:
+				parts = append(parts, strings.TrimSpace(cmd[thenStart:t.start]))
+			case 3:
+				parts = append(parts, strings.TrimSpace(cmd[elseStart:t.start]))
+			default:
+				return nil, false
+			}
+			stage = 4
+		}
+	}
+	if stage != 4 {
+		return nil, false
+	}
+	for _, p := range parts {
+		if strings.TrimSpace(p) == "" {
+			return nil, false
+		}
+	}
+	return parts, true
 }
 
 func matchParen(s string, open int) int {
