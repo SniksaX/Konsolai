@@ -2287,3 +2287,53 @@ func TestExportDocUnknownContentRejected(t *testing.T) {
 		t.Fatalf("want unknown field reject, got %q", got.Content)
 	}
 }
+
+func TestFinishPicksLongerNarration(t *testing.T) {
+	long := "This narration is clearly longer than the finish summary."
+	var out bytes.Buffer
+	_, _, err := setupCfg(t, []llm.Message{
+		{Role: llm.RoleAssistant, Content: long, ToolCalls: []llm.ToolCall{call("1", "finish", `{"summary":"done"}`)}},
+	}, nil, Config{Out: &out, MaxSteps: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := out.String()
+	if !strings.Contains(s, long) {
+		t.Fatalf("want narration %q", s)
+	}
+	if strings.Contains(s, "done") {
+		t.Fatalf("short summary should not print %q", s)
+	}
+}
+
+func TestFinishPicksLongerSummary(t *testing.T) {
+	sum := "Finished the requested work successfully."
+	var out bytes.Buffer
+	_, _, err := setupCfg(t, []llm.Message{
+		{Role: llm.RoleAssistant, Content: "OK.", ToolCalls: []llm.ToolCall{call("1", "finish", `{"summary":"`+sum+`"}`)}},
+	}, nil, Config{Out: &out, MaxSteps: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := out.String()
+	if !strings.Contains(s, sum) {
+		t.Fatalf("want summary %q", s)
+	}
+	if strings.Contains(s, "OK.") {
+		t.Fatalf("short narration should not print %q", s)
+	}
+}
+
+func TestOnShellRemembersOutput(t *testing.T) {
+	var got string
+	_, _, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "run_shell", `{"cmd":"echo captured"}`)),
+		assistant(call("2", "finish", `{"summary":"ok"}`)),
+	}, nil, Config{OnShell: func(s string) { got = s }, MaxSteps: 6})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "captured") {
+		t.Fatalf("%q", got)
+	}
+}
