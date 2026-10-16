@@ -659,3 +659,60 @@ func TestTokensPerCharCalibration(t *testing.T) {
 		t.Fatalf("estimate %d want %d", c.EstimatePromptTokens(msgs, tools), want)
 	}
 }
+
+func TestFastClientOmitsThinkKwargs(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		_ = json.NewEncoder(w).Encode(completeResponse{
+			Choices: []struct {
+				Message Message `json:"message"`
+			}{{Message: Message{Role: RoleAssistant, Content: "ok"}}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	c := NewFast(srv.URL+"/v1", "mini")
+	if c.SendsThinkKwargs() {
+		t.Fatal("fast client must not send think kwargs")
+	}
+	_, _, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{Thinking: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(gotBody, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["chat_template_kwargs"]; ok {
+		t.Fatalf("fast client sent chat_template_kwargs: %s", raw["chat_template_kwargs"])
+	}
+}
+
+func TestReachableCache(t *testing.T) {
+	ResetReachCache()
+	t.Cleanup(ResetReachCache)
+	n := atomic.Int32{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n.Add(1)
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"id": "m"}}})
+	}))
+	t.Cleanup(srv.Close)
+	c := NewFast(srv.URL+"/v1", "")
+	if !c.Reachable(context.Background()) {
+		t.Fatal("want reachable")
+	}
+	if !c.Reachable(context.Background()) {
+		t.Fatal("cached")
+	}
+	if n.Load() != 1 {
+		t.Fatalf("probes %d want 1", n.Load())
+	}
+	down := NewFast("http://127.0.0.1:1/v1", "x")
+	if down.Reachable(context.Background()) {
+		t.Fatal("down endpoint")
+	}
+}
