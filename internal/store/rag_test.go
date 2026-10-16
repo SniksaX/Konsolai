@@ -117,9 +117,13 @@ func TestRAGUnavailableWithoutVector(t *testing.T) {
 	if s.RAGAvailable(ctx) {
 		t.Fatal("rag should be off")
 	}
-	_, err = s.pool.Exec(ctx, "SELECT 1 FROM memory_chunks")
-	if err == nil {
-		t.Fatal("memory_chunks should not exist")
+	var n int
+	err = s.pool.QueryRow(ctx, `
+		SELECT count(*) FROM pg_class c
+		JOIN pg_namespace ns ON ns.oid = c.relnamespace
+		WHERE c.relname = 'memory_chunks' AND ns.nspname = current_schema()`).Scan(&n)
+	if err != nil || n != 0 {
+		t.Fatalf("memory_chunks should not exist in the test schema: n=%d err=%v", n, err)
 	}
 	if _, err := s.UpsertProject(ctx, "/tmp/still-works", nil, nil); err != nil {
 		t.Fatalf("store should still work: %v", err)
