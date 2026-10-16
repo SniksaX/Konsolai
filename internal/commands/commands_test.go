@@ -272,7 +272,7 @@ func TestDispatchUnknownAndHelp(t *testing.T) {
 
 func TestSlashLines(t *testing.T) {
 	s := Default().SlashLines()
-	for _, want := range []string{"/help:", "/output:", "/status:", "/think:"} {
+	for _, want := range []string{"/help:", "/output:", "/status:", "/think:", "/cmd:"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %s in %q", want, s)
 		}
@@ -520,5 +520,28 @@ func TestOutputMissing(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "no shell output") {
 		t.Fatalf("%q", errb.String())
+	}
+}
+
+func TestRunCmd(t *testing.T) {
+	env, _, errb := testEnv(t)
+	if code := runCmd(context.Background(), env, nil); code != 2 {
+		t.Fatalf("no callback %d", code)
+	}
+	if !strings.Contains(errb.String(), "/cmd is only available") {
+		t.Fatalf("%q", errb.String())
+	}
+	toggled := false
+	env.OnCmd = func() int { toggled = true; return 0 }
+	if code := runCmd(context.Background(), env, nil); code != 0 || !toggled {
+		t.Fatal("toggle")
+	}
+	cleared := false
+	env.OnCmdClear = func() { cleared = true }
+	if code := runCmd(context.Background(), env, []string{"clear"}); code != 0 || !cleared {
+		t.Fatal("clear")
+	}
+	if code := runCmd(context.Background(), env, []string{"nope"}); code != 2 {
+		t.Fatalf("usage %d", code)
 	}
 }
