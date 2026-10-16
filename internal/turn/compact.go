@@ -36,8 +36,12 @@ func HistoryWithSummary(msgs []llm.Message, summary string, after int) []llm.Mes
 			rest = msgs[after:]
 		}
 	}
-	note := llm.Message{Role: llm.RoleUser, Content: "Summary of earlier conversation: " + summary}
-	return append([]llm.Message{note}, rest...)
+	note := "Summary of earlier conversation: " + summary
+	if len(rest) > 0 && rest[0].Role == llm.RoleUser {
+		rest[0].Content = note + "\n\n" + rest[0].Content
+		return rest
+	}
+	return append([]llm.Message{{Role: llm.RoleUser, Content: note}}, rest...)
 }
 
 func LoadCompacted(ctx context.Context, mem *memory.Guard, sessionID, profile, cwd string) []llm.Message {
