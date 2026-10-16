@@ -49,6 +49,7 @@ type Decision struct {
 	Effort           Effort `json:"effort"`
 	Task             Task   `json:"task"`
 	ContinuesSession int    `json:"continues_session"`
+	NeedsMemory      bool   `json:"needs_memory"`
 }
 
 func (d Decision) EffectiveEffort() Effort {
@@ -80,9 +81,10 @@ Acknowledgements and short reactions are ALWAYS intent answer, effort none, even
 task is "analysis" when the user asks to analyse, review or give an opinion on code; "docs" when they ask to generate documentation, READMEs, diagrams or reports about code; otherwise "other".
 continues_session: Pick the conversation this message follows up, or 0 if it starts a new topic. Prefer 0 when unsure.
 Prefer 0 (new topic) when the new request is a different task, even about the same project (e.g. a PDF overview after a README request).
+needs_memory=true when the message refers to past conversations or decisions: last time, we decided, earlier, remember when, la dernière fois, on avait dit.
 Never print a secret value in full. Refer to it by name and its first 4 characters.`
 
-var decisionSchema = json.RawMessage(`{"type":"object","properties":{"intent":{"type":"string","enum":["answer","lookup","act","build"]},"language":{"type":"string"},"reason":{"type":"string"},"reasoning":{"type":"boolean"},"effort":{"type":"string","enum":["none","low","high"]},"task":{"type":"string","enum":["analysis","docs","other"]},"continues_session":{"type":"integer"}},"required":["intent","language","reason","reasoning","effort","task","continues_session"],"additionalProperties":false}`)
+var decisionSchema = json.RawMessage(`{"type":"object","properties":{"intent":{"type":"string","enum":["answer","lookup","act","build"]},"language":{"type":"string"},"reason":{"type":"string"},"reasoning":{"type":"boolean"},"effort":{"type":"string","enum":["none","low","high"]},"task":{"type":"string","enum":["analysis","docs","other"]},"continues_session":{"type":"integer"},"needs_memory":{"type":"boolean"}},"required":["intent","language","reason","reasoning","effort","task","continues_session","needs_memory"],"additionalProperties":false}`)
 
 func Classify(ctx context.Context, client *llm.Client, request string, candidates []Candidate, inRepo bool) (Decision, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -215,6 +217,19 @@ func parseDecision(raw string) (Decision, bool) {
 		d.ContinuesSession = 0
 	}
 	return d, true
+}
+
+func LooksLikeMemory(s string) bool {
+	lower := strings.ToLower(s)
+	for _, p := range []string{
+		"last time", "we decided", "earlier", "remember when",
+		"la dernière fois", "on avait dit",
+	} {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func fallback(request string, inRepo bool) Decision {
