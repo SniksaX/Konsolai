@@ -60,9 +60,12 @@ func (t *outlineTool) Prepare(rawArgs string) (Action, error) {
 	if strings.TrimSpace(args.Path) == "" {
 		return nil, errors.New("tools: outline: path is required")
 	}
-	resolved, err := t.guard.ResolvePath(args.Path)
+	resolved, err := t.guard.ResolveReadDir(args.Path)
 	if err != nil {
 		return nil, err
+	}
+	if fi, err := os.Stat(resolved); err == nil && !fi.IsDir() && safety.SensitiveRead(resolved) {
+		return nil, safety.ErrSensitiveFile
 	}
 	return &outlineAction{guard: t.guard, files: t.files, path: resolved, display: args.Path}, nil
 }
@@ -80,6 +83,51 @@ func (a *outlineAction) Run(ctx context.Context) (Result, error) {
 		return Result{Output: err.Error(), IsError: true, Meta: err.Error()}, nil
 	}
 	var files []string
+	outside := !a.guard.Contains(a.path)
+	if fi.IsDir() && outside {
+		ents, err := os.ReadDir(a.path)
+		if err != nil {
+			return Result{Output: err.Error(), IsError: true}, nil
+		}
+		var b strings.Builder
+		decls := 0
+		for _, e := range ents {
+			if e.IsDir() {
+				continue
+			}
+			abs := filepath.Join(a.path, e.Name())
+			if safety.SensitiveRead(abs) {
+				continue
+			}
+			text, n := outlineFile(abs, e.Name())
+			decls += n
+			if text != "" {
+				if b.Len() > 0 {
+					b.WriteByte('\n')
+				}
+				b.WriteString(text)
+			}
+			if b.Len() >= outlineCap {
+				break
+			}
+		}
+		out := b.String()
+		if out == "" {
+			out = "(no declarations)"
+		}
+		return Result{Output: out, Meta: fmt.Sprintf("%d decls", decls)}, nil
+	}
+	if !fi.IsDir() && outside {
+		if safety.SensitiveRead(a.path) {
+			return Result{Output: safety.ErrSensitiveFile.Error(), IsError: true}, nil
+		}
+		text, n := outlineFile(a.path, a.display)
+		out := text
+		if out == "" {
+			out = "(no declarations)"
+		}
+		return Result{Output: out, Meta: fmt.Sprintf("%d decls", n)}, nil
+	}
 	if fi.IsDir() {
 		listed, err := a.files(ctx)
 		if err != nil {
@@ -114,8 +162,11 @@ func (a *outlineAction) Run(ctx context.Context) (Result, error) {
 		if err := ctx.Err(); err != nil {
 			return Result{}, err
 		}
-		abs, err := a.guard.ResolvePath(rel)
+		abs, err := a.guard.ResolveFromRoot(rel)
 		if err != nil {
+			continue
+		}
+		if safety.SensitiveRead(abs) {
 			continue
 		}
 		text, n := outlineFile(abs, rel)
