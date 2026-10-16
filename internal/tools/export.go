@@ -25,17 +25,15 @@ func (t *exportDocTool) Spec() llm.ToolSpec {
 		Type: "function",
 		Function: llm.FunctionSpec{
 			Name:        "export_doc",
-			Description: "Write an HTML or PDF document to path. Prefer this over write_file for rendered documents.",
-			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Output path relative to the current directory."},"format":{"type":"string","enum":["html","pdf"]},"title":{"type":"string"},"content":{"type":"string","description":"Markdown or HTML body."}},"required":["path","format","content"]}`),
+			Description: "Write an HTML or PDF document to path. Arguments are only path and format; it reads the Markdown file you already wrote.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Output path relative to the current directory."},"format":{"type":"string","enum":["html","pdf"]}},"required":["path","format"]}`),
 		},
 	}
 }
 
 type exportDocArgs struct {
-	Path    string `json:"path"`
-	Format  string `json:"format"`
-	Title   string `json:"title"`
-	Content string `json:"content"`
+	Path   string `json:"path"`
+	Format string `json:"format"`
 }
 
 type exportDocAction struct {
@@ -47,6 +45,17 @@ type exportDocAction struct {
 	existed  bool
 	oldBytes []byte
 	newBytes []byte
+}
+
+func markdownSource(output string) string {
+	stem := strings.TrimSuffix(output, filepath.Ext(output))
+	for _, ext := range []string{".md", ".markdown"} {
+		cand := stem + ext
+		if _, err := os.Stat(cand); err == nil {
+			return cand
+		}
+	}
+	return ""
 }
 
 func (t *exportDocTool) Prepare(rawArgs string) (Action, error) {
@@ -67,7 +76,16 @@ func (t *exportDocTool) Prepare(rawArgs string) (Action, error) {
 	if err != nil {
 		return nil, err
 	}
-	act := &exportDocAction{path: resolved, display: args.Path, format: format, title: args.Title, content: args.Content}
+	srcDisplay := strings.TrimSuffix(args.Path, filepath.Ext(args.Path)) + ".md"
+	srcResolved := markdownSource(resolved)
+	if srcResolved == "" {
+		return nil, fmt.Errorf("tools: export_doc: markdown source not found (write %s first)", srcDisplay)
+	}
+	body, err := os.ReadFile(srcResolved)
+	if err != nil {
+		return nil, fmt.Errorf("tools: export_doc: read markdown: %w", err)
+	}
+	act := &exportDocAction{path: resolved, display: args.Path, format: format, content: string(body)}
 	if b, err := os.ReadFile(resolved); err == nil {
 		act.existed = true
 		act.oldBytes = b
