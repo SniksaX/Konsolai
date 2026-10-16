@@ -16,6 +16,7 @@ import (
 
 	"github.com/siraj/konsolai/internal/llm"
 	"github.com/siraj/konsolai/internal/redact"
+	"github.com/siraj/konsolai/internal/safety"
 	"github.com/siraj/konsolai/internal/tools"
 	"github.com/siraj/konsolai/internal/ui"
 )
@@ -93,6 +94,7 @@ type Config struct {
 	Stats          *Stats
 	Plain          bool
 	OnShell        func(output string)
+	Guard          *safety.Guard
 }
 
 type Stats struct {
@@ -834,6 +836,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	planApproved := false
 	var planFiles []string
 	var planCmds []string
+	var planText string
 	explore := 0
 	noteSent := false
 	readonlyAfterNote := 0
@@ -1132,7 +1135,17 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 						outside = true
 					}
 				} else if c, ok := commandOf(action); ok {
-					if inPlanCmd(planCmds, c) {
+					okHit, hits := safety.MatchPlan(safety.Plan{Files: planFiles, Commands: planCmds, Text: planText}, c)
+					if cfg.Trace {
+						for _, h := range hits {
+							mark := "✗"
+							if h.OK {
+								mark = "✓"
+							}
+							fmt.Fprintln(cfg.Err, h.Rule+" "+mark)
+						}
+					}
+					if okHit {
 						inPlanHit = true
 					} else {
 						outside = true
@@ -1193,6 +1206,10 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 							planRejected = false
 							planFiles = planFilesOf(action)
 							planCmds = planCmdsOf(action)
+							planText = planTextOf(action)
+							if cfg.Guard != nil {
+								cfg.Guard.AllowPlanFiles(planFiles)
+							}
 						}
 					case ui.ApproveAll:
 						decision = "approved_all"
@@ -1205,6 +1222,10 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 							planRejected = false
 							planFiles = planFilesOf(action)
 							planCmds = planCmdsOf(action)
+							planText = planTextOf(action)
+							if cfg.Guard != nil {
+								cfg.Guard.AllowPlanFiles(planFiles)
+							}
 						}
 					}
 				}
@@ -1583,6 +1604,14 @@ func planCmdsOf(a tools.Action) []string {
 	return p.PlanCommands()
 }
 
+func planTextOf(a tools.Action) string {
+	type hasText interface{ PlanText() string }
+	if p, ok := a.(hasText); ok {
+		return p.PlanText()
+	}
+	return a.Summary() + "\n" + a.Preview()
+}
+
 func commandOf(a tools.Action) (string, bool) {
 	type hasCmd interface{ PlanCommand() string }
 	p, ok := a.(hasCmd)
@@ -1592,121 +1621,9 @@ func commandOf(a tools.Action) (string, bool) {
 	return p.PlanCommand(), true
 }
 
-func normCmd(s string) string {
-	return strings.Join(strings.Fields(s), " ")
-}
-
 func inPlanCmd(cmds []string, cmd string) bool {
-	if matchDeclared(cmds, cmd) {
-		return true
-	}
-	segs := splitPlanSegments(cmd)
-	if len(segs) == 0 {
-		return false
-	}
-	for _, s := range segs {
-		if !matchDeclared(cmds, s) {
-			return false
-		}
-	}
-	return true
-}
-
-func matchDeclared(cmds []string, cmd string) bool {
-	want := equivCmd(cmd)
-	for _, c := range cmds {
-		if equivCmd(c) == want {
-			return true
-		}
-	}
-	return false
-}
-
-func equivCmd(s string) string {
-	return stripLauncher(normCmd(s))
-}
-
-var launcherPrefixes = []string{
-	"npx -y ",
-	"npx ",
-	"pnpm exec ",
-	"pnpm dlx ",
-	"npm exec -- ",
-}
-
-var yarnCommands = map[string]bool{
-	"install": true, "add": true, "remove": true, "run": true, "init": true,
-	"test": true, "build": true, "start": true, "dev": true, "workspace": true,
-	"workspaces": true, "dlx": true, "exec": true, "create": true, "global": true,
-	"upgrade": true, "outdated": true, "why": true, "info": true, "config": true,
-	"cache": true, "help": true, "version": true, "publish": true, "link": true,
-	"unlink": true, "pack": true,
-}
-
-func stripLauncher(s string) string {
-	lower := strings.ToLower(s)
-	for _, p := range launcherPrefixes {
-		if strings.HasPrefix(lower, p) {
-			return strings.TrimSpace(s[len(p):])
-		}
-	}
-	if strings.HasPrefix(lower, "yarn ") {
-		rest := strings.TrimSpace(s[5:])
-		first := rest
-		if i := strings.IndexByte(rest, ' '); i >= 0 {
-			first = rest[:i]
-		}
-		if first != "" && !yarnCommands[strings.ToLower(first)] {
-			return rest
-		}
-	}
-	return s
-}
-
-func splitPlanSegments(cmd string) []string {
-	var segs []string
-	var b strings.Builder
-	var quote byte
-	flush := func() {
-		s := strings.TrimSpace(b.String())
-		b.Reset()
-		if s != "" {
-			segs = append(segs, s)
-		}
-	}
-	for i := 0; i < len(cmd); i++ {
-		c := cmd[i]
-		if quote != 0 {
-			b.WriteByte(c)
-			if c == quote {
-				quote = 0
-			}
-			continue
-		}
-		if c == '\'' || c == '"' {
-			quote = c
-			b.WriteByte(c)
-			continue
-		}
-		if c == '\\' && i+1 < len(cmd) {
-			b.WriteByte(c)
-			b.WriteByte(cmd[i+1])
-			i++
-			continue
-		}
-		if c == '\n' || c == '\r' || c == ';' {
-			flush()
-			continue
-		}
-		if c == '&' && i+1 < len(cmd) && cmd[i+1] == '&' {
-			flush()
-			i++
-			continue
-		}
-		b.WriteByte(c)
-	}
-	flush()
-	return segs
+	ok, _ := safety.MatchPlan(safety.Plan{Commands: cmds}, cmd)
+	return ok
 }
 
 func inPlan(files []string, path string) bool {
