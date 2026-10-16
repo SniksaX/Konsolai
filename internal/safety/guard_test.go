@@ -205,3 +205,64 @@ func TestResolveFromBase(t *testing.T) {
 		t.Fatalf("display outside base: %q", g.Display("sibling/x"))
 	}
 }
+
+func TestNamedRoots(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, "test"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	got := NamedRoots("create ~/test with folders", home)
+	if len(got) != 1 || got[0] != filepath.Join(home, "test") {
+		t.Fatalf("~/test %v", got)
+	}
+	if NamedRoots("look at ~ please", home) != nil {
+		t.Fatal("~ denied")
+	}
+	if NamedRoots("read ~/.ssh/id_rsa", home) != nil {
+		t.Fatal("~/.ssh denied")
+	}
+	if NamedRoots("cat /etc/passwd", home) != nil {
+		t.Fatal("/etc denied")
+	}
+	fresh := NamedRoots("mkdir ~/new/dir now", home)
+	if len(fresh) != 1 || fresh[0] != filepath.Join(home, "new", "dir") {
+		t.Fatalf("nonexistent %v", fresh)
+	}
+	if NamedRoots("use ~/test/../.ssh", home) != nil {
+		t.Fatal("../ trick")
+	}
+	if NamedRoots("use ~/foo/./bar", home) != nil {
+		t.Fatal("./ trick")
+	}
+}
+
+func TestResolveAllowedRoot(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	extra := filepath.Join(home, "test")
+	if err := os.MkdirAll(extra, 0755); err != nil {
+		t.Fatal(err)
+	}
+	g, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.AllowRoots([]string{extra})
+	got, err := g.ResolvePath(extra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(extra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+	if _, err := g.ResolvePath("/etc"); err == nil {
+		t.Fatal("want /etc denied")
+	}
+}
