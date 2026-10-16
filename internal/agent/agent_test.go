@@ -274,6 +274,9 @@ func setupCfg(t *testing.T, replies []llm.Message, confirm Confirmer, extra Conf
 		confirm = stubConfirm{d: ui.Approve}
 	}
 	extra.Client = client
+	if extra.Guard == nil {
+		extra.Guard = g
+	}
 	if extra.Tools == nil {
 		extra.Tools = tools.NewRegistry(g, io.Discard, nil, nil, nil)
 	}
@@ -1083,8 +1086,8 @@ func TestInPlanCmdSegments(t *testing.T) {
 	if inPlanCmd(cmds, `echo "npm init -y && npm install express"`) {
 		t.Fatal("quoted && must not split into declared segments")
 	}
-	if inPlanCmd([]string{"ss -ltnp", "grep 80"}, "ss -ltnp | grep 80") {
-		t.Fatal("pipeline must not split")
+	if !inPlanCmd([]string{"ss -ltnp", "grep 80"}, "ss -ltnp | grep 80") {
+		t.Fatal("read-only pipeline is in plan (R1)")
 	}
 	if !inPlanCmd([]string{"ss -ltnp | grep 80"}, "ss -ltnp | grep 80") {
 		t.Fatal("declared pipeline should match")
@@ -1172,6 +1175,45 @@ func TestInPlanMultilineCommand(t *testing.T) {
 	}
 	if !inPlanCmd([]string{"cat <<'EOF'\nhello\nEOF"}, "cat <<'EOF'  hello  EOF") {
 		t.Fatal("whitespace-normalized multiline")
+	}
+}
+
+func TestPlanMatchTraceRules(t *testing.T) {
+	var errW strings.Builder
+	_, _, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "propose_plan", `{"summary":"skeleton","steps":["mkdir","touch"],"files":["src/a/.gitkeep","src/b/.gitkeep"]}`)),
+		assistant(call("2", "run_shell", `{"cmd":"mkdir -p src/a src/b && touch src/a/.gitkeep src/b/.gitkeep"}`)),
+		assistant(call("3", "finish", `{"summary":"done"}`)),
+	}, stubConfirm{d: ui.Approve}, Config{RequirePlan: true, Trace: true, Err: &errW})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := errW.String()
+	if !strings.Contains(s, "R3 mkdir") || !strings.Contains(s, "✓") {
+		t.Fatalf("trace %q", s)
+	}
+}
+
+func TestPlanAuthorizesLocalBinWrite(t *testing.T) {
+	rel := "~/.local/bin/konsolai-agent-plan-auth-test"
+	abs := filepath.Join(os.Getenv("HOME"), ".local", "bin", "konsolai-agent-plan-auth-test")
+	defer os.Remove(abs)
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "propose_plan", `{"summary":"bin","steps":["write"],"files":["`+rel+`"]}`)),
+		assistant(call("2", "write_file", `{"path":"`+rel+`","content":"ok"}`)),
+		assistant(call("3", "finish", `{"summary":"done"}`)),
+	}, stubConfirm{d: ui.Approve}, Config{RequirePlan: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep.mu.Lock()
+	defer rep.mu.Unlock()
+	for _, msgs := range rep.reqs {
+		for _, m := range msgs {
+			if m.Role == llm.RoleTool && strings.Contains(m.Content, "escape") {
+				t.Fatalf("plan write escaped: %s", m.Content)
+			}
+		}
 	}
 }
 
