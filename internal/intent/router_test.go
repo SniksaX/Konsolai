@@ -88,6 +88,9 @@ func TestClassifySchemaAndRecent(t *testing.T) {
 	if _, ok := wrap.JSONSchema.Schema.Properties["continues_session"]; !ok {
 		t.Fatal("schema missing continues_session")
 	}
+	if _, ok := wrap.JSONSchema.Schema.Properties["effort"]; !ok {
+		t.Fatal("schema missing effort")
+	}
 	if _, ok := wrap.JSONSchema.Schema.Properties["continues_previous"]; ok {
 		t.Fatal("continues_previous should be gone")
 	}
@@ -105,8 +108,20 @@ func TestClassifySchemaAndRecent(t *testing.T) {
 			contReq = true
 		}
 	}
-	if !found || !taskReq || !contReq {
+	effortReq := false
+	for _, r := range wrap.JSONSchema.Schema.Required {
+		if r == "effort" {
+			effortReq = true
+		}
+	}
+	if !found || !taskReq || !contReq || !effortReq {
 		t.Fatalf("required %v", wrap.JSONSchema.Schema.Required)
+	}
+	if !strings.Contains(joined, `effort is required`) || !strings.Contains(joined, "okey good") {
+		t.Fatal("router prompt missing effort rule")
+	}
+	if !strings.Contains(joined, "ALWAYS intent answer, effort none") {
+		t.Fatal("router prompt missing acknowledgement rule")
 	}
 	if !strings.Contains(joined, `task is "analysis"`) || !strings.Contains(joined, `"docs"`) {
 		t.Fatal("router prompt missing task rule")
@@ -214,6 +229,55 @@ func TestClassifyFallbackOnError(t *testing.T) {
 	}
 	if d.Intent != Lookup || d.ContinuesSession != 0 {
 		t.Fatalf("fallback %+v", d)
+	}
+}
+
+func TestExtractFirstJSON(t *testing.T) {
+	got := extractFirstJSON("Sure.\n{\"intent\":\"answer\",\"effort\":\"none\",\"language\":\"en\",\"reason\":\"hi\",\"reasoning\":false,\"task\":\"other\",\"continues_session\":0}\nThanks")
+	d, ok := parseDecision(got)
+	if !ok || d.Intent != Answer || d.Effort != EffortNone {
+		t.Fatalf("%+v %v %q", d, ok, got)
+	}
+	if extractFirstJSON("no object here") != "" {
+		t.Fatal("want empty")
+	}
+}
+
+func TestAckAfterActRoutesAnswerNone(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]any{
+				"role": "assistant", "content": `Here you go: {"intent":"answer","language":"en","reason":"ack","reasoning":false,"effort":"none","task":"other","continues_session":1}`,
+			}}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	c := llm.New(srv.URL+"/v1", "qwen")
+	cands := []Candidate{{Title: "create folders", LastUser: "mkdir a b", Age: time.Minute}}
+	d, err := Classify(context.Background(), c, "okey good", cands, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Intent != Answer || d.Effort != EffortNone {
+		t.Fatalf("ack after act %+v", d)
+	}
+}
+
+func TestEffortMapping(t *testing.T) {
+	if (Decision{Effort: EffortNone}).EffectiveEffort() != EffortNone {
+		t.Fatal("none")
+	}
+	if (Decision{Effort: EffortLow}).EffectiveEffort() != EffortLow {
+		t.Fatal("low")
+	}
+	if (Decision{Effort: EffortHigh}).EffectiveEffort() != EffortHigh {
+		t.Fatal("high")
+	}
+	if (Decision{Reasoning: true}).EffectiveEffort() != EffortHigh {
+		t.Fatal("reason -> high")
+	}
+	if (Decision{}).EffectiveEffort() != EffortLow {
+		t.Fatal("default low")
 	}
 }
 
