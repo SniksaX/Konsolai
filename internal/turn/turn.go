@@ -54,6 +54,11 @@ type Runner struct {
 	LastWindow       int
 	SlashHelp        string
 	shellOut         []string
+	lastCode         int
+	lastIntent       intent.Intent
+	lastLang         string
+	lastEffort       intent.Effort
+	lastTask         intent.Task
 }
 
 type Request struct {
