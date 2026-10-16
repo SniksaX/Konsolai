@@ -2174,6 +2174,49 @@ func specNames(specs []llm.ToolSpec) []string {
 	return out
 }
 
+type seqConfirm struct {
+	ds []ui.Decision
+	i  int
+}
+
+func (s *seqConfirm) next() ui.Decision {
+	d := s.ds[s.i]
+	if s.i < len(s.ds)-1 {
+		s.i++
+	}
+	return d
+}
+
+func (s *seqConfirm) Confirm(string, string) (ui.Decision, string, error) {
+	return s.next(), "no", nil
+}
+func (s *seqConfirm) ConfirmForced(string, string) (ui.Decision, string, error) {
+	return s.next(), "no", nil
+}
+
+func TestRejectedPlanThinksOnNext(t *testing.T) {
+	conf := &seqConfirm{ds: []ui.Decision{ui.Reject, ui.Approve}}
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "list_dir", `{"path":"."}`)),
+		assistant(call("2", "propose_plan", `{"summary":"a","steps":["w"],"files":["a.txt"]}`)),
+		assistant(call("2b", "propose_plan", `{"summary":"a","steps":["w"],"files":["a.txt"]}`)),
+		assistant(call("3", "propose_plan", `{"summary":"a","steps":["w"],"files":["a.txt"]}`)),
+		assistant(call("4", "finish", `{"summary":"done"}`)),
+	}, conf, Config{RequirePlan: true, ThinkingPolicy: ThinkPlanStep, MaxSteps: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []bool{false, false, true, true, false}
+	if len(rep.think) != len(want) {
+		t.Fatalf("think %v want %v", rep.think, want)
+	}
+	for i, g := range rep.think {
+		if g != want[i] {
+			t.Fatalf("think[%d]=%v want %v (%v)", i, g, want[i], rep.think)
+		}
+	}
+}
+
 func TestPlanStepInvalidPlanNoRetry(t *testing.T) {
 	_, rep, err := setupCfg(t, []llm.Message{
 		assistant(call("1", "propose_plan", `{"summary":"x"}`)),
