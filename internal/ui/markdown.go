@@ -62,6 +62,7 @@ func (r *Renderer) Flush() error {
 			body += string(r.buf)
 			r.buf = nil
 		}
+		body = stripLenientCloser(body, r.fenceChar, r.fenceN)
 		if err := r.emitFence(r.fenceLang, body); err != nil {
 			return err
 		}
@@ -145,6 +146,44 @@ func parseOpenFence(s string) (char byte, n int, lang string, ok bool) {
 		lang = info[:j]
 	}
 	return char, n, lang, true
+}
+
+func stripLenientCloser(body string, char byte, n int) string {
+	if n <= 3 || body == "" {
+		return body
+	}
+	body = strings.TrimRight(body, "\n")
+	i := strings.LastIndexByte(body, '\n')
+	last := body
+	head := ""
+	if i >= 0 {
+		head = body[:i]
+		last = body[i+1:]
+	}
+	if isLenientClose(last, char, n) {
+		return strings.TrimRight(head, "\n")
+	}
+	return body
+}
+
+func isLenientClose(s string, char byte, n int) bool {
+	if n <= 3 {
+		return false
+	}
+	s = strings.TrimRight(s, "\r")
+	i := 0
+	for i < len(s) && i < 3 && s[i] == ' ' {
+		i++
+	}
+	start := i
+	for i < len(s) && s[i] == char {
+		i++
+	}
+	count := i - start
+	if count < 3 || count >= n {
+		return false
+	}
+	return strings.TrimSpace(s[i:]) == ""
 }
 
 func isCloseFence(s string, char byte, n int) bool {
