@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -52,11 +53,14 @@ type CodeChunk struct {
 }
 
 type IndexStats struct {
-	Indexed   int
-	Chunks    int
-	Unchanged int
-	Deleted   int
-	Duration  time.Duration
+	Indexed    int
+	Chunks     int
+	Unchanged  int
+	Deleted    int
+	Considered int
+	Failed     int
+	LastError  error
+	Duration   time.Duration
 }
 
 func Index(ctx context.Context, st IndexBackend, emb Embedder, profile string, projectID int64, root, filter string, progress func(done, total int)) (IndexStats, error) {
@@ -81,6 +85,7 @@ func Index(ctx context.Context, st IndexBackend, emb Embedder, profile string, p
 		}
 		todo = append(todo, rel)
 	}
+	stats.Considered = len(todo)
 	seen := map[string]struct{}{}
 	for i, rel := range todo {
 		if progress != nil {
@@ -115,6 +120,8 @@ func Index(ctx context.Context, st IndexBackend, emb Embedder, profile string, p
 		}
 		chunks := ChunkFile(rel, string(body))
 		if err := st.DeleteCodeChunks(ctx, projectID, rel); err != nil {
+			stats.Failed++
+			stats.LastError = err
 			continue
 		}
 		texts := make([]string, len(chunks))
@@ -122,7 +129,14 @@ func Index(ctx context.Context, st IndexBackend, emb Embedder, profile string, p
 			texts[i] = c.Content
 		}
 		vecs, err := emb.Embed(ctx, texts)
-		if err != nil || len(vecs) != len(chunks) {
+		if err != nil {
+			stats.Failed++
+			stats.LastError = err
+			continue
+		}
+		if len(vecs) != len(chunks) {
+			stats.Failed++
+			stats.LastError = fmt.Errorf("embed: got %d vectors for %d chunks", len(vecs), len(chunks))
 			continue
 		}
 		n := 0
