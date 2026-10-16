@@ -96,6 +96,32 @@ func TestMarkdownUnterminatedFenceFlush(t *testing.T) {
 	}
 }
 
+func TestMarkdownCollapsesBlankRuns(t *testing.T) {
+	restore := ForceTheme(Palette{})
+	defer restore()
+	var buf bytes.Buffer
+	r := NewRenderer(&buf, false)
+	_, _ = r.Write([]byte("a\n\n\n\nb\n"))
+	_ = r.Flush()
+	if strings.Contains(buf.String(), "a\n\n\nb") {
+		t.Fatalf("kept extra blanks: %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "a\n\nb") {
+		t.Fatalf("want one blank: %q", buf.String())
+	}
+}
+
+func TestCollapseBlankLinesKeepsFences(t *testing.T) {
+	in := "a\n\n\nb\n```\n\n\nx\n```\n"
+	got := CollapseBlankLines(in)
+	if strings.Count(got, "\n\n\n") != 1 {
+		t.Fatalf("fence blanks: %q", got)
+	}
+	if !strings.Contains(got, "a\n\nb\n") {
+		t.Fatalf("prose: %q", got)
+	}
+}
+
 func TestMarkdownPlainPassthrough(t *testing.T) {
 	var buf bytes.Buffer
 	r := NewRenderer(&buf, true)
