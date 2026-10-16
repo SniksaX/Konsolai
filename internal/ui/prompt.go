@@ -85,27 +85,37 @@ func (p *Prompter) confirm(summary, preview string, force bool) (Decision, strin
 	}
 	w := p.writer()
 	p.drain()
+	BeforeOutput()
 	for {
+		fmt.Fprintln(w)
 		fmt.Fprintln(w, Current().Strong(summary))
 		if preview != "" {
+			body := preview
 			if isDiffPreview(preview) {
-				fmt.Fprintln(w, ColorDiff(preview))
+				body = ColorDiff(preview)
+				if !strings.HasSuffix(body, "\n") {
+					body += "\n"
+				}
 			} else {
-				fmt.Fprint(w, Numbered(preview))
+				body = Numbered(preview)
 			}
+			fmt.Fprint(w, Indent(body, 4))
 		}
-		fmt.Fprint(w, PromptOptions())
+		fmt.Fprintln(w, PromptOptions())
 		line, err := p.in.ReadString('\n')
 		if err != nil {
 			return 0, "", fmt.Errorf("ui: read prompt: %w", err)
 		}
 		switch strings.ToLower(strings.TrimSpace(line)) {
 		case "y", "yes":
+			fmt.Fprintln(w)
 			return Approve, "", nil
 		case "a", "all":
 			p.approveAll = true
+			fmt.Fprintln(w)
 			return ApproveAll, "", nil
 		case "q", "quit":
+			fmt.Fprintln(w)
 			return Quit, "", nil
 		case "n", "no":
 			fmt.Fprint(w, "reason (optional): ")
@@ -113,6 +123,7 @@ func (p *Prompter) confirm(summary, preview string, force bool) (Decision, strin
 			if err != nil {
 				return 0, "", fmt.Errorf("ui: read reason: %w", err)
 			}
+			fmt.Fprintln(w)
 			return Reject, strings.TrimSpace(reason), nil
 		default:
 			fmt.Fprintln(w, Current().Warn("answer y, n, a or q"))
