@@ -217,6 +217,68 @@ func TestShellRunningSpinner(t *testing.T) {
 	}
 }
 
+func TestShellSpinnerClearedBeforeOutput(t *testing.T) {
+	var buf bytes.Buffer
+	restore := ui.TestHook(&buf, true, time.Millisecond, nil)
+	defer restore()
+	old := shellQuietFor
+	shellQuietFor = 5 * time.Millisecond
+	defer func() { shellQuietFor = old }()
+	g, err := safety.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	act, err := newShell(g, &buf, false, false).Prepare(`{"cmd":"sleep 0.04; printf 'hello\nworld\n'"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := act.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+	for _, line := range committedShellLines(buf.String()) {
+		for _, f := range frames {
+			if strings.HasPrefix(strings.TrimLeft(line, " "), f) {
+				t.Fatalf("output line starts with spinner frame %q: %q (raw %q)", f, line, buf.String())
+			}
+		}
+	}
+}
+
+func committedShellLines(s string) []string {
+	var cur []byte
+	var lines []string
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\033' {
+			j := i + 1
+			for j < len(s) && (s[j] < 'A' || s[j] > 'Z') && (s[j] < 'a' || s[j] > 'z') {
+				j++
+			}
+			if j < len(s) && s[j] == 'K' {
+				cur = cur[:0]
+			}
+			if j < len(s) {
+				i = j
+			}
+			continue
+		}
+		if s[i] == '\r' {
+			cur = cur[:0]
+			continue
+		}
+		if s[i] == '\n' {
+			lines = append(lines, string(cur))
+			cur = cur[:0]
+			continue
+		}
+		cur = append(cur, s[i])
+	}
+	if len(cur) > 0 {
+		lines = append(lines, string(cur))
+	}
+	return lines
+}
+
 func TestCommandHeadlineAndPreview(t *testing.T) {
 	if CommandHeadline("echo hi") != "echo hi" {
 		t.Fatalf("%q", CommandHeadline("echo hi"))
