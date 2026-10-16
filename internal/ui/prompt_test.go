@@ -125,6 +125,37 @@ func TestConfirmScriptGutter(t *testing.T) {
 	if !strings.Contains(s, "1 ") || !strings.Contains(s, "2 ") || !strings.Contains(s, "echo b") {
 		t.Fatalf("gutter %q", s)
 	}
+	if !strings.Contains(s, "    1 ") {
+		t.Fatalf("preview not indented: %q", s)
+	}
+}
+
+func TestConfirmPlanNoDoubleNumbers(t *testing.T) {
+	p, w, out := testPrompter(t)
+	done := make(chan Decision, 1)
+	go func() {
+		d, _, err := p.Confirm("plan", "1. mkdir a\n2. touch b")
+		if err != nil {
+			t.Error(err)
+		}
+		done <- d
+	}()
+	waitPrompt(t, out, "1. mkdir a")
+	if _, err := w.Write([]byte("y\n")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case d := <-done:
+		if d != Approve {
+			t.Fatalf("%v", d)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout")
+	}
+	s := out.String()
+	if strings.Contains(s, "1 1.") {
+		t.Fatalf("duplicated numbers: %q", s)
+	}
 }
 
 func waitPrompt(t *testing.T, out *bytes.Buffer, needle string) {
