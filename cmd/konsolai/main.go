@@ -260,11 +260,13 @@ func run() int {
 		SlashHelp:  commands.Default().SlashLines(),
 	}
 	isRepl := inv.Slash == "" && inv.Cmd == cmdRequest && strings.TrimSpace(inv.Request) == "" && stdinIsTTY() && stdoutIsTTY()
+	var emb *embed.Client
 	if st != nil && prof.RAGEnabled() {
 		if !st.RAGAvailable(ctx) {
 			fmt.Fprintln(os.Stderr, ui.Current().Warn("rag unavailable"))
 		} else {
-			ing := rag.New(st, embed.New(prof.EmbedEndpoint, prof.RerankEndpoint), prof.Name)
+			emb = embed.New(prof.EmbedEndpoint, prof.RerankEndpoint)
+			ing := rag.New(st, emb, prof.Name)
 			runner.Ingest = ing
 			if isRepl {
 				ing.Start()
@@ -281,7 +283,7 @@ func run() int {
 	}
 
 	if isRepl {
-		env := commandEnv(runner, mem, prof, cwd, projectID, inv)
+		env := commandEnv(runner, mem, prof, cwd, projectID, inv, emb)
 		env.InRepl = true
 		model := prof.Model
 		if id, err := client.ResolveModel(ctx); err == nil && id != "" {
@@ -295,7 +297,7 @@ func run() int {
 	}
 
 	if inv.Slash != "" || inv.Cmd != cmdRequest {
-		env := commandEnv(runner, mem, prof, cwd, projectID, inv)
+		env := commandEnv(runner, mem, prof, cwd, projectID, inv, emb)
 		name, args := inv.Slash, inv.SlashArgs[:inv.SlashN]
 		if inv.Slash == "" {
 			name, args = bareCommand(inv)
@@ -320,17 +322,19 @@ func run() int {
 	return res.ExitCode
 }
 
-func commandEnv(runner *turn.Runner, mem *memory.Guard, prof config.Profile, cwd string, projectID *int64, inv invocation) *commands.Env {
+func commandEnv(runner *turn.Runner, mem *memory.Guard, prof config.Profile, cwd string, projectID *int64, inv invocation, emb *embed.Client) *commands.Env {
 	return &commands.Env{
-		Runner:  runner,
-		Mem:     mem,
-		Profile: prof,
-		Out:     os.Stdout,
-		Err:     os.Stderr,
-		Cwd:     cwd,
-		Yes:     inv.Yes,
-		Version: version,
-		Plain:   inv.Plain,
+		Runner:    runner,
+		Mem:       mem,
+		Profile:   prof,
+		Out:       os.Stdout,
+		Err:       os.Stderr,
+		Cwd:       cwd,
+		Yes:       inv.Yes,
+		Version:   version,
+		Plain:     inv.Plain,
+		Embed:     emb,
+		ProjectID: projectID,
 		Undo: func(ctx context.Context) int {
 			return runUndo(ctx, mem, projectID, cwd, inv.Yes)
 		},
