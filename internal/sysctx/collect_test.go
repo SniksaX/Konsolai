@@ -42,4 +42,9 @@ func TestLocationLine(t *testing.T) {
 	if !strings.Contains(full, "you are in svc/") {
 		t.Fatalf("string missing location: %q", full)
 	}
+	s.Pkg = PkgInfo{Family: "Arch", System: "pacman", AUR: "yay"}
+	full = s.String()
+	if !strings.Contains(full, "Package manager: pacman (Arch family); AUR helper: yay.") {
+		t.Fatalf("pkg line: %q", full)
+	}
 }
