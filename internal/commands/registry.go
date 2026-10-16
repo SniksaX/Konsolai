@@ -10,6 +10,7 @@ import (
 	"github.com/siraj/konsolai/internal/agent"
 	"github.com/siraj/konsolai/internal/clip"
 	"github.com/siraj/konsolai/internal/config"
+	"github.com/siraj/konsolai/internal/embed"
 	"github.com/siraj/konsolai/internal/memory"
 	"github.com/siraj/konsolai/internal/turn"
 	"github.com/siraj/konsolai/internal/ui"
@@ -53,6 +54,8 @@ type Env struct {
 	OnExit       func() int
 	OnCmd        func() int
 	OnCmdClear   func()
+	Embed        *embed.Client
+	ProjectID    *int64
 }
 
 func (e *Env) out() io.Writer {
@@ -231,6 +234,7 @@ func Default() *Registry {
 		Command{Name: "run", Usage: "run [k]", Summary: "Run a bash/sh block from the last answer", Run: runRun},
 		Command{Name: "output", Usage: "output [n]", Summary: "Reprint the full output of a recent command", Run: runOutput},
 		Command{Name: "status", Usage: "status", Summary: "Show version, model, database and environment", Run: runStatus},
+		Command{Name: "index", Usage: "index [path]|status|clear", Summary: "Index the project for recall", Run: runIndex},
 		Command{Name: "remember", Usage: "remember [--project] \"<fact>\"", Summary: "Store a fact", Run: runRemember},
 		Command{Name: "facts", Usage: "facts", Summary: "List remembered facts", Run: runFacts},
 		Command{Name: "forget", Usage: "forget user|project <id>", Summary: "Delete a fact", Run: runForget},
