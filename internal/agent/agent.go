@@ -549,7 +549,11 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		if len(msg.ToolCalls) == 0 {
 			if cfg.Task == "docs" && planApproved && !wroteFile && !exportedDoc && !docsNudged {
 				docsNudged = true
-				nudge := llm.Message{Role: llm.RoleUser, Content: DocsFileNote}
+				note := DocsFileNote
+				if wantsDocExport(task, planFiles) {
+					note = DocsExportNote
+				}
+				nudge := llm.Message{Role: llm.RoleUser, Content: note}
 				msgs = append(msgs, nudge)
 				_ = rec.Message(ctx, nudge)
 				continue
@@ -899,6 +903,19 @@ func filePathOf(a tools.Action) (string, bool) {
 		return "", false
 	}
 	return p.FilePath(), true
+}
+
+func wantsDocExport(request string, files []string) bool {
+	if strings.Contains(strings.ToLower(request), ".pdf") || strings.Contains(strings.ToLower(request), ".html") {
+		return true
+	}
+	for _, f := range files {
+		fl := strings.ToLower(f)
+		if strings.Contains(fl, ".pdf") || strings.Contains(fl, ".html") {
+			return true
+		}
+	}
+	return false
 }
 
 func planFilesOf(a tools.Action) []string {
