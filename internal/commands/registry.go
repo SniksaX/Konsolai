@@ -209,6 +209,7 @@ func Default() *Registry {
 		Command{Name: "cd", Usage: "cd <dir>", Summary: "Change the working directory", ReplOnly: true, Run: runCD},
 		Command{Name: "yes", Usage: "yes on|off", Summary: "Auto-approve for this REPL session", ReplOnly: true, Run: runYes},
 		Command{Name: "trace", Usage: "trace on|off", Summary: "Toggle per-call traces", ReplOnly: true, Run: runTrace},
+		Command{Name: "think", Usage: "think on|off|auto", Summary: "Override thinking for this session", ReplOnly: true, Run: runThink},
 		Command{Name: "model", Usage: "model", Summary: "Show model, window and endpoint", ReplOnly: true, Run: runModel},
 		Command{Name: "compact", Usage: "compact", Summary: "Summarize earlier messages in this session", ReplOnly: true, Run: runCompact},
 		Command{Name: "undo", Usage: "undo", Summary: "Restore files changed in recent sessions", Run: runUndo},
