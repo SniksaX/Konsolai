@@ -22,11 +22,18 @@ func runStatus(ctx context.Context, env *Env, _ []string) int {
 	fmt.Fprintf(env.out(), "version        %s\n", ver)
 	fmt.Fprintf(env.out(), "profile        %s\n", env.Profile.Name)
 	ep := env.Profile.Endpoint
-	fmt.Fprintf(env.out(), "endpoint       %s  %s\n", turn.EndpointHost(ep), modelsProbe(ctx, ep))
+	reach, probeModel := modelsProbe(ctx, ep)
+	fmt.Fprintf(env.out(), "endpoint       %s  %s\n", turn.EndpointHost(ep), reach)
 	model := env.Profile.Model
 	win := 0
 	if env.Runner != nil && env.Runner.Client != nil {
 		win = env.Runner.Client.ContextWindow()
+	}
+	if model == "" {
+		model = probeModel
+	}
+	if model == "" {
+		model = "-"
 	}
 	fmt.Fprintf(env.out(), "model          %s\n", model)
 	if win > 0 {
@@ -50,30 +57,27 @@ func runStatus(ctx context.Context, env *Env, _ []string) int {
 	return 0
 }
 
-func modelsProbe(ctx context.Context, endpoint string) string {
+func modelsProbe(ctx context.Context, endpoint string) (reach, model string) {
 	if endpoint == "" {
-		return "unreachable"
+		return "unreachable", ""
 	}
 	u := strings.TrimRight(endpoint, "/")
-	if !strings.HasSuffix(u, "/v1") && !strings.HasSuffix(u, "/models") {
-		// endpoint is typically .../v1
-	}
 	reqURL := u + "/models"
 	cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	t0 := time.Now()
 	req, err := http.NewRequestWithContext(cctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		return "unreachable"
+		return "unreachable", ""
 	}
 	resp, err := http.DefaultClient.Do(req)
 	d := time.Since(t0).Round(time.Millisecond)
 	if err != nil {
-		return "unreachable"
+		return "unreachable", ""
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return fmt.Sprintf("error %d %s", resp.StatusCode, d)
+		return fmt.Sprintf("error %d %s", resp.StatusCode, d), ""
 	}
 	var body struct {
 		Data []struct {
@@ -81,7 +85,10 @@ func modelsProbe(ctx context.Context, endpoint string) string {
 		} `json:"data"`
 	}
 	_ = json.NewDecoder(resp.Body).Decode(&body)
-	return "ok " + d.String()
+	if len(body.Data) > 0 {
+		model = body.Data[0].ID
+	}
+	return "ok " + d.String(), model
 }
 
 func dbStatus(ctx context.Context, env *Env) string {
