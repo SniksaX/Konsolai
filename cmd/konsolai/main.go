@@ -255,6 +255,7 @@ func run() int {
 		Out:        os.Stdout,
 		Err:        os.Stderr,
 		Version:    version,
+		SlashHelp:  commands.Default().SlashLines(),
 	}
 
 	if inv.Slash == "" && inv.Cmd == cmdRequest && strings.TrimSpace(inv.Request) == "" && stdinIsTTY() && stdoutIsTTY() {
