@@ -185,12 +185,35 @@ var (
 )
 
 const (
-	elidedOutput     = "[output elided to save context]"
-	contextSafety    = 1024
-	contextElideFrac = 0.55
-	minOutputTokens  = 2048
-	protectLastMsgs  = 6
+	elidedPrefix    = "[tool output elided:"
+	contextSafety   = 1024
+	contextTrigger  = 0.60
+	contextTarget   = 0.40
+	minOutputTokens = 2048
+	protectLastMsgs = 6
+	elideSummaryMax = 80
 )
+
+type ElideStats struct {
+	Count  int
+	Before int
+	After  int
+}
+
+func ctxPct(n, window int) int {
+	if window <= 0 {
+		return 0
+	}
+	return int(float64(n)*100/float64(window) + 0.5)
+}
+
+func FormatElide(s ElideStats, window int) string {
+	if s.Count == 0 {
+		return ""
+	}
+	return fmt.Sprintf("  elided %d tool outputs (ctx %d%% -> %d%%)",
+		s.Count, ctxPct(s.Before, window), ctxPct(s.After, window))
+}
 
 func ProfileCap(intent string) int {
 	if intent == "build" {
@@ -214,10 +237,14 @@ func shouldElide(estimate, window, cap int) bool {
 	if window <= 0 {
 		return false
 	}
-	if float64(estimate) > contextElideFrac*float64(window) {
+	if float64(estimate) > contextTrigger*float64(window) {
 		return true
 	}
 	return window-estimate-contextSafety < cap/2
+}
+
+func isElided(s string) bool {
+	return strings.HasPrefix(s, elidedPrefix)
 }
 
 func isPlanTool(msgs []llm.Message, i int) bool {
@@ -238,19 +265,61 @@ func isPlanTool(msgs []llm.Message, i int) bool {
 	return false
 }
 
+func toolNameOf(msgs []llm.Message, i int) string {
+	id := msgs[i].ToolCallID
+	if id == "" {
+		return "tool"
+	}
+	for j := i - 1; j >= 0; j-- {
+		if msgs[j].Role != llm.RoleAssistant {
+			continue
+		}
+		for _, c := range msgs[j].ToolCalls {
+			if c.ID == id {
+				if c.Function.Name != "" {
+					return c.Function.Name
+				}
+				return "tool"
+			}
+		}
+	}
+	return "tool"
+}
+
+func elideSummary(content string) string {
+	s := strings.TrimSpace(content)
+	s = strings.TrimPrefix(s, "error: ")
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		s = "output"
+	}
+	r := []rune(s)
+	if len(r) > elideSummaryMax {
+		s = string(r[:elideSummaryMax])
+	}
+	return s
+}
+
+func elidedMarker(tool, summary string) string {
+	return fmt.Sprintf("[tool output elided: %s %s]", tool, summary)
+}
+
 func elideOneTool(msgs []llm.Message) bool {
 	limit := len(msgs) - protectLastMsgs
 	if limit <= 0 {
 		return false
 	}
 	for i := 0; i < limit; i++ {
-		if msgs[i].Role != llm.RoleTool || msgs[i].Content == elidedOutput {
+		if msgs[i].Role != llm.RoleTool || isElided(msgs[i].Content) {
 			continue
 		}
 		if isPlanTool(msgs, i) {
 			continue
 		}
-		msgs[i].Content = elidedOutput
+		msgs[i].Content = elidedMarker(toolNameOf(msgs, i), elideSummary(msgs[i].Content))
 		return true
 	}
 	return false
@@ -309,23 +378,29 @@ func aggressiveTrim(msgs []llm.Message, userIdx int) []llm.Message {
 	return out
 }
 
-func PrepareCall(client *llm.Client, msgs []llm.Message, tools []llm.ToolSpec, intent string) (estimate, maxTokens int, err error) {
+func PrepareCall(client *llm.Client, msgs []llm.Message, tools []llm.ToolSpec, intent string) (estimate, maxTokens int, elide ElideStats, err error) {
 	window := client.ContextWindow()
 	cap := ProfileCap(intent)
-	for {
-		estimate = client.EstimatePromptTokens(msgs, tools)
-		if !shouldElide(estimate, window, cap) {
-			break
-		}
-		if !elideOneTool(msgs) {
-			break
-		}
-	}
 	estimate = client.EstimatePromptTokens(msgs, tools)
-	if window-estimate-contextSafety < minOutputTokens {
-		return estimate, 0, ErrContextOverflow
+	if shouldElide(estimate, window, cap) {
+		elide.Before = estimate
+		for {
+			est := client.EstimatePromptTokens(msgs, tools)
+			if float64(est) <= contextTarget*float64(window) {
+				break
+			}
+			if !elideOneTool(msgs) {
+				break
+			}
+			elide.Count++
+		}
+		estimate = client.EstimatePromptTokens(msgs, tools)
+		elide.After = estimate
 	}
-	return estimate, MaxTokensFor(window, estimate, cap), nil
+	if window-estimate-contextSafety < minOutputTokens {
+		return estimate, 0, elide, ErrContextOverflow
+	}
+	return estimate, MaxTokensFor(window, estimate, cap), elide, nil
 }
 
 func Run(ctx context.Context, cfg Config, systemContext, task string) error {
@@ -413,9 +488,12 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				stepSpecs = nil
 			}
 		}
-		_, maxTok, err := PrepareCall(cfg.Client, msgs, stepSpecs, cfg.Intent)
+		_, maxTok, elide, err := PrepareCall(cfg.Client, msgs, stepSpecs, cfg.Intent)
 		if err != nil {
 			return err
+		}
+		if cfg.Trace && elide.Count > 0 {
+			fmt.Fprintln(cfg.Err, FormatElide(elide, cfg.Client.ContextWindow()))
 		}
 		opts.MaxTokens = maxTok
 		live := ui.StartLive(label)
@@ -732,9 +810,12 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	note := llm.Message{Role: llm.RoleUser, Content: MaxStepsNote}
 	msgs = append(msgs, note)
 	_ = rec.Message(ctx, note)
-	_, maxTok, prepErr := PrepareCall(cfg.Client, msgs, nil, cfg.Intent)
+	_, maxTok, elide, prepErr := PrepareCall(cfg.Client, msgs, nil, cfg.Intent)
 	if prepErr != nil {
 		return prepErr
+	}
+	if cfg.Trace && elide.Count > 0 {
+		fmt.Fprintln(cfg.Err, FormatElide(elide, cfg.Client.ContextWindow()))
 	}
 	live := ui.StartLive("thinking")
 	t0 := time.Now()
