@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/siraj/konsolai/internal/agent"
 	"github.com/siraj/konsolai/internal/config"
@@ -51,6 +52,8 @@ type Runner struct {
 	Version          string
 	LastPromptTokens int
 	LastWindow       int
+	SlashHelp        string
+	shellOut         []string
 }
 
 type Request struct {
@@ -208,4 +211,38 @@ func ThinkingFor(dec intent.Decision, buildThinking string, mode ThinkMode) agen
 		}
 		return agent.ThinkOff
 	}
+}
+
+const (
+	maxShellKept  = 5
+	maxShellBytes = 256 * 1024
+)
+
+func clipBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	s = s[:n]
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+func (r *Runner) RememberShell(output string) {
+	if r == nil {
+		return
+	}
+	output = clipBytes(output, maxShellBytes)
+	r.shellOut = append(r.shellOut, output)
+	if len(r.shellOut) > maxShellKept {
+		r.shellOut = append([]string(nil), r.shellOut[len(r.shellOut)-maxShellKept:]...)
+	}
+}
+
+func (r *Runner) ShellOutput(n int) (string, bool) {
+	if r == nil || n < 0 || n >= len(r.shellOut) {
+		return "", false
+	}
+	return r.shellOut[len(r.shellOut)-1-n], true
 }
