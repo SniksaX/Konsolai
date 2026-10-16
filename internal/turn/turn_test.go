@@ -226,3 +226,36 @@ func TestRunTurnAbortExit(t *testing.T) {
 		t.Fatalf("exit %d", res.ExitCode)
 	}
 }
+
+func TestShellOutputRing(t *testing.T) {
+	var r Runner
+	if _, ok := r.ShellOutput(0); ok {
+		t.Fatal("empty")
+	}
+	r.RememberShell("one")
+	r.RememberShell("two")
+	r.RememberShell("three")
+	got, ok := r.ShellOutput(0)
+	if !ok || got != "three" {
+		t.Fatalf("last %q %v", got, ok)
+	}
+	got, ok = r.ShellOutput(1)
+	if !ok || got != "two" {
+		t.Fatalf("back1 %q %v", got, ok)
+	}
+	if _, ok := r.ShellOutput(3); ok {
+		t.Fatal("overflow")
+	}
+	for i := 0; i < 8; i++ {
+		r.RememberShell(strings.Repeat("x", 10) + string(rune('a'+i)))
+	}
+	if len(r.shellOut) != 5 {
+		t.Fatalf("kept %d", len(r.shellOut))
+	}
+	big := strings.Repeat("z", maxShellBytes+50)
+	r.RememberShell(big)
+	got, _ = r.ShellOutput(0)
+	if len(got) != maxShellBytes {
+		t.Fatalf("clip %d", len(got))
+	}
+}
