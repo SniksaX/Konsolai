@@ -1102,13 +1102,8 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				continue
 			}
 			kind := action.Kind()
-			if kind == tools.ReadOnly {
-				stepReadOnly++
-			} else if kind != tools.Plan {
-				stepOther++
-			}
 			if kind == tools.Mutating && cfg.RequirePlan && !planApproved {
-				reason := "plan not approved. Explore with read-only tools, then call propose_plan."
+				reason := "call propose_plan first"
 				printReject(cfg.Out, call.Function.Name, call.Function.Arguments, reason)
 				tm := llm.Message{
 					Role:       llm.RoleTool,
@@ -1119,6 +1114,11 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				_ = rec.Message(ctx, tm)
 				_ = rec.Action(ctx, ActionRecord{Tool: call.Function.Name, Args: args, Kind: kind, Decision: "gate_blocked", IsError: true, Output: tm.Content})
 				continue
+			}
+			if kind == tools.ReadOnly {
+				stepReadOnly++
+			} else if kind != tools.Plan {
+				stepOther++
 			}
 			decision := "auto"
 			summary := action.Summary()
@@ -1367,7 +1367,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			forceExport = false
 		}
 		prePlanEvery := !planApproved && (cfg.RequirePlan || cfg.Intent == "act" || cfg.Intent == "build")
-		if prePlanEvery {
+		if prePlanEvery && (stepReadOnly > 0 || stepOther > 0) {
 			explore++
 			if cfg.ExploreBudget > 0 && explore >= cfg.ExploreBudget && cfg.ExploreNote != "" && lastReadOnly >= 0 {
 				msgs[lastReadOnly].Content += "\n\n" + exploreNote(cfg, sourceReads)
