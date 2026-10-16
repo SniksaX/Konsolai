@@ -148,7 +148,7 @@ func (a *shellAction) Run(ctx context.Context) (Result, error) {
 	defer lim.Close(a.out)
 	quiet := ui.NewQuiet("running", shellQuietFor)
 	defer quiet.Stop()
-	mw := io.MultiWriter(lim, &cap, quiet)
+	mw := io.MultiWriter(quiet.Tee(lim), &cap)
 	cmd.Stdout = mw
 	cmd.Stderr = mw
 
