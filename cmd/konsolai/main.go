@@ -691,7 +691,10 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 	if !inv.Plain {
 		toolOut = ui.NewGutter(os.Stdout)
 	}
-	reg := tools.NewRegistry(sg, toolOut, lister, memory.NewWebCache(mem), memory.NewFactStore(mem, profile, projectID, sessionID), tools.Options{ReadOnlyShell: dec.Intent == intent.Lookup})
+	reg := tools.NewRegistry(sg, toolOut, lister, memory.NewWebCache(mem), memory.NewFactStore(mem, profile, projectID, sessionID), tools.Options{
+		ReadOnlyShell: dec.Intent == intent.Lookup,
+		DocsTask:      dec.Task == intent.TaskDocs,
+	})
 	cfg := agent.Config{
 		Client:         client,
 		Tools:          reg,
