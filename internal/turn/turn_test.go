@@ -84,6 +84,49 @@ func testRunner(t *testing.T, client *llm.Client, conf agent.Confirmer) *Runner 
 	}
 }
 
+func TestLanguagePromptIgnoresRouterSpanish(t *testing.T) {
+	var bodies []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{"id": "test", "max_model_len": 8192}},
+		})
+	})
+	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(b))
+		if strings.Contains(string(b), `"intent"`) || len(bodies) == 1 {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"choices": []map[string]any{{"message": map[string]any{
+					"role": "assistant", "content": `{"intent":"answer","language":"es","reason":"hi","reasoning":false,"effort":"none","task":"other","continues_session":0}`,
+				}}},
+			})
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		payload, _ := json.Marshal(map[string]any{
+			"choices": []map[string]any{{"delta": map[string]any{"content": "hello"}}},
+		})
+		_, _ = io.WriteString(w, "data: "+string(payload)+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	client := llm.New(srv.URL+"/v1", "test")
+	r := testRunner(t, client, autoConfirm{})
+	res := r.RunTurn(context.Background(), Request{Text: "hiiii !", Yes: true, Cwd: t.TempDir(), New: true})
+	if res.ExitCode != 0 {
+		t.Fatalf("exit %d", res.ExitCode)
+	}
+	joined := strings.Join(bodies, "\n")
+	if !strings.Contains(joined, "Reply in English, the language of the user's latest message.") {
+		t.Fatalf("missing english instruction in %q", joined)
+	}
+	if strings.Contains(joined, "Spanish") || strings.Contains(joined, `(es)`) {
+		t.Fatalf("spanish leaked %q", joined)
+	}
+}
+
 func TestRunTurnAnswer(t *testing.T) {
 	client := fakeLLM(t, []llm.Message{{Role: llm.RoleAssistant, Content: "hello there"}})
 	r := testRunner(t, client, autoConfirm{})
