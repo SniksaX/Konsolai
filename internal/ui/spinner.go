@@ -213,6 +213,14 @@ func (s *spinner) Stop() {
 	})
 }
 
+// ResetDisplay clears a leftover spinner line and shows the cursor.
+func ResetDisplay() {
+	if !hookTTY() {
+		return
+	}
+	fmt.Fprint(hookWriter(), clearLine+showCursor)
+}
+
 func formatElapsed(d time.Duration) string {
 	return fmt.Sprintf("%.1fs", d.Seconds())
 }
