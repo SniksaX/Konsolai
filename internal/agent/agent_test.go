@@ -1002,6 +1002,9 @@ func TestRunAccumulatesStats(t *testing.T) {
 	if st.PromptTokens != 2000 || st.CompletionTokens != 400 {
 		t.Fatalf("tokens %+v", st)
 	}
+	if st.LastPromptTokens != 1000 {
+		t.Fatalf("last prompt %d", st.LastPromptTokens)
+	}
 	if st.RouterTime != time.Second {
 		t.Fatalf("router %s", st.RouterTime)
 	}
@@ -1322,16 +1325,35 @@ func TestForcedPlanDiscardsText(t *testing.T) {
 
 func TestMaxStepsPrintsSummary(t *testing.T) {
 	var out bytes.Buffer
-	_, _, err := setupCfg(t, []llm.Message{
+	_, rep, err := setupCfg(t, []llm.Message{
 		assistant(call("1", "list_dir", `{"path":"."}`)),
 		assistant(call("2", "list_dir", `{"path":"."}`)),
 		{Role: llm.RoleAssistant, Content: "I listed twice; more remains"},
-	}, nil, Config{MaxSteps: 2, Out: &out})
+	}, nil, Config{MaxSteps: 2, Out: &out, Intent: "act"})
 	if !errors.Is(err, ErrMaxSteps) {
 		t.Fatalf("%v", err)
 	}
 	if !strings.Contains(out.String(), "I listed twice") {
 		t.Fatalf("%q", out.String())
+	}
+	if len(rep.tools) == 0 {
+		t.Fatal("no requests")
+	}
+	last := rep.tools[len(rep.tools)-1]
+	if len(last) != 0 {
+		t.Fatalf("forced summary still had tools: %d", len(last))
+	}
+}
+
+func TestRestoreApprovedPlan(t *testing.T) {
+	msgs := []llm.Message{
+		assistant(call("1", "propose_plan", `{"summary":"s","steps":["t"],"files":["a.txt"],"commands":["touch a"]}`)),
+		{Role: llm.RoleTool, ToolCallID: "1", Content: "plan approved"},
+		assistant(call("2", "run_shell", `{"cmd":"touch a"}`)),
+	}
+	files, cmds, text, ok := RestoreApprovedPlan(msgs)
+	if !ok || len(files) != 1 || files[0] != "a.txt" || cmds[0] != "touch a" || !strings.Contains(text, "s") {
+		t.Fatalf("%v %v %v %q", ok, files, cmds, text)
 	}
 }
 
