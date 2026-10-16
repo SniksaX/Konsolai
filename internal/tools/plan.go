@@ -10,9 +10,26 @@ import (
 	"github.com/siraj/konsolai/internal/llm"
 )
 
-type proposePlanTool struct{}
+const PlanExportReject = "plan must produce the PDF/HTML with the export_doc tool (write Markdown first, then export_doc)"
 
-func newProposePlan() *proposePlanTool { return &proposePlanTool{} }
+type proposePlanTool struct {
+	docsTask bool
+	request  string
+}
+
+func newProposePlan(docsTask bool, request string) *proposePlanTool {
+	return &proposePlanTool{docsTask: docsTask, request: request}
+}
+
+func mentionsDocExport(s string) bool {
+	l := strings.ToLower(s)
+	return strings.Contains(l, "pdf") || strings.Contains(l, "html")
+}
+
+func mentionsExportDoc(summary string, steps []string) bool {
+	blob := strings.ToLower(summary + " " + strings.Join(steps, " "))
+	return strings.Contains(blob, "export_doc")
+}
 
 func (t *proposePlanTool) Spec() llm.ToolSpec {
 	return llm.ToolSpec{
@@ -54,6 +71,9 @@ func (t *proposePlanTool) Prepare(rawArgs string) (Action, error) {
 	}
 	if len(args.Files) < 1 {
 		return nil, errors.New("tools: propose_plan: files is required")
+	}
+	if t.docsTask && mentionsDocExport(t.request) && !mentionsExportDoc(args.Summary, args.Steps) {
+		return nil, errors.New(PlanExportReject)
 	}
 	return &proposePlanAction{summary: args.Summary, steps: args.Steps, files: args.Files, commands: args.Commands}, nil
 }
