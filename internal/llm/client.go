@@ -448,6 +448,7 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, opts ChatOptions, o
 }
 
 func (c *Client) complete(ctx context.Context, msgs []Message, tools []ToolSpec, opts ChatOptions, onDelta func(string) error) (Message, Usage, error) {
+	msgs = Normalize(msgs)
 	msg, usage, err, gotBytes := c.completeAttempt(ctx, msgs, tools, opts, onDelta)
 	if err == nil || !shouldRetry(err, gotBytes) {
 		c.observePrompt(msgs, usage)
