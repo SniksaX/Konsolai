@@ -16,33 +16,41 @@ import (
 )
 
 type Command struct {
-	Name    string
-	Aliases []string
-	Usage   string
-	Summary string
-	Run     func(ctx context.Context, env *Env, args []string) int
+	Name     string
+	Aliases  []string
+	Usage    string
+	Summary  string
+	ReplOnly bool
+	Run      func(ctx context.Context, env *Env, args []string) int
 }
 
 type Env struct {
-	Runner      *turn.Runner
-	Mem         *memory.Guard
-	Profile     config.Profile
-	Copy        func(ctx context.Context, text string) (string, error)
-	Out         io.Writer
-	Err         io.Writer
-	Cwd         string
-	Yes         bool
-	Version     string
-	Plain       bool
-	Confirm     agent.Confirmer
-	Undo        func(ctx context.Context) int
-	Remember    func(ctx context.Context, args []string) int
-	Facts       func(ctx context.Context) int
-	Forget      func(ctx context.Context, args []string) int
-	Prune       func(ctx context.Context) int
-	LoadHistory func(ctx context.Context, limit int) []histItem
-	RunTurn     func(ctx context.Context, req turn.Request) turn.Result
-	CloseAll    func(ctx context.Context) error
+	Runner       *turn.Runner
+	Mem          *memory.Guard
+	Profile      config.Profile
+	Copy         func(ctx context.Context, text string) (string, error)
+	Out          io.Writer
+	Err          io.Writer
+	Cwd          string
+	Yes          bool
+	Version      string
+	Plain        bool
+	Confirm      agent.Confirmer
+	Undo         func(ctx context.Context) int
+	Remember     func(ctx context.Context, args []string) int
+	Facts        func(ctx context.Context) int
+	Forget       func(ctx context.Context, args []string) int
+	Prune        func(ctx context.Context) int
+	LoadHistory  func(ctx context.Context, limit int) []histItem
+	RunTurn      func(ctx context.Context, req turn.Request) turn.Result
+	CloseAll     func(ctx context.Context) error
+	InRepl       bool
+	OnCwd        func(dir string) error
+	OnYes        func(on bool)
+	OnTrace      func(on bool)
+	OnNewSession func()
+	OnCompact    func(ctx context.Context) int
+	OnExit       func() int
 }
 
 func (e *Env) out() io.Writer {
@@ -100,6 +108,10 @@ func (r *Registry) Dispatch(ctx context.Context, env *Env, name string, args []s
 			msg += "\ndid you mean /" + sug + "?"
 		}
 		fmt.Fprintln(env.errw(), msg)
+		return 2
+	}
+	if c.ReplOnly && (env == nil || !env.InRepl) {
+		fmt.Fprintln(env.errw(), "/"+c.Name+" is only available in the REPL")
 		return 2
 	}
 	return c.Run(ctx, env, args)
@@ -191,6 +203,14 @@ func Default() *Registry {
 		Command{Name: "show", Usage: "show <n>", Summary: "Reprint a session's prompts and answers", Run: runShow},
 		Command{Name: "resume", Usage: "resume <n> \"<request>\"", Summary: "Continue session n with a new request", Run: runResume},
 		Command{Name: "new", Usage: "new", Summary: "Close resumable sessions so the next request starts fresh", Run: runNew},
+		Command{Name: "exit", Usage: "exit", Summary: "Leave the REPL", ReplOnly: true, Run: runExit},
+		Command{Name: "quit", Usage: "quit", Summary: "Leave the REPL", ReplOnly: true, Run: runExit},
+		Command{Name: "clear", Usage: "clear", Summary: "Clear the screen", ReplOnly: true, Run: runClear},
+		Command{Name: "cd", Usage: "cd <dir>", Summary: "Change the working directory", ReplOnly: true, Run: runCD},
+		Command{Name: "yes", Usage: "yes on|off", Summary: "Auto-approve for this REPL session", ReplOnly: true, Run: runYes},
+		Command{Name: "trace", Usage: "trace on|off", Summary: "Toggle per-call traces", ReplOnly: true, Run: runTrace},
+		Command{Name: "model", Usage: "model", Summary: "Show model, window and endpoint", ReplOnly: true, Run: runModel},
+		Command{Name: "compact", Usage: "compact", Summary: "Summarize earlier messages in this session", ReplOnly: true, Run: runCompact},
 		Command{Name: "undo", Usage: "undo", Summary: "Restore files changed in recent sessions", Run: runUndo},
 		Command{Name: "diff", Usage: "diff [n]", Summary: "Show file diffs from a session", Run: runDiff},
 		Command{Name: "run", Usage: "run [k]", Summary: "Run a bash/sh block from the last answer", Run: runRun},
