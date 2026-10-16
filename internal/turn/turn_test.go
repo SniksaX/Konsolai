@@ -140,6 +140,21 @@ func TestRunTurnResumeLocal(t *testing.T) {
 	}
 }
 
+func TestRunTurnResolvesWindow(t *testing.T) {
+	client := fakeLLM(t, []llm.Message{{Role: llm.RoleAssistant, Content: "ok"}})
+	if client.ContextWindow() != 32768 {
+		t.Fatalf("pre-turn window %d", client.ContextWindow())
+	}
+	r := testRunner(t, client, autoConfirm{})
+	res := r.RunTurn(context.Background(), Request{Text: "hi", Intent: "answer", Yes: true, Cwd: t.TempDir(), New: true})
+	if res.ExitCode != 0 {
+		t.Fatalf("exit %d", res.ExitCode)
+	}
+	if client.ContextWindow() != 8192 {
+		t.Fatalf("want max_model_len 8192, got %d", client.ContextWindow())
+	}
+}
+
 func TestRunTurnAbortExit(t *testing.T) {
 	client := fakeLLM(t, []llm.Message{
 		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{
