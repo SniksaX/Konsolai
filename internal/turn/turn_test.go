@@ -259,3 +259,96 @@ func TestShellOutputRing(t *testing.T) {
 		t.Fatalf("clip %d", len(got))
 	}
 }
+
+func TestFastWindowTooFull(t *testing.T) {
+	if FastWindowTooFull(49, 100) {
+		t.Fatal("49 of 100")
+	}
+	if !FastWindowTooFull(61, 100) {
+		t.Fatal("61 of 100")
+	}
+	if FastWindowTooFull(4915, 8192) {
+		t.Fatal("60% of 8192 is still ok")
+	}
+	if !FastWindowTooFull(4916, 8192) {
+		t.Fatal("over 60%")
+	}
+}
+
+func TestFastSkippedWhenHistoryTooLarge(t *testing.T) {
+	llm.ResetReachCache()
+	t.Cleanup(llm.ResetReachCache)
+	router := `{"intent":"answer","language":"en","reason":"hi","reasoning":false,"effort":"none","task":"other","continues_session":0}`
+	fast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/models") {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{{"id": "mini", "meta": map[string]any{"n_ctx": 32}}},
+			})
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		payload, _ := json.Marshal(map[string]any{
+			"choices": []map[string]any{{"delta": map[string]any{"content": router}}},
+		})
+		_, _ = io.WriteString(w, "data: "+string(payload)+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(fast.Close)
+	client := fakeLLM(t, []llm.Message{{Role: llm.RoleAssistant, Content: "from-main"}})
+	r := testRunner(t, client, autoConfirm{})
+	r.FastClient = llm.NewFast(fast.URL+"/v1", "mini")
+	var errB strings.Builder
+	r.Err = &errB
+	res := r.RunTurn(context.Background(), Request{Text: "hi", Trace: true, Yes: true, Cwd: t.TempDir(), New: true})
+	if res.ExitCode != 0 {
+		t.Fatalf("exit %d %s", res.ExitCode, errB.String())
+	}
+	if !strings.Contains(errB.String(), "fast model skipped (history too large)") {
+		t.Fatalf("trace %q", errB.String())
+	}
+	if !strings.Contains(res.Answer, "from-main") {
+		t.Fatalf("answer %q", res.Answer)
+	}
+}
+
+func TestActLowSkipsPlanGate(t *testing.T) {
+	client := fakeLLM(t, []llm.Message{
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{
+			ID: "1", Type: "function", Function: llm.FunctionCall{Name: "write_file", Arguments: `{"path":"a.txt","content":"hi"}`},
+		}}},
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{
+			ID: "2", Type: "function", Function: llm.FunctionCall{Name: "finish", Arguments: `{"summary":"wrote"}`},
+		}}},
+	})
+	r := testRunner(t, client, autoConfirm{})
+	cwd := t.TempDir()
+	res := r.RunTurn(context.Background(), Request{Text: "write a.txt", Intent: "act", Yes: true, Cwd: cwd, New: true})
+	if res.ExitCode != 0 {
+		t.Fatalf("exit %d", res.ExitCode)
+	}
+	b, err := os.ReadFile(cwd + "/a.txt")
+	if err != nil || string(b) != "hi" {
+		t.Fatalf("file %q %v", b, err)
+	}
+}
+
+func TestActHighKeepsPlanGate(t *testing.T) {
+	llm.ResetReachCache()
+	t.Cleanup(llm.ResetReachCache)
+	client := fakeLLM(t, []llm.Message{
+		{Role: llm.RoleAssistant, Content: `{"intent":"act","language":"en","reason":"multi-step","reasoning":true,"effort":"high","task":"other","continues_session":0}`},
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{
+			ID: "1", Type: "function", Function: llm.FunctionCall{Name: "write_file", Arguments: `{"path":"a.txt","content":"no"}`},
+		}}},
+		{Role: llm.RoleAssistant, Content: "blocked"},
+	})
+	r := testRunner(t, client, autoConfirm{})
+	cwd := t.TempDir()
+	res := r.RunTurn(context.Background(), Request{Text: "set up a project with several files", Yes: true, Cwd: cwd, New: true})
+	if res.ExitCode != 0 {
+		t.Fatalf("exit %d", res.ExitCode)
+	}
+	if _, err := os.Stat(cwd + "/a.txt"); !os.IsNotExist(err) {
+		t.Fatal("high effort act must keep the plan gate")
+	}
+}
