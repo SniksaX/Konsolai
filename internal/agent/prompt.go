@@ -53,6 +53,7 @@ const (
 	ToolsGoneNote  = "Tools are no longer available. Answer now with what you have."
 	ForcedPlanNote = "Exploration is over. Call propose_plan now."
 	DocsFileNote   = "The user asked for a file. Write it with write_file, then export_doc if a PDF/HTML was requested."
+	DocsExportNote = "Write the Markdown with write_file, then call export_doc with format pdf and/or html. export_doc is available and renders Mermaid diagrams."
 	MaxStepsNote   = "Step limit reached. Summarize what you found or did, and what remains."
 )
 
