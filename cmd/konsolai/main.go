@@ -268,6 +268,7 @@ func run() int {
 			emb = embed.New(prof.EmbedEndpoint, prof.RerankEndpoint)
 			ing := rag.New(st, emb, prof.Name)
 			runner.Ingest = ing
+			runner.Embed = emb
 			if isRepl {
 				ing.Start()
 				defer ing.Stop()
