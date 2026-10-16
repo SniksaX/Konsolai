@@ -215,14 +215,17 @@ func TestThinkingFor(t *testing.T) {
 	if g := thinkingFor(intent.Decision{Intent: intent.Build}, "plan_step"); g != agent.ThinkPlanStep {
 		t.Fatalf("build plan_step %v", g)
 	}
-	if g := thinkingFor(intent.Decision{Intent: intent.Answer, Reasoning: true}, ""); g != agent.ThinkOn {
-		t.Fatalf("answer+reason %v", g)
+	if g := thinkingFor(intent.Decision{Intent: intent.Answer, Effort: intent.EffortHigh}, ""); g != agent.ThinkOn {
+		t.Fatalf("answer+high %v", g)
 	}
-	if g := thinkingFor(intent.Decision{Intent: intent.Lookup, Reasoning: false}, ""); g != agent.ThinkOff {
+	if g := thinkingFor(intent.Decision{Intent: intent.Answer, Effort: intent.EffortLow}, ""); g != agent.ThinkOff {
+		t.Fatalf("answer+low %v", g)
+	}
+	if g := thinkingFor(intent.Decision{Intent: intent.Lookup, Reasoning: false}, ""); g != agent.ThinkLookup {
 		t.Fatalf("lookup %v", g)
 	}
-	if g := thinkingFor(intent.Decision{Intent: intent.Act, Reasoning: true}, ""); g != agent.ThinkOn {
-		t.Fatalf("act+reason %v", g)
+	if g := thinkingFor(intent.Decision{Intent: intent.Act, Reasoning: true}, ""); g != agent.ThinkPlanStep {
+		t.Fatalf("act plan_step %v", g)
 	}
 }
 
