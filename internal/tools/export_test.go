@@ -3,7 +3,6 @@ package tools
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,12 +21,15 @@ func TestExportDocHTMLChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "out.md"), []byte("<p>Hi</p>"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	reg := NewRegistry(g, nil, nil, nil, nil)
 	tool, ok := reg.Get("export_doc")
 	if !ok {
 		t.Fatal("missing export_doc")
 	}
-	act, err := tool.Prepare(`{"path":"out.html","format":"html","title":"T","content":"<p>Hi</p>"}`)
+	act, err := tool.Prepare(`{"path":"out.html","format":"html"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,8 +64,11 @@ func TestExportDocPDFChange(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "out.pdf"), []byte("old"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "out.md"), []byte("Hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	tool, _ := NewRegistry(g, nil, nil, nil, nil).Get("export_doc")
-	act, err := tool.Prepare(`{"path":"out.pdf","format":"pdf","title":"T","content":"Hello"}`)
+	act, err := tool.Prepare(`{"path":"out.pdf","format":"pdf"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,8 +97,11 @@ func TestExportDocSpinner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "out.md"), []byte("<p>x</p>"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	tool, _ := NewRegistry(g, nil, nil, nil, nil).Get("export_doc")
-	act, err := tool.Prepare(`{"path":"out.html","format":"html","content":"<p>x</p>"}`)
+	act, err := tool.Prepare(`{"path":"out.html","format":"html"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,8 +119,11 @@ func TestExportPrepareDoesNotRender(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "out.md"), []byte("<p>Hi</p>"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	tool, _ := NewRegistry(g, nil, nil, nil, nil).Get("export_doc")
-	act, err := tool.Prepare(`{"path":"out.html","format":"html","title":"T","content":"<p>Hi</p>"}`)
+	act, err := tool.Prepare(`{"path":"out.html","format":"html"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,8 +146,11 @@ func TestExportDocMermaidRenders(t *testing.T) {
 		t.Fatal(err)
 	}
 	const body = "Architecture\n\n```mermaid\nflowchart TD\n  A[Agent] --> B[Tools]\n```\n\nDone.\n"
+	if err := os.WriteFile(filepath.Join(root, "out.md"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
 	tool, _ := NewRegistry(g, nil, nil, nil, nil).Get("export_doc")
-	htmlAct, err := tool.Prepare(`{"path":"out.html","format":"html","title":"Arch","content":` + quoteJSON(body) + `}`)
+	htmlAct, err := tool.Prepare(`{"path":"out.html","format":"html"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +168,7 @@ func TestExportDocMermaidRenders(t *testing.T) {
 	if !strings.Contains(string(html), "<svg") {
 		t.Fatalf("html missing svg: %s", html[:min(len(html), 400)])
 	}
-	pdfAct, err := tool.Prepare(`{"path":"out.pdf","format":"pdf","title":"Arch","content":` + quoteJSON(body) + `}`)
+	pdfAct, err := tool.Prepare(`{"path":"out.pdf","format":"pdf"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +185,50 @@ func TestExportDocMermaidRenders(t *testing.T) {
 	}
 }
 
-func quoteJSON(s string) string {
-	b, _ := json.Marshal(s)
-	return string(b)
+func TestExportDocRejectsUnknownFields(t *testing.T) {
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "out.md"), []byte("# Hi\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	tool, _ := NewRegistry(g, nil, nil, nil, nil).Get("export_doc")
+	_, err = tool.Prepare(`{"path":"out.html","format":"html","content":"` + strings.Repeat("x", 200) + `"}`)
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("want unknown field, got %v", err)
+	}
+	_, err = tool.Prepare(`{"path":"out.html","format":"html","title":"T"}`)
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("want unknown title field, got %v", err)
+	}
+}
+
+func TestExportDocReadsMarkdown(t *testing.T) {
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool, _ := NewRegistry(g, nil, nil, nil, nil).Get("export_doc")
+	_, err = tool.Prepare(`{"path":"out.html","format":"html"}`)
+	if err == nil || !strings.Contains(err.Error(), "markdown source not found") {
+		t.Fatalf("want missing markdown, got %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "out.markdown"), []byte("<p>via markdown ext</p>"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	act, err := tool.Prepare(`{"path":"out.html","format":"html"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := act.Run(context.Background())
+	if err != nil || res.IsError {
+		t.Fatal(res.Output, err)
+	}
+	b, err := os.ReadFile(filepath.Join(root, "out.html"))
+	if err != nil || !strings.Contains(string(b), "via markdown ext") {
+		t.Fatalf("%s %v", b, err)
+	}
 }
