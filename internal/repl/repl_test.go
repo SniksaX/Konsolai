@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -143,6 +144,56 @@ func TestCompleterSlashAndAt(t *testing.T) {
 		t.Fatalf("token start %d", lastTokenStart("foo @bar"))
 	}
 }
+
+func TestReadLineSeesTrailingNewline(t *testing.T) {
+	var out, errb bytes.Buffer
+	env := &commands.Env{
+		Profile: config.Profile{Name: "p", Model: "m", Endpoint: "http://127.0.0.1:9/v1"},
+		Out:     &out,
+		Err:     &errb,
+		Cwd:     t.TempDir(),
+		Version: "test",
+	}
+	rd := &checkNLReader{out: &out, lines: []string{"/help", "/exit"}}
+	code := Run(context.Background(), Config{
+		Runner:  &turn.Runner{Profile: env.Profile, Out: &out, Err: &errb},
+		Env:     env,
+		Reg:     commands.Default(),
+		Reader:  rd,
+		Version: "test",
+		Model:   "m",
+		Out:     &out,
+		Err:     &errb,
+	})
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, errb.String())
+	}
+	if rd.calls < 2 {
+		t.Fatalf("calls %d", rd.calls)
+	}
+}
+
+type checkNLReader struct {
+	out   *bytes.Buffer
+	lines []string
+	i     int
+	calls int
+}
+
+func (c *checkNLReader) ReadLine(context.Context, string) (string, error) {
+	c.calls++
+	if !strings.HasSuffix(c.out.String(), "\n") {
+		return "", fmt.Errorf("output before ReadLine %d does not end with newline: %q", c.calls, c.out.String())
+	}
+	if c.i >= len(c.lines) {
+		return "", ErrEOF
+	}
+	line := c.lines[c.i]
+	c.i++
+	return line, nil
+}
+
+func (c *checkNLReader) Close() error { return nil }
 
 func TestErrs(t *testing.T) {
 	if !errors.Is(ErrInterrupt, ErrInterrupt) || !errors.Is(ErrEOF, ErrEOF) {
