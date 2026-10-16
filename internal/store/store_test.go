@@ -464,3 +464,42 @@ func TestOpenRequiresPostgres13(t *testing.T) {
 		t.Fatalf("unexpected version %d", ver)
 	}
 }
+
+func TestClosedSessionsHiddenFromResume(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	pid, err := s.UpsertProject(ctx, "/tmp/closed", []string{"go"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.CreateSession(ctx, NewSession{
+		Profile: "home", ProjectID: &pid, CWD: "/tmp/closed", Mode: "act", Model: "m", Title: "keep",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := s.FindResumableSession(ctx, "home", &pid, "/tmp/closed", "act", 30*time.Minute)
+	if err != nil || !ok || got.ID != id {
+		t.Fatalf("before close ok=%v id=%s err=%v", ok, got.ID, err)
+	}
+	n, err := s.CloseSessions(ctx, "home", &pid, "/tmp/closed")
+	if err != nil || n != 1 {
+		t.Fatalf("close n=%d err=%v", n, err)
+	}
+	_, ok, err = s.FindResumableSession(ctx, "home", &pid, "/tmp/closed", "act", 30*time.Minute)
+	if err != nil || ok {
+		t.Fatalf("resume after close ok=%v err=%v", ok, err)
+	}
+	hist, err := s.HistorySessions(ctx, "home", &pid, "/tmp/closed", 10)
+	if err != nil || len(hist) != 0 {
+		t.Fatalf("history %d err=%v", len(hist), err)
+	}
+	recent, err := s.RecentSessions(ctx, "home", &pid, "/tmp/closed", 30*time.Minute, 3)
+	if err != nil || len(recent) != 0 {
+		t.Fatalf("recent %d err=%v", len(recent), err)
+	}
+	ver, err := s.SchemaVersion(ctx)
+	if err != nil || ver < 4 {
+		t.Fatalf("schema %d err=%v", ver, err)
+	}
+}
