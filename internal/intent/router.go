@@ -74,7 +74,7 @@ language is the ISO 639-1 code of the user's message.
 reasoning=true when the request needs multi-step analysis: debugging an error or a pasted command, comparing approaches, non-trivial code questions. false for greetings, simple facts and simple commands.
 effort is required: "none" | "low" | "high".
 none: greetings, thanks, acknowledgements ('ok', 'good', 'merci', 'okey good'), small talk.
-low: simple questions or single commands with an obvious answer.
+low: simple questions or single commands with an obvious answer. A single explicit command or a trivial operation is low.
 high: debugging, design or trade-off questions, analysis, multi-step tasks, anything with many constraints.
 Acknowledgements and short reactions are ALWAYS intent answer, effort none, even after an act or build turn.
 task is "analysis" when the user asks to analyse, review or give an opinion on code; "docs" when they ask to generate documentation, READMEs, diagrams or reports about code; otherwise "other".
