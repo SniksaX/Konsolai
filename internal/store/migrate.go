@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/jackc/pgx/v5"
@@ -17,10 +18,14 @@ import (
 //go:embed migrations/*.sql
 var migrationFS embed.FS
 
-const minServerVersion = 130000
+const (
+	minServerVersion = 130000
+	migrateTimeout   = 15 * time.Second
+	EmbeddingDim     = 1024
+)
 
 func (s *Store) migrate(ctx context.Context) error {
-	qctx, cancel := withTimeout(ctx)
+	qctx, cancel := context.WithTimeout(ctx, migrateTimeout)
 	defer cancel()
 
 	var ver int
@@ -76,9 +81,15 @@ func (s *Store) migrate(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("store: read %s: %w", name, err)
 		}
-		for _, stmt := range splitSQL(string(body)) {
-			if _, err := tx.Exec(qctx, stmt); err != nil {
-				return fmt.Errorf("store: apply %s: %w", name, err)
+		if version == 7 {
+			if err := applyRAGMigration(qctx, tx, string(body), "vector"); err != nil {
+				return err
+			}
+		} else {
+			for _, stmt := range splitSQL(string(body)) {
+				if _, err := tx.Exec(qctx, stmt); err != nil {
+					return fmt.Errorf("store: apply %s: %w", name, err)
+				}
 			}
 		}
 		if _, err := tx.Exec(qctx, "INSERT INTO schema_migrations (version) VALUES ($1)", version); err != nil {
@@ -104,6 +115,40 @@ func migrationVersion(name string) (int, error) {
 		return 0, fmt.Errorf("store: migration %s: %w", name, err)
 	}
 	return n, nil
+}
+
+func applyRAGMigration(ctx context.Context, tx pgx.Tx, body, vectorExt string) error {
+	if vectorExt == "" {
+		vectorExt = "vector"
+	}
+	if _, err := tx.Exec(ctx, "SAVEPOINT rag_ext"); err != nil {
+		return fmt.Errorf("store: rag savepoint: %w", err)
+	}
+	_, err := tx.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS "+pgx.Identifier{vectorExt}.Sanitize()+" WITH SCHEMA public")
+	if err != nil {
+		if _, rb := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT rag_ext"); rb != nil {
+			return fmt.Errorf("store: rag rollback: %w", rb)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO meta (key, value) VALUES ('rag', 'unavailable')
+			ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`); err != nil {
+			return fmt.Errorf("store: rag meta: %w", err)
+		}
+		return nil
+	}
+	if _, err := tx.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS unaccent WITH SCHEMA public"); err != nil {
+		return fmt.Errorf("store: unaccent: %w", err)
+	}
+	sql := strings.ReplaceAll(body, "__DIM__", strconv.Itoa(EmbeddingDim))
+	for _, stmt := range splitSQL(sql) {
+		if _, err := tx.Exec(ctx, stmt); err != nil {
+			return fmt.Errorf("store: apply 0007_rag.sql: %w", err)
+		}
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO meta (key, value) VALUES ('rag', 'ready')
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`); err != nil {
+		return fmt.Errorf("store: rag ready: %w", err)
+	}
+	return nil
 }
 
 func splitSQL(s string) []string {
