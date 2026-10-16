@@ -221,6 +221,12 @@ func ResetDisplay() {
 	fmt.Fprint(hookWriter(), clearLine+showCursor)
 }
 
+// BeforeOutput stops any leftover spinner and clears its line before the
+// first byte of command output, narration, a confirm prompt, or a rejection.
+func BeforeOutput() {
+	ResetDisplay()
+}
+
 func formatElapsed(d time.Duration) string {
 	return fmt.Sprintf("%.1fs", d.Seconds())
 }
@@ -298,8 +304,8 @@ func (q *Quiet) maybeStart() {
 
 // Write notes output and hides the spinner. It does not forward the bytes.
 func (q *Quiet) Write(p []byte) (int, error) {
-	if len(p) == 0 {
-		return 0, nil
+	if q == nil || len(p) == 0 {
+		return len(p), nil
 	}
 	q.mu.Lock()
 	if q.stop != nil {
@@ -309,6 +315,26 @@ func (q *Quiet) Write(p []byte) (int, error) {
 	q.last = hookNow()
 	q.mu.Unlock()
 	return len(p), nil
+}
+
+// Tee stops the spinner before forwarding each write to w.
+func (q *Quiet) Tee(w io.Writer) io.Writer {
+	return stopWriter{q: q, w: w}
+}
+
+type stopWriter struct {
+	q *Quiet
+	w io.Writer
+}
+
+func (s stopWriter) Write(p []byte) (int, error) {
+	if s.q != nil {
+		_, _ = s.q.Write(p)
+	}
+	if s.w == nil {
+		return len(p), nil
+	}
+	return s.w.Write(p)
 }
 
 func (q *Quiet) Stop() {
