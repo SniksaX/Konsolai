@@ -61,3 +61,30 @@ func TestProposePlanRequiresExportDocForDocsPDF(t *testing.T) {
 		t.Fatalf("non-docs should accept: %v", err)
 	}
 }
+
+func TestProposePlanRejectsPlaceholderCommands(t *testing.T) {
+	g, err := safety.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool, ok := NewRegistry(g, nil, nil, nil, nil).Get("propose_plan")
+	if !ok {
+		t.Fatal("missing")
+	}
+	bads := []string{
+		`{"summary":"s","steps":["x"],"files":["a"],"commands":["mkdir (all dirs)"]}`,
+		`{"summary":"s","steps":["x"],"files":["a"],"commands":["do ..."]}`,
+		`{"summary":"s","steps":["x"],"files":["a"],"commands":["run listed commands"]}`,
+		`{"summary":"s","steps":["x"],"files":["a"],"commands":["touch each file"]}`,
+		`{"summary":"s","steps":["x"],"files":["a"],"commands":["npm i && etc"]}`,
+	}
+	for _, raw := range bads {
+		_, err := tool.Prepare(raw)
+		if err == nil || err.Error() != PlanCommandReject {
+			t.Fatalf("want reject for %s: %v", raw, err)
+		}
+	}
+	if _, err := tool.Prepare(`{"summary":"s","steps":["x"],"files":["a"],"commands":["mkdir -p a/b"]}`); err != nil {
+		t.Fatal(err)
+	}
+}
