@@ -53,31 +53,40 @@ const (
 	ThinkOff ThinkingPolicy = iota
 	ThinkOn
 	ThinkUntilPlan
+	ThinkPlanStep
 )
 
+func ParseBuildThinking(s string) ThinkingPolicy {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "until_plan":
+		return ThinkUntilPlan
+	default:
+		return ThinkPlanStep
+	}
+}
+
 type Config struct {
-	Client              *llm.Client
-	Tools               *tools.Registry
-	Confirmer           Confirmer
-	Out                 io.Writer
-	MaxSteps            int
-	ThinkingPolicy      ThinkingPolicy
-	RequirePlan         bool
-	ContextBudgetTokens int
-	Prompt              string
-	Temperature         float64
-	Recorder            Recorder
-	History             []llm.Message
-	AutoApprove         bool
-	ExploreBudget       int
-	ExploreNote         string
-	Trace               bool
-	Intent              string
-	Task                string
-	RouterTime          time.Duration
-	Err                 io.Writer
-	Stats               *Stats
-	Plain               bool
+	Client         *llm.Client
+	Tools          *tools.Registry
+	Confirmer      Confirmer
+	Out            io.Writer
+	MaxSteps       int
+	ThinkingPolicy ThinkingPolicy
+	RequirePlan    bool
+	Prompt         string
+	Temperature    float64
+	Recorder       Recorder
+	History        []llm.Message
+	AutoApprove    bool
+	ExploreBudget  int
+	ExploreNote    string
+	Trace          bool
+	Intent         string
+	Task           string
+	RouterTime     time.Duration
+	Err            io.Writer
+	Stats          *Stats
+	Plain          bool
 }
 
 type Stats struct {
@@ -116,13 +125,18 @@ func FormatSummary(intent string, s Stats) string {
 		FormatTokens(s.PromptTokens), FormatTokens(s.CompletionTokens))
 }
 
-func FormatTrace(step int, think bool, d time.Duration, in, out int, names []string) string {
+func FormatTrace(step int, think bool, d time.Duration, in, out, window int, names []string) string {
 	th := "off"
 	if think {
 		th = "on"
 	}
-	return fmt.Sprintf("  [step %d] think=%s  %s  in=%s out=%s  -> %s",
-		step, th, formatDuration(d), FormatTokens(in), FormatTokens(out), strings.Join(names, ", "))
+	pct := 0
+	if window > 0 {
+		pct = int(float64(in)*100/float64(window) + 0.5)
+	}
+	return fmt.Sprintf("  [step %d] think=%s  %s  in=%s out=%s  ctx %d%% (%s/%s)  -> %s",
+		step, th, formatDuration(d), FormatTokens(in), FormatTokens(out),
+		pct, FormatTokens(in), FormatTokens(window), strings.Join(names, ", "))
 }
 
 func PrintSummary(w io.Writer, intent string, s Stats) {
@@ -132,11 +146,31 @@ func PrintSummary(w io.Writer, intent string, s Stats) {
 	fmt.Fprintln(w, ui.Current().Muted(FormatSummary(intent, s)))
 }
 
-func PrintTrace(w io.Writer, step int, think bool, d time.Duration, in, out int, names []string) {
+func ExploreBudgetFor(intent, task string) int {
+	switch intent {
+	case "lookup":
+		if task == "analysis" {
+			return 10
+		}
+		return 6
+	case "build":
+		switch task {
+		case "docs":
+			return 16
+		case "analysis":
+			return 12
+		}
+		return 8
+	default:
+		return 6
+	}
+}
+
+func PrintTrace(w io.Writer, step int, think bool, d time.Duration, in, out, window int, names []string) {
 	if w == nil {
 		return
 	}
-	fmt.Fprintln(w, FormatTrace(step, think, d, in, out, names))
+	fmt.Fprintln(w, FormatTrace(step, think, d, in, out, window, names))
 }
 
 func (p ThinkingPolicy) enabled(planApproved, shellFail bool) bool {
@@ -148,18 +182,250 @@ func (p ThinkingPolicy) enabled(planApproved, shellFail bool) bool {
 			return true
 		}
 		return shellFail
+	case ThinkPlanStep:
+		if !planApproved {
+			return false
+		}
+		return shellFail
 	default:
 		return false
 	}
 }
 
+func hasProposePlan(msg llm.Message) bool {
+	for _, c := range msg.ToolCalls {
+		if c.Function.Name == "propose_plan" {
+			return true
+		}
+	}
+	return false
+}
+
 var (
-	ErrAborted  = errors.New("agent: aborted")
-	ErrMaxSteps = errors.New("agent: max steps exceeded")
-	ErrNoAnswer = errors.New("agent: no answer")
+	ErrAborted         = errors.New("agent: aborted")
+	ErrMaxSteps        = errors.New("agent: max steps exceeded")
+	ErrNoAnswer        = errors.New("agent: no answer")
+	ErrContextOverflow = errors.New("konsolai: the conversation no longer fits the model's context; start a new session with `new`.")
 )
 
-const elidedOutput = "[output elided to save context]"
+const (
+	elidedPrefix    = "[tool output elided:"
+	contextSafety   = 1024
+	contextTrigger  = 0.60
+	contextTarget   = 0.40
+	minOutputTokens = 2048
+	protectLastMsgs = 6
+	elideSummaryMax = 80
+)
+
+type ElideStats struct {
+	Count  int
+	Before int
+	After  int
+}
+
+func ctxPct(n, window int) int {
+	if window <= 0 {
+		return 0
+	}
+	return int(float64(n)*100/float64(window) + 0.5)
+}
+
+func FormatElide(s ElideStats, window int) string {
+	if s.Count == 0 {
+		return ""
+	}
+	return fmt.Sprintf("  elided %d tool outputs (ctx %d%% -> %d%%)",
+		s.Count, ctxPct(s.Before, window), ctxPct(s.After, window))
+}
+
+func ProfileCap(intent string) int {
+	if intent == "build" {
+		return 12288
+	}
+	return 4096
+}
+
+func MaxTokensFor(window, estimate, cap int) int {
+	room := window - estimate - contextSafety
+	if room < 1 {
+		return 0
+	}
+	if room < cap {
+		return room
+	}
+	return cap
+}
+
+func shouldElide(estimate, window, cap int) bool {
+	if window <= 0 {
+		return false
+	}
+	if float64(estimate) > contextTrigger*float64(window) {
+		return true
+	}
+	return window-estimate-contextSafety < cap/2
+}
+
+func isElided(s string) bool {
+	return strings.HasPrefix(s, elidedPrefix)
+}
+
+func isPlanTool(msgs []llm.Message, i int) bool {
+	id := msgs[i].ToolCallID
+	if id == "" {
+		return false
+	}
+	for j := i - 1; j >= 0; j-- {
+		if msgs[j].Role != llm.RoleAssistant {
+			continue
+		}
+		for _, c := range msgs[j].ToolCalls {
+			if c.ID == id && c.Function.Name == "propose_plan" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func toolNameOf(msgs []llm.Message, i int) string {
+	id := msgs[i].ToolCallID
+	if id == "" {
+		return "tool"
+	}
+	for j := i - 1; j >= 0; j-- {
+		if msgs[j].Role != llm.RoleAssistant {
+			continue
+		}
+		for _, c := range msgs[j].ToolCalls {
+			if c.ID == id {
+				if c.Function.Name != "" {
+					return c.Function.Name
+				}
+				return "tool"
+			}
+		}
+	}
+	return "tool"
+}
+
+func elideSummary(content string) string {
+	s := strings.TrimSpace(content)
+	s = strings.TrimPrefix(s, "error: ")
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		s = "output"
+	}
+	r := []rune(s)
+	if len(r) > elideSummaryMax {
+		s = string(r[:elideSummaryMax])
+	}
+	return s
+}
+
+func elidedMarker(tool, summary string) string {
+	return fmt.Sprintf("[tool output elided: %s %s]", tool, summary)
+}
+
+func elideOneTool(msgs []llm.Message) bool {
+	limit := len(msgs) - protectLastMsgs
+	if limit <= 0 {
+		return false
+	}
+	for i := 0; i < limit; i++ {
+		if msgs[i].Role != llm.RoleTool || isElided(msgs[i].Content) {
+			continue
+		}
+		if isPlanTool(msgs, i) {
+			continue
+		}
+		msgs[i].Content = elidedMarker(toolNameOf(msgs, i), elideSummary(msgs[i].Content))
+		return true
+	}
+	return false
+}
+
+func lastUserTask(msgs []llm.Message, task string) int {
+	idx := -1
+	for i, m := range msgs {
+		if m.Role == llm.RoleUser && m.Content == task {
+			idx = i
+		}
+	}
+	return idx
+}
+
+func aggressiveTrim(msgs []llm.Message, userIdx int) []llm.Message {
+	if len(msgs) == 0 {
+		return msgs
+	}
+	keep := make([]bool, len(msgs))
+	if msgs[0].Role == llm.RoleSystem {
+		keep[0] = true
+	}
+	if userIdx >= 0 && userIdx < len(msgs) {
+		keep[userIdx] = true
+	}
+	for i, m := range msgs {
+		if m.Role != llm.RoleTool || !isPlanTool(msgs, i) {
+			continue
+		}
+		keep[i] = true
+		for j := i - 1; j >= 0; j-- {
+			if msgs[j].Role == llm.RoleAssistant {
+				keep[j] = true
+				break
+			}
+		}
+	}
+	start := len(msgs) - 4
+	if start < 0 {
+		start = 0
+	}
+	for i := start; i < len(msgs); i++ {
+		keep[i] = true
+	}
+	out := make([]llm.Message, 0, len(msgs))
+	for i, m := range msgs {
+		if !keep[i] {
+			continue
+		}
+		if m.Role == llm.RoleTool && len(m.Content) > 400 {
+			m.Content = m.Content[:400]
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+func PrepareCall(client *llm.Client, msgs []llm.Message, tools []llm.ToolSpec, intent string) (estimate, maxTokens int, elide ElideStats, err error) {
+	window := client.ContextWindow()
+	cap := ProfileCap(intent)
+	estimate = client.EstimatePromptTokens(msgs, tools)
+	if shouldElide(estimate, window, cap) {
+		elide.Before = estimate
+		for {
+			est := client.EstimatePromptTokens(msgs, tools)
+			if float64(est) <= contextTarget*float64(window) {
+				break
+			}
+			if !elideOneTool(msgs) {
+				break
+			}
+			elide.Count++
+		}
+		estimate = client.EstimatePromptTokens(msgs, tools)
+		elide.After = estimate
+	}
+	if window-estimate-contextSafety < minOutputTokens {
+		return estimate, 0, elide, ErrContextOverflow
+	}
+	return estimate, MaxTokensFor(window, estimate, cap), elide, nil
+}
 
 func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	prompt := cfg.Prompt
@@ -174,12 +440,16 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	if rec == nil {
 		rec = NopRecorder{}
 	}
+	if _, err := cfg.Client.ResolveModel(ctx); err != nil {
+		return err
+	}
 	msgs := []llm.Message{
 		{Role: llm.RoleSystem, Content: prompt + "\n\n" + systemContext},
 	}
 	msgs = append(msgs, cfg.History...)
 	userMsg := llm.Message{Role: llm.RoleUser, Content: task}
 	msgs = append(msgs, userMsg)
+	userIdx := len(msgs) - 1
 	_ = rec.Message(ctx, userMsg)
 	specs := cfg.Tools.Specs()
 	seenFail := make(map[string]struct{})
@@ -193,6 +463,9 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	sourceReads := 0
 	toolsGone := false
 	goneNoteAdded := false
+	wroteFile := false
+	exportedDoc := false
+	docsNudged := false
 	shellFail := false
 	var st Stats
 	st.RouterTime = cfg.RouterTime
@@ -210,10 +483,14 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	}()
 
 	for step := 0; step < analysisLimit(cfg, sourceReads); step++ {
-		elideToolOutputs(msgs, cfg.ContextBudgetTokens)
 		think := cfg.ThinkingPolicy.enabled(planApproved, shellFail)
 		opts := llm.ChatOptions{Thinking: think, Temperature: temp}
 		shellFail = false
+		forcingPlan := toolsGone && cfg.RequirePlan && !planApproved
+		if forcingPlan && cfg.ThinkingPolicy == ThinkPlanStep {
+			think = true
+			opts.Thinking = true
+		}
 		label := "working"
 		if cfg.RequirePlan && !planApproved {
 			label = "planning"
@@ -221,19 +498,32 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			label = "thinking"
 		}
 		if toolsGone && !goneNoteAdded {
-			gone := llm.Message{Role: llm.RoleUser, Content: ToolsGoneNote}
+			note := ToolsGoneNote
+			if forcingPlan {
+				note = ForcedPlanNote
+			}
+			gone := llm.Message{Role: llm.RoleUser, Content: note}
 			msgs = append(msgs, gone)
 			_ = rec.Message(ctx, gone)
 			goneNoteAdded = true
 		}
 		stepSpecs := specs
 		if toolsGone {
-			if cfg.RequirePlan && !planApproved {
+			if forcingPlan {
 				stepSpecs = planOnlySpecs(specs)
+				opts.ToolChoice = "propose_plan"
 			} else if !cfg.RequirePlan {
 				stepSpecs = nil
 			}
 		}
+		_, maxTok, elide, err := PrepareCall(cfg.Client, msgs, stepSpecs, cfg.Intent)
+		if err != nil {
+			return err
+		}
+		if cfg.Trace && elide.Count > 0 {
+			fmt.Fprintln(cfg.Err, FormatElide(elide, cfg.Client.ContextWindow()))
+		}
+		opts.MaxTokens = maxTok
 		live := ui.StartLive(label)
 		opts.OnProgress = func(p llm.Progress) {
 			live.SetLabel(ProgressLabel(label, p))
@@ -242,8 +532,100 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		msg, usage, err := cfg.Client.Complete(ctx, msgs, stepSpecs, opts)
 		modelElapsed := time.Since(t0)
 		live.Stop()
+		if errors.Is(err, llm.ErrTruncated) {
+			msgs = aggressiveTrim(msgs, userIdx)
+			userIdx = lastUserTask(msgs, task)
+			est := cfg.Client.EstimatePromptTokens(msgs, stepSpecs)
+			window := cfg.Client.ContextWindow()
+			room := window - est - contextSafety
+			if room < minOutputTokens {
+				return ErrContextOverflow
+			}
+			opts.MaxTokens = room
+			live = ui.StartLive(label)
+			opts.OnProgress = func(p llm.Progress) {
+				live.SetLabel(ProgressLabel(label, p))
+			}
+			t0 = time.Now()
+			msg, usage, err = cfg.Client.Complete(ctx, msgs, stepSpecs, opts)
+			modelElapsed += time.Since(t0)
+			live.Stop()
+			if errors.Is(err, llm.ErrTruncated) {
+				return ErrContextOverflow
+			}
+		}
 		if err != nil {
 			return err
+		}
+		if cfg.ThinkingPolicy == ThinkPlanStep && !think && !planApproved && hasProposePlan(msg) {
+			if cfg.Trace {
+				var names []string
+				for _, c := range msg.ToolCalls {
+					names = append(names, c.Function.Name)
+				}
+				st.Steps++
+				st.ModelTime += modelElapsed
+				st.PromptTokens += usage.PromptTokens
+				st.CompletionTokens += usage.CompletionTokens
+				PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, cfg.Client.ContextWindow(), names)
+			} else {
+				st.Steps++
+				st.ModelTime += modelElapsed
+				st.PromptTokens += usage.PromptTokens
+				st.CompletionTokens += usage.CompletionTokens
+			}
+			think = true
+			opts.Thinking = true
+			opts.ToolChoice = "propose_plan"
+			stepSpecs = planOnlySpecs(specs)
+			if len(stepSpecs) == 0 {
+				stepSpecs = specs
+			}
+			label = "thinking"
+			_, maxTok, elide, err = PrepareCall(cfg.Client, msgs, stepSpecs, cfg.Intent)
+			if err != nil {
+				return err
+			}
+			if cfg.Trace && elide.Count > 0 {
+				fmt.Fprintln(cfg.Err, FormatElide(elide, cfg.Client.ContextWindow()))
+			}
+			opts.MaxTokens = maxTok
+			live = ui.StartLive(label)
+			opts.OnProgress = func(p llm.Progress) {
+				live.SetLabel(ProgressLabel(label, p))
+			}
+			t0 := time.Now()
+			msg, usage, err = cfg.Client.Complete(ctx, msgs, stepSpecs, opts)
+			modelElapsed = time.Since(t0)
+			live.Stop()
+			if errors.Is(err, llm.ErrTruncated) {
+				msgs = aggressiveTrim(msgs, userIdx)
+				userIdx = lastUserTask(msgs, task)
+				est := cfg.Client.EstimatePromptTokens(msgs, stepSpecs)
+				window := cfg.Client.ContextWindow()
+				room := window - est - contextSafety
+				if room < minOutputTokens {
+					return ErrContextOverflow
+				}
+				opts.MaxTokens = room
+				live = ui.StartLive(label)
+				opts.OnProgress = func(p llm.Progress) {
+					live.SetLabel(ProgressLabel(label, p))
+				}
+				t0 = time.Now()
+				msg, usage, err = cfg.Client.Complete(ctx, msgs, stepSpecs, opts)
+				modelElapsed += time.Since(t0)
+				live.Stop()
+				if errors.Is(err, llm.ErrTruncated) {
+					return ErrContextOverflow
+				}
+			}
+			if err != nil {
+				return err
+			}
+		}
+		if forcingPlan {
+			msg.Content = ""
 		}
 		st.Steps++
 		st.ModelTime += modelElapsed
@@ -254,12 +636,23 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			names = append(names, c.Function.Name)
 		}
 		if cfg.Trace {
-			PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, names)
+			PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, cfg.Client.ContextWindow(), names)
 		}
 		msgs = append(msgs, msg)
 		_ = rec.Message(ctx, msg)
 
 		if len(msg.ToolCalls) == 0 {
+			if cfg.Task == "docs" && planApproved && !wroteFile && !exportedDoc && !docsNudged {
+				docsNudged = true
+				note := DocsFileNote
+				if wantsDocExport(task, planFiles) {
+					note = DocsExportNote
+				}
+				nudge := llm.Message{Role: llm.RoleUser, Content: note}
+				msgs = append(msgs, nudge)
+				_ = rec.Message(ctx, nudge)
+				continue
+			}
 			text := trimLeadingBlanks(msg.Content)
 			if strings.TrimSpace(text) == "" {
 				return ErrNoAnswer
@@ -272,6 +665,10 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			fmt.Fprintln(cfg.Out, ui.Current().Muted(text))
 		}
 
+		noteWasSent := noteSent
+		stepReadOnly := 0
+		stepOther := 0
+		lastReadOnly := -1
 		for _, call := range msg.ToolCalls {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -302,11 +699,10 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				continue
 			}
 			kind := action.Kind()
-			if noteSent && kind == tools.ReadOnly {
-				readonlyAfterNote++
-				if readonlyAfterNote >= hardStopAfter(cfg, sourceReads) {
-					toolsGone = true
-				}
+			if kind == tools.ReadOnly {
+				stepReadOnly++
+			} else if kind != tools.Plan {
+				stepOther++
 			}
 			if kind == tools.Mutating && cfg.RequirePlan && !planApproved {
 				tm := llm.Message{
@@ -409,6 +805,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					}
 					msgs = append(msgs, tm)
 					_ = rec.Message(ctx, tm)
+					lastReadOnly = len(msgs) - 1
 					continue
 				}
 				seenRead[key] = struct{}{}
@@ -430,6 +827,14 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			if result.Change != nil {
 				_ = rec.FileChange(ctx, *result.Change)
 			}
+			if !result.IsError {
+				switch call.Function.Name {
+				case "write_file":
+					wroteFile = true
+				case "export_doc":
+					exportedDoc = true
+				}
+			}
 			if result.Final {
 				text := trimLeadingBlanks(result.Output)
 				if strings.TrimSpace(text) == "" {
@@ -446,19 +851,8 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			}
 			fmt.Fprintf(cfg.Out, "%s %s · %s\n", mark, pal.Muted(displayMeta(result)), pal.Muted(formatDuration(elapsed)))
 			content := result.Output
-			if kind == tools.ReadOnly {
-				if !cfg.RequirePlan || !planApproved {
-					explore++
-				}
-			} else if kind != tools.Plan {
-				explore = 0
-			}
 			if cfg.Task == "analysis" && analysisSourceRead(call.Function.Name, call.Function.Arguments) && !result.IsError {
 				sourceReads++
-			}
-			if cfg.ExploreBudget > 0 && explore >= cfg.ExploreBudget && cfg.ExploreNote != "" {
-				content += "\n\n" + exploreNote(cfg, sourceReads)
-				noteSent = true
 			}
 			if result.IsError {
 				sum := sha256.Sum256([]byte(result.Output))
@@ -476,18 +870,56 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			}
 			msgs = append(msgs, tm)
 			_ = rec.Message(ctx, tm)
+			if kind == tools.ReadOnly {
+				lastReadOnly = len(msgs) - 1
+			}
 			if call.Function.Name == "run_shell" && result.IsError {
 				shellFail = true
+			}
+		}
+		prePlanEvery := !planApproved && (cfg.RequirePlan || cfg.Intent == "act" || cfg.Intent == "build")
+		if prePlanEvery {
+			explore++
+			if cfg.ExploreBudget > 0 && explore >= cfg.ExploreBudget && cfg.ExploreNote != "" && lastReadOnly >= 0 {
+				msgs[lastReadOnly].Content += "\n\n" + exploreNote(cfg, sourceReads)
+				noteSent = true
+			}
+			if noteWasSent {
+				readonlyAfterNote++
+				if readonlyAfterNote >= hardStopAfter(cfg, sourceReads) {
+					toolsGone = true
+				}
+			}
+		} else if stepOther > 0 {
+			explore = 0
+		} else if stepReadOnly > 0 && (!cfg.RequirePlan || !planApproved) {
+			explore++
+			if cfg.ExploreBudget > 0 && explore >= cfg.ExploreBudget && cfg.ExploreNote != "" && lastReadOnly >= 0 {
+				msgs[lastReadOnly].Content += "\n\n" + exploreNote(cfg, sourceReads)
+				noteSent = true
+			}
+			if noteWasSent {
+				readonlyAfterNote++
+				if readonlyAfterNote >= hardStopAfter(cfg, sourceReads) {
+					toolsGone = true
+				}
 			}
 		}
 	}
 	note := llm.Message{Role: llm.RoleUser, Content: MaxStepsNote}
 	msgs = append(msgs, note)
 	_ = rec.Message(ctx, note)
+	_, maxTok, elide, prepErr := PrepareCall(cfg.Client, msgs, nil, cfg.Intent)
+	if prepErr != nil {
+		return prepErr
+	}
+	if cfg.Trace && elide.Count > 0 {
+		fmt.Fprintln(cfg.Err, FormatElide(elide, cfg.Client.ContextWindow()))
+	}
 	live := ui.StartLive("thinking")
 	t0 := time.Now()
 	msg, usage, err := cfg.Client.Complete(ctx, msgs, nil, llm.ChatOptions{
-		Thinking: false, Temperature: temp,
+		Thinking: false, Temperature: temp, MaxTokens: maxTok,
 		OnProgress: func(p llm.Progress) { live.SetLabel(ProgressLabel("thinking", p)) },
 	})
 	live.Stop()
@@ -547,40 +979,6 @@ func displayMeta(r tools.Result) string {
 	return s
 }
 
-func tokenEstimate(msgs []llm.Message) int {
-	n := 0
-	for _, m := range msgs {
-		n += len(m.Content)
-		for _, c := range m.ToolCalls {
-			n += len(c.Function.Name) + len(c.Function.Arguments)
-		}
-	}
-	return n / 4
-}
-
-func elideToolOutputs(msgs []llm.Message, budget int) {
-	if budget <= 0 {
-		return
-	}
-	for tokenEstimate(msgs) > budget {
-		limit := len(msgs) - 6
-		if limit <= 0 {
-			return
-		}
-		idx := -1
-		for i := 0; i < limit; i++ {
-			if msgs[i].Role == llm.RoleTool && msgs[i].Content != elidedOutput {
-				idx = i
-				break
-			}
-		}
-		if idx < 0 {
-			return
-		}
-		msgs[idx].Content = elidedOutput
-	}
-}
-
 func canonicalJSON(raw string) string {
 	var v any
 	if err := json.Unmarshal([]byte(raw), &v); err != nil {
@@ -600,6 +998,19 @@ func filePathOf(a tools.Action) (string, bool) {
 		return "", false
 	}
 	return p.FilePath(), true
+}
+
+func wantsDocExport(request string, files []string) bool {
+	if strings.Contains(strings.ToLower(request), ".pdf") || strings.Contains(strings.ToLower(request), ".html") {
+		return true
+	}
+	for _, f := range files {
+		fl := strings.ToLower(f)
+		if strings.Contains(fl, ".pdf") || strings.Contains(fl, ".html") {
+			return true
+		}
+	}
+	return false
 }
 
 func planFilesOf(a tools.Action) []string {
@@ -800,4 +1211,109 @@ func analysisSourceRead(name, args string) bool {
 		return false
 	}
 	return p.Path != ""
+}
+
+const (
+	resumeTokenCap   = 6000
+	resumeArgMax     = 200
+	resumeToolElided = "[tool output from an earlier turn elided]"
+)
+
+func LeanResume(hist []llm.Message, tokensPerChar float64) []llm.Message {
+	if len(hist) == 0 {
+		return hist
+	}
+	if tokensPerChar <= 0 {
+		tokensPerChar = 0.30
+	}
+	lastUser := -1
+	for i := len(hist) - 1; i >= 0; i-- {
+		if hist[i].Role == llm.RoleUser {
+			lastUser = i
+			break
+		}
+	}
+	out := make([]llm.Message, len(hist))
+	copy(out, hist)
+	for i := range out {
+		if n := len(out[i].ToolCalls); n > 0 {
+			tcs := make([]llm.ToolCall, n)
+			copy(tcs, out[i].ToolCalls)
+			out[i].ToolCalls = tcs
+		}
+	}
+	for i := range out {
+		if out[i].Role == llm.RoleAssistant {
+			for j := range out[i].ToolCalls {
+				args := out[i].ToolCalls[j].Function.Arguments
+				if len(args) > resumeArgMax {
+					out[i].ToolCalls[j].Function.Arguments = args[:resumeArgMax]
+				}
+			}
+		}
+		if i < lastUser && out[i].Role == llm.RoleTool {
+			out[i].Content = resumeToolElided
+		}
+	}
+	for resumeTokens(out, tokensPerChar) > resumeTokenCap && canDropPair(out) {
+		out = dropOldestPair(out)
+	}
+	return out
+}
+
+func resumeTokens(msgs []llm.Message, ratio float64) int {
+	return int(float64(llm.MessageChars(msgs)) * ratio)
+}
+
+func canDropPair(msgs []llm.Message) bool {
+	users := 0
+	for _, m := range msgs {
+		if m.Role == llm.RoleUser {
+			users++
+		}
+	}
+	if users >= 2 {
+		return true
+	}
+	return len(msgs) > 0 && msgs[0].Role != llm.RoleUser && users >= 1
+}
+
+func dropOldestPair(msgs []llm.Message) []llm.Message {
+	if len(msgs) == 0 {
+		return msgs
+	}
+	if msgs[0].Role != llm.RoleUser {
+		i := 0
+		for i < len(msgs) && msgs[i].Role != llm.RoleUser {
+			i++
+		}
+		if i > 0 {
+			return msgs[i:]
+		}
+	}
+	i := 1
+	for i < len(msgs) && msgs[i].Role != llm.RoleUser {
+		i++
+	}
+	return msgs[i:]
+}
+
+func toolProtocolValid(msgs []llm.Message) bool {
+	pending := map[string]bool{}
+	for _, m := range msgs {
+		switch m.Role {
+		case llm.RoleAssistant:
+			pending = map[string]bool{}
+			for _, c := range m.ToolCalls {
+				if c.ID != "" {
+					pending[c.ID] = true
+				}
+			}
+		case llm.RoleTool:
+			if m.ToolCallID == "" || !pending[m.ToolCallID] {
+				return false
+			}
+		}
+	}
+	return true
 }

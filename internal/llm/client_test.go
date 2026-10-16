@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -71,6 +72,47 @@ func TestCompleteParsesToolCallsAndSendsTools(t *testing.T) {
 	}
 	if !kwargs.EnableThinking {
 		t.Fatal("enable_thinking want true")
+	}
+}
+
+func TestNamedToolChoice(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		_ = json.NewEncoder(w).Encode(completeResponse{
+			Choices: []struct {
+				Message Message `json:"message"`
+			}{{Message: Message{Role: RoleAssistant, Content: "ok"}}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL+"/v1", "qwen")
+	specs := []ToolSpec{{
+		Type: "function",
+		Function: FunctionSpec{
+			Name:       "propose_plan",
+			Parameters: json.RawMessage(`{"type":"object"}`),
+		},
+	}}
+	_, _, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, specs, ChatOptions{ToolChoice: "propose_plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(gotBody, &raw); err != nil {
+		t.Fatal(err)
+	}
+	var choice struct {
+		Type     string `json:"type"`
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(raw["tool_choice"], &choice); err != nil {
+		t.Fatal(err)
+	}
+	if choice.Type != "function" || choice.Function.Name != "propose_plan" {
+		t.Fatalf("tool_choice %s", raw["tool_choice"])
 	}
 }
 
@@ -430,6 +472,10 @@ func TestCompleteSSETruncated(t *testing.T) {
 
 func TestCompleteSSEIdleTimeout(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/models") {
+			http.NotFound(w, r)
+			return
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		if f, ok := w.(http.Flusher); ok {
@@ -449,6 +495,10 @@ func TestCompleteSSEIdleTimeout(t *testing.T) {
 func TestCompleteRetry503ThenSuccess(t *testing.T) {
 	var n atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/models") {
+			http.NotFound(w, r)
+			return
+		}
 		if n.Add(1) == 1 {
 			http.Error(w, "busy", http.StatusServiceUnavailable)
 			return
@@ -473,6 +523,10 @@ func TestCompleteRetry503ThenSuccess(t *testing.T) {
 func TestCompleteNoRetryAfterPartialData(t *testing.T) {
 	var n atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/models") {
+			http.NotFound(w, r)
+			return
+		}
 		n.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n")
@@ -495,6 +549,10 @@ func TestCompleteNoRetryAfterPartialData(t *testing.T) {
 func TestCompleteNoRetry4xx(t *testing.T) {
 	var n atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/models") {
+			http.NotFound(w, r)
+			return
+		}
 		n.Add(1)
 		http.Error(w, "bad", http.StatusBadRequest)
 	}))
@@ -508,5 +566,96 @@ func TestCompleteNoRetry4xx(t *testing.T) {
 	}
 	if n.Load() != 1 {
 		t.Fatalf("retried %d", n.Load())
+	}
+}
+
+func TestContextWindowFromMaxModelLen(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/models") {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"id": "other", "max_model_len": 4096},
+				{"id": "qwen38.nvfp4", "max_model_len": 94208},
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL+"/v1", "qwen38.nvfp4")
+	if c.ContextWindow() != 32768 {
+		t.Fatalf("unset window %d", c.ContextWindow())
+	}
+	id, err := c.ResolveModel(context.Background())
+	if err != nil || id != "qwen38.nvfp4" {
+		t.Fatalf("id=%q err=%v", id, err)
+	}
+	if c.ContextWindow() != 94208 {
+		t.Fatalf("window %d", c.ContextWindow())
+	}
+}
+
+func TestContextWindowFallback(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/models") {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{"id": "qwen"}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL+"/v1", "")
+	id, err := c.ResolveModel(context.Background())
+	if err != nil || id != "qwen" {
+		t.Fatalf("id=%q err=%v", id, err)
+	}
+	if c.ContextWindow() != 32768 {
+		t.Fatalf("window %d", c.ContextWindow())
+	}
+}
+
+func TestTokensPerCharCalibration(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/models") {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(completeResponse{
+			Choices: []struct {
+				Message Message `json:"message"`
+			}{{Message: Message{Role: RoleAssistant, Content: "ok"}}},
+			Usage: &usageJSON{PromptTokens: 60, CompletionTokens: 4},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL+"/v1", "qwen")
+	if math.Abs(c.TokensPerChar()-0.30) > 1e-9 {
+		t.Fatalf("start ratio %v", c.TokensPerChar())
+	}
+	msgs := []Message{{Role: RoleUser, Content: strings.Repeat("a", 100)}}
+	if _, _, err := c.Complete(context.Background(), msgs, nil, ChatOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	// observed 60/100 = 0.60; ema = 0.5*0.60 + 0.5*0.30 = 0.45
+	if math.Abs(c.TokensPerChar()-0.45) > 1e-9 {
+		t.Fatalf("after one %v", c.TokensPerChar())
+	}
+	if _, _, err := c.Complete(context.Background(), msgs, nil, ChatOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	// observed 0.60; ema = 0.5*0.60 + 0.5*0.45 = 0.525
+	if math.Abs(c.TokensPerChar()-0.525) > 1e-9 {
+		t.Fatalf("after two %v", c.TokensPerChar())
+	}
+	tools := []ToolSpec{{
+		Type:     "function",
+		Function: FunctionSpec{Name: "read_file", Description: "read", Parameters: json.RawMessage(`{}`)},
+	}}
+	want := int(float64(MessageChars(msgs))*c.TokensPerChar() + float64(ToolsSchemaChars(tools))*c.TokensPerChar())
+	if c.EstimatePromptTokens(msgs, tools) != want || want <= 0 {
+		t.Fatalf("estimate %d want %d", c.EstimatePromptTokens(msgs, tools), want)
 	}
 }

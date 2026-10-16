@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -35,18 +36,38 @@ func (s stubConfirm) ConfirmForced(summary, preview string) (ui.Decision, string
 }
 
 type replay struct {
-	t       *testing.T
-	mu      sync.Mutex
-	replies []llm.Message
-	reqs    [][]llm.Message
-	tools   [][]llm.ToolSpec
-	think   []bool
+	t            *testing.T
+	mu           sync.Mutex
+	replies      []llm.Message
+	reqs         [][]llm.Message
+	tools        [][]llm.ToolSpec
+	think        []bool
+	toolChoices  []json.RawMessage
+	maxTokens    []int
+	promptTokens []int
+	truncates    []bool
+	modelLen     int
 }
 
 func newReplay(t *testing.T, replies []llm.Message) (*llm.Client, *replay) {
 	t.Helper()
 	r := &replay{t: t, replies: replies}
 	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, req *http.Request) {
+		win := r.modelLen
+		if win <= 0 {
+			win = 94208
+		}
+		_ = json.NewEncoder(w).Encode(struct {
+			Data []struct {
+				ID          string `json:"id"`
+				MaxModelLen int    `json:"max_model_len"`
+			} `json:"data"`
+		}{Data: []struct {
+			ID          string `json:"id"`
+			MaxModelLen int    `json:"max_model_len"`
+		}{{ID: "test", MaxModelLen: win}}})
+	})
 	mux.HandleFunc("/v1/chat/completions", r.serve)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -55,8 +76,10 @@ func newReplay(t *testing.T, replies []llm.Message) (*llm.Client, *replay) {
 
 func (r *replay) serve(w http.ResponseWriter, req *http.Request) {
 	var body struct {
-		Messages           []llm.Message  `json:"messages"`
-		Tools              []llm.ToolSpec `json:"tools"`
+		Messages           []llm.Message   `json:"messages"`
+		Tools              []llm.ToolSpec  `json:"tools"`
+		ToolChoice         json.RawMessage `json:"tool_choice"`
+		MaxTokens          int             `json:"max_tokens"`
 		ChatTemplateKwargs struct {
 			EnableThinking bool `json:"enable_thinking"`
 		} `json:"chat_template_kwargs"`
@@ -68,11 +91,36 @@ func (r *replay) serve(w http.ResponseWriter, req *http.Request) {
 	r.mu.Lock()
 	r.reqs = append(r.reqs, body.Messages)
 	r.tools = append(r.tools, body.Tools)
+	r.toolChoices = append(r.toolChoices, body.ToolChoice)
 	r.think = append(r.think, body.ChatTemplateKwargs.EnableThinking)
+	r.maxTokens = append(r.maxTokens, body.MaxTokens)
 	i := len(r.reqs) - 1
+	pt := 1000
+	if r.promptTokens != nil {
+		pt = 0
+		if i < len(r.promptTokens) {
+			pt = r.promptTokens[i]
+		}
+	}
 	r.mu.Unlock()
 	if i >= len(r.replies) {
 		http.Error(w, "no more replies", http.StatusInternalServerError)
+		return
+	}
+	if i < len(r.truncates) && r.truncates[i] {
+		payload, err := json.Marshal(map[string]any{
+			"choices": []map[string]any{{
+				"delta":         map[string]any{"content": r.replies[i].Content},
+				"finish_reason": "length",
+			}},
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: "+string(payload)+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
 		return
 	}
 	_ = json.NewEncoder(w).Encode(struct {
@@ -88,7 +136,7 @@ func (r *replay) serve(w http.ResponseWriter, req *http.Request) {
 	}{{Message: r.replies[i]}}, Usage: struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
-	}{PromptTokens: 1000, CompletionTokens: 200}})
+	}{PromptTokens: pt, CompletionTokens: 200}})
 }
 
 func (r *replay) lastTool() llm.Message {
@@ -301,13 +349,13 @@ func TestContextElision(t *testing.T) {
 	}
 	replies = append(replies, llm.Message{Role: llm.RoleAssistant, Content: "done"})
 	client, rep := newReplay(t, replies)
+	rep.promptTokens = []int{25000, 25000, 25000, 25000, 25000, 25000, 25000, 25000, 25000}
 	err = Run(context.Background(), Config{
-		Client:              client,
-		Tools:               tools.NewRegistry(g, io.Discard, list, nil, nil),
-		Confirmer:           stubConfirm{d: ui.Approve},
-		Out:                 io.Discard,
-		MaxSteps:            15,
-		ContextBudgetTokens: 80,
+		Client:    client,
+		Tools:     tools.NewRegistry(g, io.Discard, list, nil, nil),
+		Confirmer: stubConfirm{d: ui.Approve},
+		Out:       io.Discard,
+		MaxSteps:  15,
 	}, "sys", "task")
 	if err != nil {
 		t.Fatal(err)
@@ -315,13 +363,203 @@ func TestContextElision(t *testing.T) {
 	found := false
 	for _, req := range rep.reqs {
 		for _, m := range req {
-			if m.Role == llm.RoleTool && m.Content == elidedOutput {
+			if m.Role == llm.RoleTool && isElided(m.Content) {
 				found = true
 			}
 		}
 	}
 	if !found {
 		t.Fatal("expected an elided tool message")
+	}
+}
+
+func samePrefix(prev, next []llm.Message) bool {
+	if len(next) < len(prev) {
+		return false
+	}
+	for i := range prev {
+		if prev[i].Role != next[i].Role || prev[i].Content != next[i].Content || prev[i].ToolCallID != next[i].ToolCallID {
+			return false
+		}
+		if len(prev[i].ToolCalls) != len(next[i].ToolCalls) {
+			return false
+		}
+		for j := range prev[i].ToolCalls {
+			if prev[i].ToolCalls[j].ID != next[i].ToolCalls[j].ID ||
+				prev[i].ToolCalls[j].Function.Name != next[i].ToolCalls[j].Function.Name ||
+				prev[i].ToolCalls[j].Function.Arguments != next[i].ToolCalls[j].Function.Arguments {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func TestHysteresisElisionOnePass(t *testing.T) {
+	root := t.TempDir()
+	big := strings.Repeat("hello world\n", 400)
+	const nfiles = 14
+	for i := 0; i < nfiles; i++ {
+		name := fmt.Sprintf("f%d.txt", i)
+		if err := os.WriteFile(filepath.Join(root, name), []byte(big), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var replies []llm.Message
+	for i := 0; i < nfiles; i++ {
+		replies = append(replies, assistant(call(fmt.Sprintf("c%d", i), "read_file", fmt.Sprintf(`{"path":"f%d.txt"}`, i))))
+	}
+	replies = append(replies, llm.Message{Role: llm.RoleAssistant, Content: "done"})
+	client, rep := newReplay(t, replies)
+	rep.modelLen = 32768
+	rep.promptTokens = make([]int, len(replies))
+	reg := tools.NewRegistry(g, io.Discard, nil, nil, nil).Named("read_file")
+	var errW strings.Builder
+	err = Run(context.Background(), Config{
+		Client: client, Tools: reg, Confirmer: stubConfirm{d: ui.Approve},
+		Out: io.Discard, MaxSteps: 15, Trace: true, Err: &errW, Intent: "act",
+	}, "sys", "task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	window := client.ContextWindow()
+	if window != 32768 {
+		t.Fatalf("window %d", window)
+	}
+	passes := 0
+	for i := 1; i < len(rep.reqs); i++ {
+		if samePrefix(rep.reqs[i-1], rep.reqs[i]) {
+			continue
+		}
+		nElided := 0
+		for _, m := range rep.reqs[i] {
+			if m.Role == llm.RoleTool && isElided(m.Content) {
+				nElided++
+			}
+		}
+		if nElided < 2 {
+			t.Fatalf("prefix changed at %d without a batch elide (%d)", i, nElided)
+		}
+		est := client.EstimatePromptTokens(rep.reqs[i], rep.tools[i])
+		if float64(est) > contextTarget*float64(window)+1 {
+			t.Fatalf("one pass should reach <=40%%, est=%d window=%d", est, window)
+		}
+		passes++
+	}
+	if passes < 1 {
+		t.Fatal("expected a hysteresis pass")
+	}
+	if !strings.Contains(errW.String(), "elided") || !strings.Contains(errW.String(), "tool outputs") {
+		t.Fatalf("trace %q", errW.String())
+	}
+}
+
+func TestElidedMarkerDeterministic(t *testing.T) {
+	a := elidedMarker("read_file", elideSummary("hello world\nmore"))
+	b := elidedMarker("read_file", elideSummary("hello world\nmore"))
+	if a != b || a != "[tool output elided: read_file hello world]" {
+		t.Fatalf("%q %q", a, b)
+	}
+	if FormatElide(ElideStats{Count: 9, Before: 57467, After: 35799}, 94208) != "  elided 9 tool outputs (ctx 61% -> 38%)" {
+		t.Fatalf("%q", FormatElide(ElideStats{Count: 9, Before: 57467, After: 35799}, 94208))
+	}
+}
+
+func TestMaxTokensComputation(t *testing.T) {
+	if ProfileCap("answer") != 4096 || ProfileCap("lookup") != 4096 || ProfileCap("act") != 4096 {
+		t.Fatal("small caps")
+	}
+	if ProfileCap("build") != 12288 {
+		t.Fatal("build cap")
+	}
+	if MaxTokensFor(94208, 50000, 4096) != 4096 {
+		t.Fatalf("capped %d", MaxTokensFor(94208, 50000, 4096))
+	}
+	if MaxTokensFor(32768, 30000, 4096) != 1744 {
+		t.Fatalf("room %d", MaxTokensFor(32768, 30000, 4096))
+	}
+	_, rep, err := setupCfg(t, []llm.Message{
+		{Role: llm.RoleAssistant, Content: "ok"},
+	}, nil, Config{Intent: "act"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.maxTokens) == 0 || rep.maxTokens[0] <= 0 || rep.maxTokens[0] > 4096 {
+		t.Fatalf("max_tokens %v", rep.maxTokens)
+	}
+}
+
+func TestTruncationRecovery(t *testing.T) {
+	var out bytes.Buffer
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, rep := newReplay(t, []llm.Message{
+		{Role: llm.RoleAssistant, Content: "cut off"},
+		{Role: llm.RoleAssistant, Content: "full answer after retry"},
+	})
+	rep.truncates = []bool{true}
+	err = Run(context.Background(), Config{
+		Client: client, Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		Confirmer: stubConfirm{d: ui.Approve}, Out: &out, MaxSteps: 5, Intent: "act",
+	}, "sys", "task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "full answer after retry") {
+		t.Fatalf("%q", out.String())
+	}
+	if len(rep.reqs) != 2 {
+		t.Fatalf("reqs %d", len(rep.reqs))
+	}
+	if len(rep.maxTokens) < 2 || rep.maxTokens[1] <= rep.maxTokens[0] {
+		t.Fatalf("max_tokens not raised %v", rep.maxTokens)
+	}
+}
+
+func TestTruncationTwiceOverflows(t *testing.T) {
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, rep := newReplay(t, []llm.Message{
+		{Role: llm.RoleAssistant, Content: "cut"},
+		{Role: llm.RoleAssistant, Content: "cut again"},
+	})
+	rep.truncates = []bool{true, true}
+	err = Run(context.Background(), Config{
+		Client: client, Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		Confirmer: stubConfirm{d: ui.Approve}, Out: io.Discard, MaxSteps: 5, Intent: "act",
+	}, "sys", "task")
+	if !errors.Is(err, ErrContextOverflow) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestContextOverflowError(t *testing.T) {
+	huge := strings.Repeat("word ", 80000)
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, _ := newReplay(t, []llm.Message{{Role: llm.RoleAssistant, Content: "ok"}})
+	err = Run(context.Background(), Config{
+		Client: client, Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		Confirmer: stubConfirm{d: ui.Approve}, Out: io.Discard, MaxSteps: 3, Intent: "act",
+	}, huge, huge)
+	if !errors.Is(err, ErrContextOverflow) {
+		t.Fatalf("got %v", err)
+	}
+	if err.Error() != "konsolai: the conversation no longer fits the model's context; start a new session with `new`." {
+		t.Fatalf("msg %q", err.Error())
 	}
 }
 
@@ -624,6 +862,68 @@ func TestUntilPlanThinkingSchedule(t *testing.T) {
 	}
 }
 
+func TestPlanStepThinkingSchedule(t *testing.T) {
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "list_dir", `{"path":"."}`)),
+		assistant(call("2", "propose_plan", `{"summary":"add a.txt","steps":["write"],"files":["a.txt"]}`)),
+		assistant(call("3", "propose_plan", `{"summary":"add a.txt","steps":["write"],"files":["a.txt"]}`)),
+		assistant(call("4", "write_file", `{"path":"a.txt","content":"x"}`)),
+		assistant(call("5", "run_shell", `{"cmd":"false"}`)),
+		assistant(call("6", "write_file", `{"path":"a.txt","content":"y"}`)),
+		assistant(call("7", "finish", `{"summary":"done"}`)),
+	}, stubConfirm{d: ui.Approve}, Config{
+		RequirePlan:    true,
+		AutoApprove:    true,
+		ThinkingPolicy: ThinkPlanStep,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []bool{false, false, true, false, false, true, false}
+	if len(rep.think) != len(want) {
+		t.Fatalf("think calls %v want %v", rep.think, want)
+	}
+	for i, g := range rep.think {
+		if g != want[i] {
+			t.Fatalf("think[%d]=%v want %v (%v)", i, g, want[i], rep.think)
+		}
+	}
+	var choice struct {
+		Type     string `json:"type"`
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(rep.toolChoices[2], &choice); err != nil || choice.Function.Name != "propose_plan" {
+		t.Fatalf("retry tool_choice %s", rep.toolChoices[2])
+	}
+	if !samePrefix(rep.reqs[1], rep.reqs[2]) {
+		t.Fatal("plan retry must re-issue the same messages")
+	}
+}
+
+func TestPlanStepForcedPlanThinks(t *testing.T) {
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "list_dir", `{"path":"."}`)),
+		assistant(call("2", "list_dir", `{"path":"."}`)),
+		assistant(call("3", "list_dir", `{"path":"."}`)),
+		assistant(call("4", "propose_plan", `{"summary":"x","steps":["y"],"files":["a.txt"]}`)),
+		assistant(call("5", "finish", `{"summary":"done"}`)),
+	}, stubConfirm{d: ui.Approve}, Config{
+		RequirePlan: true, ExploreBudget: 1, ExploreNote: ExploreNoteBuild, MaxSteps: 8,
+		ThinkingPolicy: ThinkPlanStep,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.think) < 4 {
+		t.Fatalf("think %v", rep.think)
+	}
+	if !rep.think[3] {
+		t.Fatalf("forced plan should think: %v", rep.think)
+	}
+}
+
 func TestFormatSummaryAndTrace(t *testing.T) {
 	s := Stats{
 		Steps:            12,
@@ -637,13 +937,13 @@ func TestFormatSummaryAndTrace(t *testing.T) {
 	if got != want {
 		t.Fatalf("summary %q want %q", got, want)
 	}
-	tr := FormatTrace(2, true, 12300*time.Millisecond, 4100, 300, []string{"tool_a", "tool_b"})
-	want = "  [step 2] think=on  12.3s  in=4.1k out=0.3k  -> tool_a, tool_b"
+	tr := FormatTrace(2, true, 12300*time.Millisecond, 58400, 300, 94200, []string{"tool_a", "tool_b"})
+	want = "  [step 2] think=on  12.3s  in=58.4k out=0.3k  ctx 62% (58.4k/94.2k)  -> tool_a, tool_b"
 	if tr != want {
 		t.Fatalf("trace %q want %q", tr, want)
 	}
-	tr = FormatTrace(1, false, time.Second, 0, 0, nil)
-	if !strings.Contains(tr, "think=off") || !strings.Contains(tr, "->") {
+	tr = FormatTrace(1, false, time.Second, 0, 0, 32768, nil)
+	if !strings.Contains(tr, "think=off") || !strings.Contains(tr, "ctx 0%") || !strings.Contains(tr, "->") {
 		t.Fatalf("off %q", tr)
 	}
 }
@@ -881,6 +1181,43 @@ func TestHardExploreStopBuildKeepsProposePlan(t *testing.T) {
 	if len(rep.tools[3]) != 1 || rep.tools[3][0].Function.Name != "propose_plan" {
 		t.Fatalf("forced build tools %+v", rep.tools[3])
 	}
+	var choice struct {
+		Type     string `json:"type"`
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(rep.toolChoices[3], &choice); err != nil || choice.Type != "function" || choice.Function.Name != "propose_plan" {
+		t.Fatalf("tool_choice %s", rep.toolChoices[3])
+	}
+	found := false
+	for _, m := range rep.reqs[3] {
+		if m.Role == llm.RoleUser && m.Content == ForcedPlanNote {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("missing forced plan note")
+	}
+}
+
+func TestForcedPlanDiscardsText(t *testing.T) {
+	var out bytes.Buffer
+	_, _, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "list_dir", `{"path":"."}`)),
+		assistant(call("2", "list_dir", `{"path":"."}`)),
+		assistant(call("3", "list_dir", `{"path":"."}`)),
+		{Role: llm.RoleAssistant, Content: "I will now plan", ToolCalls: []llm.ToolCall{
+			call("4", "propose_plan", `{"summary":"x","steps":["y"],"files":["a.txt"]}`),
+		}},
+		assistant(call("5", "finish", `{"summary":"done"}`)),
+	}, stubConfirm{d: ui.Approve}, Config{RequirePlan: true, ExploreBudget: 1, ExploreNote: ExploreNoteBuild, MaxSteps: 8, Out: &out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "I will now plan") {
+		t.Fatalf("forced plan text should be discarded: %q", out.String())
+	}
 }
 
 func TestMaxStepsPrintsSummary(t *testing.T) {
@@ -923,6 +1260,14 @@ func TestPromptNotes(t *testing.T) {
 	for _, p := range []string{ActPrompt, CodePrompt, AnswerPrompt, LookupPrompt} {
 		if !strings.Contains(p, SecretRule) {
 			t.Fatal("prompt missing secret rule")
+		}
+		if !strings.Contains(p, FenceRule) {
+			t.Fatal("prompt missing fence rule")
+		}
+	}
+	for _, p := range []string{ActPrompt, CodePrompt, LookupPrompt} {
+		if !strings.Contains(p, batchReads) {
+			t.Fatal("prompt missing batch-reads rule")
 		}
 	}
 }
@@ -1065,5 +1410,269 @@ func TestAnalysisIgnoresManifestReads(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("manifest/README reads must not release the analysis hold")
+	}
+}
+
+func TestExploreBudgetCountsStepsNotCalls(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"a.txt", "b.txt", "c.txt", "d.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(name), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, rep := newReplay(t, []llm.Message{
+		assistant(
+			call("1", "read_file", `{"path":"a.txt"}`),
+			call("2", "read_file", `{"path":"b.txt"}`),
+			call("3", "read_file", `{"path":"c.txt"}`),
+			call("4", "read_file", `{"path":"d.txt"}`),
+		),
+		assistant(call("5", "finish", `{"summary":"ok"}`)),
+	})
+	err = Run(context.Background(), Config{
+		Client: client, Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		Confirmer: stubConfirm{d: ui.Approve}, Out: io.Discard,
+		ExploreBudget: 2, ExploreNote: ExploreNoteLookup, MaxSteps: 6,
+	}, "sys", "read them")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, msgs := range rep.reqs {
+		for _, m := range msgs {
+			if m.Role == llm.RoleTool && strings.Contains(m.Content, ExploreNoteLookup) {
+				t.Fatal("4 parallel reads are one step; budget 2 must not fire")
+			}
+		}
+	}
+}
+
+func TestPrePlanExploreCountsEveryStep(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"a.txt", "b.txt", "c.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(name), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, rep := newReplay(t, []llm.Message{
+		assistant(call("1", "read_file", `{"path":"a.txt"}`)),
+		assistant(call("2", "read_file", `{"path":"b.txt"}`)),
+		assistant(call("3", "run_shell", `{"cmd":"rm a.txt"}`)),
+		assistant(call("4", "read_file", `{"path":"c.txt"}`)),
+		assistant(call("5", "propose_plan", `{"summary":"x","steps":["y"],"files":["a.txt"]}`)),
+		assistant(call("6", "finish", `{"summary":"done"}`)),
+	})
+	err = Run(context.Background(), Config{
+		Client: client, Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		Confirmer: stubConfirm{d: ui.Approve}, Out: io.Discard,
+		RequirePlan: true, ExploreBudget: 2, ExploreNote: ExploreNoteBuild,
+		MaxSteps: 10, Intent: "build",
+	}, "sys", "explore then plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep.mu.Lock()
+	defer rep.mu.Unlock()
+	if len(rep.tools) < 5 {
+		t.Fatalf("reqs %d", len(rep.tools))
+	}
+	if len(rep.tools[4]) != 1 || rep.tools[4][0].Function.Name != "propose_plan" {
+		t.Fatalf("want forced plan after blocked shell, got %+v", rep.tools[4])
+	}
+	found := false
+	for _, msgs := range rep.reqs {
+		for _, m := range msgs {
+			if m.Role == llm.RoleTool && strings.Contains(m.Content, ExploreNoteBuild) {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing explore note; blocked run_shell must not reset the budget")
+	}
+}
+
+func TestExploreBudgetForDocs(t *testing.T) {
+	if ExploreBudgetFor("lookup", "other") != 6 || ExploreBudgetFor("lookup", "analysis") != 10 {
+		t.Fatal("lookup budgets")
+	}
+	if ExploreBudgetFor("act", "other") != 6 {
+		t.Fatal("act budget")
+	}
+	if ExploreBudgetFor("build", "other") != 8 || ExploreBudgetFor("build", "analysis") != 12 {
+		t.Fatal("build budgets")
+	}
+	if ExploreBudgetFor("build", "docs") != 16 {
+		t.Fatal("docs budget")
+	}
+}
+
+func TestDocsNudgeFiresOnce(t *testing.T) {
+	var out bytes.Buffer
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "propose_plan", `{"summary":"write overview","steps":["write docs/OVERVIEW.md"],"files":["docs/OVERVIEW.md"]}`)),
+		{Role: llm.RoleAssistant, Content: "Here is the overview in chat."},
+		assistant(call("2", "write_file", `{"path":"docs/OVERVIEW.md","content":"# Overview\n"}`)),
+		{Role: llm.RoleAssistant, Content: "wrote the file"},
+	}, stubConfirm{d: ui.Approve}, Config{RequirePlan: true, Task: "docs", Out: &out, MaxSteps: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	if len(rep.reqs) == 0 {
+		t.Fatal("no requests")
+	}
+	for _, m := range rep.reqs[len(rep.reqs)-1] {
+		if m.Role == llm.RoleUser && m.Content == DocsFileNote {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("nudge count %d in last request", n)
+	}
+	if !strings.Contains(out.String(), "wrote the file") {
+		t.Fatalf("want final answer after nudge: %q", out.String())
+	}
+	if strings.Contains(out.String(), "Here is the overview in chat") {
+		t.Fatalf("pre-nudge text should not finish: %q", out.String())
+	}
+}
+
+func TestDocsExportNudge(t *testing.T) {
+	var out bytes.Buffer
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "propose_plan", `{"summary":"write overview","steps":["write md","export pdf"],"files":["docs/OVERVIEW.pdf"]}`)),
+		{Role: llm.RoleAssistant, Content: "Here is the overview in chat."},
+		assistant(call("2", "write_file", `{"path":"docs/OVERVIEW.md","content":"# Overview\n"}`)),
+		{Role: llm.RoleAssistant, Content: "wrote"},
+	}, stubConfirm{d: ui.Approve}, Config{RequirePlan: true, Task: "docs", Out: &out, MaxSteps: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, msgs := range rep.reqs {
+		for _, m := range msgs {
+			if m.Role == llm.RoleUser && m.Content == DocsExportNote {
+				found = true
+			}
+			if m.Role == llm.RoleUser && m.Content == DocsFileNote {
+				t.Fatal("want export_doc nudge, got generic docs note")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing export_doc nudge")
+	}
+}
+
+func TestLeanResumeElidesOldToolOutputs(t *testing.T) {
+	longArgs := `{"path":"` + strings.Repeat("x", 300) + `"}`
+	hist := []llm.Message{
+		{Role: llm.RoleUser, Content: "first"},
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call("1", "read_file", longArgs)}},
+		{Role: llm.RoleTool, Content: "huge old output from read_file", ToolCallID: "1"},
+		{Role: llm.RoleAssistant, Content: "done first"},
+		{Role: llm.RoleUser, Content: "second"},
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call("2", "read_file", `{"path":"b.txt"}`)}},
+		{Role: llm.RoleTool, Content: "recent output", ToolCallID: "2"},
+	}
+	got := LeanResume(hist, 0.30)
+	if !toolProtocolValid(got) {
+		t.Fatal("protocol broken")
+	}
+	var old, recent bool
+	for _, m := range got {
+		if m.Role == llm.RoleTool && m.ToolCallID == "1" {
+			if m.Content != resumeToolElided {
+				t.Fatalf("old tool %q", m.Content)
+			}
+			old = true
+		}
+		if m.Role == llm.RoleTool && m.ToolCallID == "2" {
+			if m.Content != "recent output" {
+				t.Fatalf("recent tool %q", m.Content)
+			}
+			recent = true
+		}
+		for _, c := range m.ToolCalls {
+			if len(c.Function.Arguments) > 200 {
+				t.Fatalf("args len %d", len(c.Function.Arguments))
+			}
+		}
+	}
+	if !old || !recent {
+		t.Fatalf("old=%v recent=%v", old, recent)
+	}
+	if hist[1].ToolCalls[0].Function.Arguments != longArgs {
+		t.Fatal("LeanResume must not mutate the input")
+	}
+}
+
+func TestLeanResumeCapsPairs(t *testing.T) {
+	var hist []llm.Message
+	for i := 0; i < 12; i++ {
+		hist = append(hist,
+			llm.Message{Role: llm.RoleUser, Content: fmt.Sprintf("user-%d ", i) + strings.Repeat("u", 2500)},
+			llm.Message{Role: llm.RoleAssistant, Content: fmt.Sprintf("asst-%d ", i) + strings.Repeat("a", 2500)},
+		)
+	}
+	got := LeanResume(hist, 0.30)
+	if resumeTokens(got, 0.30) > resumeTokenCap {
+		t.Fatalf("tokens %d", resumeTokens(got, 0.30))
+	}
+	if len(got) == 0 || got[0].Role != llm.RoleUser {
+		t.Fatalf("pair broken: first %+v", got)
+	}
+	for i := 0; i < len(got)-1; i++ {
+		if got[i].Role == llm.RoleUser && got[i+1].Role != llm.RoleAssistant {
+			t.Fatalf("user not followed by assistant at %d", i)
+		}
+	}
+	last := got[len(got)-1]
+	if last.Role != llm.RoleAssistant || !strings.Contains(last.Content, "asst-11") {
+		t.Fatalf("dropped the newest pair: %+v", last)
+	}
+	if strings.Contains(got[0].Content, "user-0") {
+		t.Fatal("oldest pair should have been dropped")
+	}
+}
+
+func TestLeanResumeKeepsToolProtocol(t *testing.T) {
+	var hist []llm.Message
+	for i := 0; i < 8; i++ {
+		id := fmt.Sprintf("c%d", i)
+		hist = append(hist,
+			llm.Message{Role: llm.RoleUser, Content: fmt.Sprintf("q%d %s", i, strings.Repeat("q", 2000))},
+			llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{call(id, "read_file", `{"path":"f.txt"}`)}},
+			llm.Message{Role: llm.RoleTool, Content: strings.Repeat("out", 800), ToolCallID: id},
+		)
+	}
+	got := LeanResume(hist, 0.30)
+	if !toolProtocolValid(got) {
+		t.Fatalf("invalid protocol after cap: %d msgs", len(got))
+	}
+	for i, m := range got {
+		if m.Role != llm.RoleTool {
+			continue
+		}
+		if i == 0 || got[i-1].Role != llm.RoleAssistant {
+			t.Fatalf("tool %d not after assistant", i)
+		}
+		found := false
+		for _, c := range got[i-1].ToolCalls {
+			if c.ID == m.ToolCallID {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("tool %s has no matching tool_call", m.ToolCallID)
+		}
 	}
 }

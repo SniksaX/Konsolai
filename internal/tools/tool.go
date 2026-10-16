@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"io"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/siraj/konsolai/internal/llm"
@@ -85,6 +87,17 @@ type Result struct {
 
 type Options struct {
 	ReadOnlyShell bool
+	DocsTask      bool
+}
+
+const DocsSourceReject = "docs tasks may not create or modify source files; write Markdown and use export_doc for PDF/HTML"
+
+func DocsPathAllowed(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".md", ".markdown", ".txt", ".mmd", ".svg", ".png", ".csv", ".json", ".yaml", ".yml":
+		return true
+	}
+	return false
 }
 
 type Registry struct {
@@ -107,13 +120,13 @@ func NewRegistry(g *safety.Guard, out io.Writer, files FileLister, cache WebCach
 		facts = NopFactStore{}
 	}
 	list := []Tool{
-		newShell(g, out, o.ReadOnlyShell),
-		newWriteFile(g),
+		newShell(g, out, o.ReadOnlyShell, o.DocsTask),
+		newWriteFile(g, o.DocsTask),
 		newReadFile(g),
 		newListDir(g),
 		newSearch(g, files),
 		newFindFiles(g, files),
-		newEditFile(g),
+		newEditFile(g, o.DocsTask),
 		newProposePlan(),
 		newRemember(facts),
 		newWebFetch(cache),

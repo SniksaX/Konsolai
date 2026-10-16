@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -188,6 +189,69 @@ func (s *Store) FindResumableSession(ctx context.Context, profile string, projec
 		return Session{}, false, fmt.Errorf("store: find session: %w", err)
 	}
 	return sess, true, nil
+}
+
+type RecentSession struct {
+	ID              string
+	Title           string
+	LastUserMessage string
+	Age             time.Duration
+}
+
+func (s *Store) RecentSessions(ctx context.Context, profile string, projectID *int64, cwd string, idle time.Duration, limit int) ([]RecentSession, error) {
+	ctx, cancel := withTimeout(ctx)
+	defer cancel()
+	mins := int(idle / time.Minute)
+	if mins < 1 {
+		mins = 1
+	}
+	if limit < 1 {
+		limit = 3
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT s.id::text, s.title, s.last_activity_at,
+		       COALESCE((
+		         SELECT m.content FROM messages m
+		         WHERE m.session_id = s.id AND m.role = 'user'
+		         ORDER BY m.seq DESC LIMIT 1
+		       ), '')
+		FROM sessions s
+		WHERE s.profile = $1
+		  AND s.status IN ('active', 'finished', 'failed')
+		  AND s.last_activity_at >= now() - make_interval(mins => $2)
+		  AND (
+		    ($3::bigint IS NOT NULL AND s.project_id = $3)
+		    OR ($3::bigint IS NULL AND s.cwd = $4)
+		  )
+		ORDER BY s.last_activity_at DESC
+		LIMIT $5`, profile, mins, projectID, cwd, limit)
+	if err != nil {
+		return nil, fmt.Errorf("store: recent sessions: %w", err)
+	}
+	defer rows.Close()
+	var out []RecentSession
+	now := time.Now()
+	for rows.Next() {
+		var r RecentSession
+		var lastAt time.Time
+		if err := rows.Scan(&r.ID, &r.Title, &lastAt, &r.LastUserMessage); err != nil {
+			return nil, fmt.Errorf("store: scan recent session: %w", err)
+		}
+		r.Age = now.Sub(lastAt)
+		if r.Age < 0 {
+			r.Age = 0
+		}
+		r.LastUserMessage = cutRunes(r.LastUserMessage, 120)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func cutRunes(s string, n int) string {
+	if n <= 0 || utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	return string([]rune(s)[:n])
 }
 
 func (s *Store) CreateSession(ctx context.Context, ns NewSession) (string, error) {

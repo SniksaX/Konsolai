@@ -262,10 +262,10 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "konsolai:", err)
 		return 1
 	}
-	cand := findCandidate(ctx, mem, prof, projectID, cwd, inv)
-	routerHist := cand.Messages
+	cands := findCandidates(ctx, mem, prof, projectID, cwd)
+	routerCands := toIntentCandidates(cands)
 	if inv.New {
-		routerHist = nil
+		routerCands = nil
 	}
 	root := repo.Root(cwd)
 	inRepo := false
@@ -274,12 +274,25 @@ func run() int {
 	}
 	routedAt := time.Now()
 	understand := ui.Start("understanding")
-	dec := decideIntent(ctx, client, inv, routerHist, inRepo)
+	dec := decideIntent(ctx, client, inv, routerCands, inRepo)
 	understand()
 	routerTime := time.Since(routedAt)
-	sessionID, history := applyResume(inv, dec, cand)
+	picked := applyResume(inv, dec, cands)
+	if picked.ID != "" && len(picked.Messages) == 0 {
+		if s := mem.Store(); s != nil {
+			msgs, err := s.LoadMessages(ctx, picked.ID)
+			if err != nil {
+				mem.Fail(err)
+				picked = resumeCandidate{}
+			} else {
+				picked.Messages = memory.ToLLM(msgs)
+			}
+		}
+	}
+	sessionID, history := picked.ID, picked.Messages
 	if len(history) > 0 {
-		fmt.Fprintln(os.Stdout, ui.Dim("↻ continuing session: "+cand.Title))
+		history = agent.LeanResume(history, client.TokensPerChar())
+		fmt.Fprintln(os.Stdout, ui.Dim("↻ continuing session: "+picked.Title))
 	}
 	if inv.Plain {
 		fmt.Fprintln(os.Stdout, "· "+string(dec.Intent))
@@ -294,7 +307,7 @@ func run() int {
 	if len(tap.msgs) > 20 {
 		tap.msgs = tap.msgs[len(tap.msgs)-20:]
 	}
-	code := runProfile(ctx, client, snap, facts, history, tap, mem, sessionID, projectID, prof.Name, inv, cwd, prompter, dec, routerTime)
+	code := runProfile(ctx, client, snap, facts, history, tap, mem, sessionID, projectID, prof, inv, cwd, prompter, dec, routerTime)
 	if sessionID != "" {
 		if s := mem.Store(); s != nil {
 			endCtx, cancel := memory.Isolated(ctx)
@@ -345,38 +358,63 @@ func upsertProject(ctx context.Context, mem *memory.Guard, cwd string) *int64 {
 type resumeCandidate struct {
 	ID       string
 	Title    string
+	LastUser string
+	Age      time.Duration
 	Messages []llm.Message
 }
 
-func findCandidate(ctx context.Context, mem *memory.Guard, prof config.Profile, projectID *int64, cwd string, inv invocation) resumeCandidate {
+func findCandidates(ctx context.Context, mem *memory.Guard, prof config.Profile, projectID *int64, cwd string) []resumeCandidate {
 	idle := time.Duration(prof.SessionIdleMinutes) * time.Minute
 	if mem.Store() == nil {
 		if sess, ok := memory.LoadLast(prof.Name, cwd, idle); ok {
-			return resumeCandidate{Title: sess.Title, Messages: sess.Messages}
+			age := time.Duration(0)
+			if !sess.UpdatedAt.IsZero() {
+				age = time.Since(sess.UpdatedAt)
+			}
+			return []resumeCandidate{{
+				Title: sess.Title, LastUser: lastUserOf(sess.Messages), Age: age, Messages: sess.Messages,
+			}}
 		}
-		return resumeCandidate{}
+		return nil
 	}
-	sess, found, err := mem.Store().FindResumableSession(ctx, prof.Name, projectID, cwd, inv.Intent, idle)
+	rows, err := mem.Store().RecentSessions(ctx, prof.Name, projectID, cwd, idle, 3)
 	if err != nil {
 		mem.Fail(err)
-		return resumeCandidate{}
+		return nil
 	}
-	if !found {
-		return resumeCandidate{}
+	out := make([]resumeCandidate, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, resumeCandidate{ID: r.ID, Title: r.Title, LastUser: r.LastUserMessage, Age: r.Age})
 	}
-	msgs, err := mem.Store().LoadMessages(ctx, sess.ID)
-	if err != nil {
-		mem.Fail(err)
-		return resumeCandidate{}
-	}
-	return resumeCandidate{ID: sess.ID, Title: sess.Title, Messages: memory.ToLLM(msgs)}
+	return out
 }
 
-func applyResume(inv invocation, dec intent.Decision, cand resumeCandidate) (string, []llm.Message) {
-	if inv.New || !dec.ContinuesPrevious || len(cand.Messages) == 0 {
-		return "", nil
+func lastUserOf(msgs []llm.Message) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == llm.RoleUser {
+			s := msgs[i].Content
+			if utf8.RuneCountInString(s) > 120 {
+				s = string([]rune(s)[:120])
+			}
+			return s
+		}
 	}
-	return cand.ID, cand.Messages
+	return ""
+}
+
+func toIntentCandidates(cands []resumeCandidate) []intent.Candidate {
+	out := make([]intent.Candidate, len(cands))
+	for i, c := range cands {
+		out[i] = intent.Candidate{Title: c.Title, LastUser: c.LastUser, Age: c.Age}
+	}
+	return out
+}
+
+func applyResume(inv invocation, dec intent.Decision, cands []resumeCandidate) resumeCandidate {
+	if inv.New || dec.ContinuesSession <= 0 || dec.ContinuesSession > len(cands) {
+		return resumeCandidate{}
+	}
+	return cands[dec.ContinuesSession-1]
 }
 
 func createSession(ctx context.Context, mem *memory.Guard, prof config.Profile, projectID *int64, cwd, mode, request string) string {
@@ -450,14 +488,18 @@ func sessionStatus(code int) string {
 	}
 }
 
-func decideIntent(ctx context.Context, client *llm.Client, inv invocation, history []llm.Message, inRepo bool) intent.Decision {
+func decideIntent(ctx context.Context, client *llm.Client, inv invocation, cands []intent.Candidate, inRepo bool) intent.Decision {
 	if inv.Intent != "" {
+		n := 0
+		if !inv.New && len(cands) > 0 {
+			n = 1
+		}
 		return intent.Decision{
 			Intent: intent.Intent(inv.Intent), Language: "en", Reason: "flag",
-			ContinuesPrevious: !inv.New && len(history) > 0,
+			ContinuesSession: n,
 		}
 	}
-	d, _ := intent.Classify(ctx, client, inv.Request, history, inRepo)
+	d, _ := intent.Classify(ctx, client, inv.Request, cands, inRepo)
 	return d
 }
 
@@ -469,9 +511,9 @@ func langLine(d intent.Decision) string {
 	return "Reply in the user's language (" + lang + ")."
 }
 
-func thinkingFor(dec intent.Decision) agent.ThinkingPolicy {
+func thinkingFor(dec intent.Decision, buildThinking string) agent.ThinkingPolicy {
 	if dec.Intent == intent.Build {
-		return agent.ThinkUntilPlan
+		return agent.ParseBuildThinking(buildThinking)
 	}
 	if dec.Reasoning {
 		return agent.ThinkOn
@@ -505,13 +547,17 @@ func runAnswer(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, hi
 		RouterTime:       routerTime,
 	}
 	if inv.Trace {
-		agent.PrintTrace(os.Stderr, 1, think, modelTime, usage.PromptTokens, usage.CompletionTokens, nil)
+		agent.PrintTrace(os.Stderr, 1, think, modelTime, usage.PromptTokens, usage.CompletionTokens, client.ContextWindow(), nil)
 	}
 	agent.PrintSummary(os.Stderr, string(dec.Intent), st)
 
 	if streamErr != nil {
 		if errors.Is(streamErr, context.Canceled) {
 			return 130
+		}
+		if errors.Is(streamErr, agent.ErrContextOverflow) {
+			fmt.Fprintln(os.Stderr, streamErr.Error())
+			return 1
 		}
 		fmt.Fprintln(os.Stderr, modelErrorLine(inv.Endpoint, streamErr, inv.Trace))
 		return 1
@@ -550,8 +596,18 @@ func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 	live := ui.StartLive("thinking")
 	first := true
 	rend := ui.NewRenderer(os.Stdout, plain)
+	if _, err := client.ResolveModel(ctx); err != nil {
+		return "", llm.Usage{}, err
+	}
+	_, maxTok, elide, err := agent.PrepareCall(client, msgs, nil, "answer")
+	if err != nil {
+		return "", llm.Usage{}, err
+	}
+	if elide.Count > 0 {
+		fmt.Fprintln(os.Stderr, agent.FormatElide(elide, client.ContextWindow()))
+	}
 	usage, err := client.Stream(ctx, msgs, llm.ChatOptions{
-		Thinking: think, Temperature: 0.3,
+		Thinking: think, Temperature: 0.3, MaxTokens: maxTok,
 		OnProgress: func(p llm.Progress) { live.SetLabel(agent.ProgressLabel("thinking", p)) },
 	}, func(delta string) error {
 		s := filter.Write(delta)
@@ -614,7 +670,7 @@ func (t *sessionTap) FileChange(ctx context.Context, c tools.FileChange) error {
 	return nil
 }
 
-func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, mem *memory.Guard, sessionID string, projectID *int64, profile string, inv invocation, cwd string, prompter *ui.Prompter, dec intent.Decision, routerTime time.Duration) int {
+func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, mem *memory.Guard, sessionID string, projectID *int64, prof config.Profile, inv invocation, cwd string, prompter *ui.Prompter, dec intent.Decision, routerTime time.Duration) int {
 	defer prompter.Close()
 	lang := langLine(dec)
 	if dec.Intent == intent.Answer {
@@ -635,23 +691,26 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 	if !inv.Plain {
 		toolOut = ui.NewGutter(os.Stdout)
 	}
-	reg := tools.NewRegistry(sg, toolOut, lister, memory.NewWebCache(mem), memory.NewFactStore(mem, profile, projectID, sessionID), tools.Options{ReadOnlyShell: dec.Intent == intent.Lookup})
+	reg := tools.NewRegistry(sg, toolOut, lister, memory.NewWebCache(mem), memory.NewFactStore(mem, prof.Name, projectID, sessionID), tools.Options{
+		ReadOnlyShell: dec.Intent == intent.Lookup,
+		DocsTask:      dec.Task == intent.TaskDocs,
+	})
 	cfg := agent.Config{
-		Client:              client,
-		Tools:               reg,
-		Confirmer:           prompter,
-		Out:                 os.Stdout,
-		ContextBudgetTokens: 60000,
-		Recorder:            rec,
-		History:             history,
-		AutoApprove:         inv.Yes,
-		Prompt:              agent.ActPrompt + "\n" + lang,
-		ThinkingPolicy:      thinkingFor(dec),
-		Trace:               inv.Trace,
-		Intent:              string(dec.Intent),
-		RouterTime:          routerTime,
-		Err:                 os.Stderr,
-		Plain:               inv.Plain,
+		Client:         client,
+		Tools:          reg,
+		Confirmer:      prompter,
+		Out:            os.Stdout,
+		Recorder:       rec,
+		History:        history,
+		AutoApprove:    inv.Yes,
+		Prompt:         agent.ActPrompt + "\n" + lang,
+		ThinkingPolicy: thinkingFor(dec, prof.BuildThinking),
+		Trace:          inv.Trace,
+		Intent:         string(dec.Intent),
+		RouterTime:     routerTime,
+		Err:            os.Stderr,
+		Plain:          inv.Plain,
+		Task:           string(dec.Task),
 	}
 	sys := snap.String() + facts
 	sub := ""
@@ -663,22 +722,21 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 		cfg.Tools = reg.Named("list_dir", "read_file", "outline", "search", "find_files", "web_fetch", "run_shell", "finish")
 		cfg.Prompt = agent.LookupPrompt + "\n" + lang + sub
 		cfg.MaxSteps = 10
-		cfg.ExploreBudget = 6
+		cfg.ExploreBudget = agent.ExploreBudgetFor("lookup", string(dec.Task))
 		cfg.ExploreNote = agent.ExploreNoteLookup
-		cfg.Task = string(dec.Task)
 	case intent.Build:
 		cfg.Prompt = agent.CodePrompt + "\n" + lang + "\n" + agent.ScopeRule + sub
 		cfg.Temperature = 0.3
 		cfg.MaxSteps = 60
 		cfg.RequirePlan = true
-		cfg.ExploreBudget = 12
+		cfg.ExploreBudget = agent.ExploreBudgetFor("build", string(dec.Task))
 		cfg.ExploreNote = agent.ExploreNoteBuild
 		sys = codeContext(ctx, snap, root) + facts
 	default:
 		cfg.Prompt = agent.ActPrompt + "\n" + lang + "\n" + agent.ScopeRule + sub
 		cfg.RequirePlan = true
 		cfg.MaxSteps = 15
-		cfg.ExploreBudget = 6
+		cfg.ExploreBudget = agent.ExploreBudgetFor("act", string(dec.Task))
 		cfg.ExploreNote = agent.ExploreNoteLookup
 	}
 
@@ -702,6 +760,10 @@ func runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, f
 	}
 	if errors.Is(err, agent.ErrNoAnswer) {
 		fmt.Fprintln(os.Stderr, "konsolai: the model returned no answer")
+		return 1
+	}
+	if errors.Is(err, agent.ErrContextOverflow) {
+		fmt.Fprintln(os.Stderr, err.Error())
 		return 1
 	}
 	fmt.Fprintln(os.Stderr, modelErrorLine(inv.Endpoint, err, inv.Trace))

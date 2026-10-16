@@ -106,6 +106,55 @@ func TestMarkdownPlainPassthrough(t *testing.T) {
 	}
 }
 
+func TestNestedFourBacktickFence(t *testing.T) {
+	restore := ForceTheme(Palette{})
+	defer restore()
+	var buf bytes.Buffer
+	r := NewRenderer(&buf, false)
+	src := "````md\n```\ninner\n```\n````\n"
+	_, _ = r.Write([]byte(src))
+	_ = r.Flush()
+	got := buf.String()
+	if strings.Count(got, "─ md") != 1 {
+		t.Fatalf("want one fence: %q", got)
+	}
+	if strings.Contains(got, "─ code") || strings.Contains(got, "─ inner") {
+		t.Fatalf("inner fence opened a block: %q", got)
+	}
+	if !strings.Contains(got, "```") || !strings.Contains(got, "inner") {
+		t.Fatalf("inner fences should be literal: %q", got)
+	}
+}
+
+func TestTildeFence(t *testing.T) {
+	restore := ForceTheme(Palette{})
+	defer restore()
+	var buf bytes.Buffer
+	r := NewRenderer(&buf, false)
+	_, _ = r.Write([]byte("~~~go\nfmt.Println(1)\n~~~\n"))
+	_ = r.Flush()
+	got := buf.String()
+	if !strings.Contains(got, "─ go") || !strings.Contains(got, "fmt.Println(1)") {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestClosingFenceWithInfoDoesNotClose(t *testing.T) {
+	restore := ForceTheme(Palette{})
+	defer restore()
+	var buf bytes.Buffer
+	r := NewRenderer(&buf, false)
+	_, _ = r.Write([]byte("```\nhello\n```go\nworld\n```\n"))
+	_ = r.Flush()
+	got := buf.String()
+	if strings.Count(got, "─ code") != 1 {
+		t.Fatalf("want one block: %q", got)
+	}
+	if !strings.Contains(got, "hello") || !strings.Contains(got, "```go") || !strings.Contains(got, "world") {
+		t.Fatalf("info-string closer must stay content: %q", got)
+	}
+}
+
 func TestThemeNOCOLOR(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	t.Setenv("COLORTERM", "truecolor")

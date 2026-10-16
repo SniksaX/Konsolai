@@ -61,6 +61,7 @@ func TestResolveBuiltinDefault(t *testing.T) {
 	t.Setenv("KONSOLAI_DATABASE_URL", "")
 	t.Setenv("KONSOLAI_ENDPOINT", "")
 	t.Setenv("KONSOLAI_MODEL", "")
+	t.Setenv("KONSOLAI_BUILD_THINKING", "")
 	p, err := File{}.Resolve("")
 	if err != nil {
 		t.Fatal(err)
@@ -70,6 +71,20 @@ func TestResolveBuiltinDefault(t *testing.T) {
 	}
 	if p.SessionIdleMinutes != 30 || p.RetentionDays != 90 || p.LLMIdleTimeoutSeconds != 120 {
 		t.Fatalf("defaults %+v", p)
+	}
+	if p.BuildThinking != "plan_step" {
+		t.Fatalf("build_thinking %q", p.BuildThinking)
+	}
+}
+
+func TestResolveBuildThinkingEnv(t *testing.T) {
+	t.Setenv("KONSOLAI_BUILD_THINKING", "until_plan")
+	p, err := File{}.Resolve("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.BuildThinking != "until_plan" {
+		t.Fatalf("got %q", p.BuildThinking)
 	}
 }
 
