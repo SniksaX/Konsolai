@@ -3,6 +3,10 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -278,6 +282,36 @@ func TestStatus(t *testing.T) {
 	}
 	if strings.Contains(s, "postgres://") || strings.Contains(s, "PASSWORD") {
 		t.Fatalf("credentials %q", s)
+	}
+}
+
+func TestStatusWindowFromModels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/models") {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{"id": "qwen38.nvfp4", "max_model_len": 94208}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	env, out, _ := testEnv(t)
+	env.Profile.Endpoint = srv.URL + "/v1"
+	env.Profile.Model = "qwen38.nvfp4"
+	client := llm.New(srv.URL+"/v1", "qwen38.nvfp4")
+	if client.ContextWindow() != 32768 {
+		t.Fatalf("fallback %d", client.ContextWindow())
+	}
+	env.Runner = &turn.Runner{Client: client, Profile: env.Profile, Out: io.Discard, Err: io.Discard}
+	if code := runStatus(context.Background(), env, nil); code != 0 {
+		t.Fatal(code)
+	}
+	if !strings.Contains(out.String(), "context        94208") {
+		t.Fatalf("want server max_model_len, got %q", out.String())
+	}
+	if client.ContextWindow() != 94208 {
+		t.Fatalf("client window %d", client.ContextWindow())
 	}
 }
 
