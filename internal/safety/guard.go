@@ -51,6 +51,26 @@ func (g *Guard) Base() string {
 	return g.base
 }
 
+// SetBase moves the path-resolution cwd. The new base must stay inside Root.
+func (g *Guard) SetBase(base string) error {
+	if g == nil {
+		return fmt.Errorf("safety: nil guard")
+	}
+	babs, err := filepath.Abs(base)
+	if err != nil {
+		return fmt.Errorf("safety: abs base: %w", err)
+	}
+	beval, err := filepath.EvalSymlinks(babs)
+	if err != nil {
+		return fmt.Errorf("safety: eval base: %w", err)
+	}
+	if !containsPath(g.root, beval) {
+		return fmt.Errorf("safety: base %s is outside root %s", beval, g.root)
+	}
+	g.base = beval
+	return nil
+}
+
 type DeniedError struct {
 	Rule   string
 	Detail string
