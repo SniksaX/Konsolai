@@ -127,6 +127,9 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 		sum, upto, cerr := CompactMessages(ctx, client, history)
 		if cerr == nil && sum != "" {
 			PersistCompact(ctx, mem, sessionID, r.Profile.Name, cwd, sum, upto, history)
+			if r.Ingest != nil {
+				r.Ingest.EnqueueSummary(projectID, sessionID, sum, upto)
+			}
 			history = HistoryWithSummary(history, sum, upto)
 			after := client.EstimatePromptTokens(history, nil)
 			PrintCompacted(r.errw(), upto, before, after, win)
@@ -174,6 +177,13 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 				mem.Fail(err)
 			}
 		}
+	}
+	if code == 0 && answer != "" && r.Ingest != nil && (dec.Intent == intent.Answer || dec.Intent == intent.Lookup || dec.Intent == intent.Act || dec.Intent == intent.Build) {
+		title := req.Text
+		if utf8.RuneCountInString(title) > 80 {
+			title = string([]rune(title)[:80])
+		}
+		r.Ingest.EnqueueTurn(projectID, req.Text, answer, sessionID, title, 0)
 	}
 	if mem.Store() == nil {
 		title := req.Text
@@ -262,10 +272,16 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 	if !req.Plain {
 		toolOut = ui.NewGutter(r.out())
 	}
+	onWeb := func(url, title, text string) {
+		if r.Ingest != nil {
+			r.Ingest.EnqueueWeb(projectID, url, title, text)
+		}
+	}
 	reg := tools.NewRegistry(sg, toolOut, lister, memory.NewWebCache(mem), memory.NewFactStore(mem, r.Profile.Name, projectID, sessionID), tools.Options{
 		ReadOnlyShell: dec.Intent == intent.Lookup,
 		DocsTask:      dec.Task == intent.TaskDocs,
 		Request:       req.Text,
+		OnWebFetch:    onWeb,
 	})
 	cfg := agent.Config{
 		Client:         client,
