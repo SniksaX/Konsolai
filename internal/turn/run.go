@@ -44,6 +44,11 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	if strings.TrimSpace(text) == "" {
 		return Result{ExitCode: 2}
 	}
+	expanded, atts := ExpandMentions(ctx, cwd, text)
+	if len(atts) > 0 {
+		PrintAttachments(r.out(), atts)
+		text = expanded
+	}
 	req.Text = text
 
 	mem := r.mem()
@@ -59,7 +64,7 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 		return Result{ExitCode: 1}
 	}
 	facts := LoadFactsBlock(ctx, mem, r.Profile.Name, projectID)
-	conf, closeConf, err := r.confirm(req.Yes)
+	conf, closeConf, err := r.confirm(ctx, req.Yes)
 	if err != nil {
 		fmt.Fprintln(r.errw(), "konsolai:", err)
 		return Result{ExitCode: 1}
@@ -68,7 +73,7 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 
 	cands := FindCandidates(ctx, mem, r.Profile, projectID, cwd)
 	routerCands := ToIntentCandidates(cands)
-	if req.New {
+	if req.New || req.ResumeSession != "" {
 		routerCands = nil
 	}
 	root := repo.Root(cwd)
@@ -89,20 +94,25 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 		picked = ApplyResume(req.New, dec, cands)
 	}
 	if picked.ID != "" && len(picked.Messages) == 0 {
-		if s := mem.Store(); s != nil {
-			msgs, err := s.LoadMessages(ctx, picked.ID)
-			if err != nil {
-				mem.Fail(err)
-				picked = ResumeCandidate{}
-			} else {
-				picked.Messages = memory.ToLLM(msgs)
-			}
-		}
+		picked.Messages = LoadCompacted(ctx, mem, picked.ID, r.Profile.Name, cwd)
 	}
 	sessionID, history := picked.ID, picked.Messages
+	win := client.ContextWindow()
+	if ShouldCompact(r.LastPromptTokens, win) && len(history) > compactKeep {
+		before := client.EstimatePromptTokens(history, nil)
+		sum, upto, cerr := CompactMessages(ctx, client, history)
+		if cerr == nil && sum != "" {
+			PersistCompact(ctx, mem, sessionID, r.Profile.Name, cwd, sum, upto, history)
+			history = HistoryWithSummary(history, sum, upto)
+			after := client.EstimatePromptTokens(history, nil)
+			PrintCompacted(r.errw(), upto, before, after, win)
+		}
+	}
 	if len(history) > 0 {
 		history = agent.LeanResume(history, client.TokensPerChar())
-		fmt.Fprintln(r.out(), ui.Dim("↻ continuing session: "+picked.Title))
+		if req.ResumeSession == "" {
+			fmt.Fprintln(r.out(), ui.Dim("↻ continuing session: "+picked.Title))
+		}
 	}
 	if req.Plain {
 		fmt.Fprintln(r.out(), "· "+string(dec.Intent))
@@ -117,11 +127,13 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	if len(tap.msgs) > 20 {
 		tap.msgs = tap.msgs[len(tap.msgs)-20:]
 	}
-	code, answer := r.runProfile(ctx, client, snap, facts, history, tap, mem, sessionID, projectID, req, cwd, conf, dec, routerTime)
+	code, answer, ptok := r.runProfile(ctx, client, snap, facts, history, tap, mem, sessionID, projectID, req, cwd, conf, dec, routerTime)
 	if tap.answer != "" {
 		answer = tap.answer
 	}
-	if sessionID != "" {
+	r.LastPromptTokens = ptok
+	r.LastWindow = client.ContextWindow()
+	if sessionID != "" && !req.KeepOpen {
 		if s := mem.Store(); s != nil {
 			endCtx, cancel := memory.Isolated(ctx)
 			defer cancel()
@@ -135,36 +147,40 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 		if utf8.RuneCountInString(title) > 80 {
 			title = string([]rune(title)[:80])
 		}
-		if !req.New {
-			if prev, ok := memory.LoadLast(r.Profile.Name, cwd, time.Duration(r.Profile.SessionIdleMinutes)*time.Minute); ok && prev.Title != "" {
-				title = prev.Title
-			}
+		prev, ok := memory.LoadLast(r.Profile.Name, cwd, 0)
+		if !req.New && ok && prev.Title != "" {
+			title = prev.Title
 		}
+		sum, upto := prev.CompactSummary, prev.CompactedUpto
 		_ = memory.SaveLast(memory.LastSession{
-			Profile:  r.Profile.Name,
-			CWD:      cwd,
-			Title:    title,
-			Messages: tap.msgs,
+			Profile:        r.Profile.Name,
+			CWD:            cwd,
+			Title:          title,
+			Messages:       tap.msgs,
+			CompactSummary: sum,
+			CompactedUpto:  upto,
 		})
 	}
-	return Result{SessionID: sessionID, Intent: string(dec.Intent), ExitCode: code, Answer: answer}
+	return Result{
+		SessionID: sessionID, Intent: string(dec.Intent), ExitCode: code, Answer: answer,
+		PromptTokens: ptok, Window: r.LastWindow,
+	}
 }
 
 func loadSessionByID(ctx context.Context, mem *memory.Guard, id string, cands []ResumeCandidate) ResumeCandidate {
 	for _, c := range cands {
 		if c.ID == id {
+			if len(c.Messages) == 0 {
+				c.Messages = LoadCompacted(ctx, mem, id, "", "")
+			}
 			return c
 		}
 	}
-	if s := mem.Store(); s != nil {
-		msgs, err := s.LoadMessages(ctx, id)
-		if err != nil {
-			mem.Fail(err)
-			return ResumeCandidate{}
-		}
-		return ResumeCandidate{ID: id, Messages: memory.ToLLM(msgs)}
+	msgs := LoadCompacted(ctx, mem, id, "", "")
+	if msgs == nil {
+		return ResumeCandidate{}
 	}
-	return ResumeCandidate{}
+	return ResumeCandidate{ID: id, Messages: msgs}
 }
 
 func langLine(d intent.Decision) string {
@@ -175,11 +191,10 @@ func langLine(d intent.Decision) string {
 	return "Reply in the user's language (" + lang + ")."
 }
 
-func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, mem *memory.Guard, sessionID string, projectID *int64, req Request, cwd string, confirmer agent.Confirmer, dec intent.Decision, routerTime time.Duration) (int, string) {
+func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, mem *memory.Guard, sessionID string, projectID *int64, req Request, cwd string, confirmer agent.Confirmer, dec intent.Decision, routerTime time.Duration) (int, string, int) {
 	lang := langLine(dec)
 	if dec.Intent == intent.Answer {
-		code, ans := r.runAnswer(ctx, client, snap, history, rec, req.Text, agent.AnswerPrompt+"\n"+lang, dec.Reasoning, req, dec, routerTime)
-		return code, ans
+		return r.runAnswer(ctx, client, snap, history, rec, req.Text, agent.AnswerPrompt+"\n"+lang, dec.Reasoning, req, dec, routerTime)
 	}
 
 	root := repo.Root(cwd)
@@ -187,7 +202,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 	sg, err := safety.NewAt(root, cwd)
 	if err != nil {
 		fmt.Fprintln(r.errw(), "konsolai:", err)
-		return 1, ""
+		return 1, "", 0
 	}
 	lister := func(ctx context.Context) ([]string, error) {
 		return repo.Files(ctx, root)
@@ -218,6 +233,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		Err:            r.errw(),
 		Plain:          req.Plain,
 		Task:           string(dec.Task),
+		Stats:          &agent.Stats{},
 	}
 	sys := snap.String() + facts
 	sub := ""
@@ -251,33 +267,37 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 	if dec.Intent == intent.Build {
 		printDiffStat(r.out(), root)
 	}
-	if err == nil {
-		return 0, ""
+	tok := 0
+	if cfg.Stats != nil {
+		tok = cfg.Stats.PromptTokens
 	}
-	if errors.Is(err, context.Canceled) {
-		return 130, ""
+	if err == nil {
+		return 0, "", tok
+	}
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+		return 130, "", tok
 	}
 	if errors.Is(err, agent.ErrAborted) {
 		fmt.Fprintln(r.errw(), "konsolai: aborted")
-		return 3, ""
+		return 3, "", tok
 	}
 	if errors.Is(err, agent.ErrMaxSteps) {
 		fmt.Fprintf(r.errw(), "konsolai: stopped after %d steps without finishing\n", cfg.MaxSteps)
-		return 4, ""
+		return 4, "", tok
 	}
 	if errors.Is(err, agent.ErrNoAnswer) {
 		fmt.Fprintln(r.errw(), "konsolai: the model returned no answer")
-		return 1, ""
+		return 1, "", tok
 	}
 	if errors.Is(err, agent.ErrContextOverflow) {
 		fmt.Fprintln(r.errw(), err.Error())
-		return 1, ""
+		return 1, "", tok
 	}
 	fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.Endpoint, err, req.Trace))
-	return 1, ""
+	return 1, "", tok
 }
 
-func (r *Runner) runAnswer(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, history []llm.Message, rec agent.Recorder, query, extra string, think bool, req Request, dec intent.Decision, routerTime time.Duration) (int, string) {
+func (r *Runner) runAnswer(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, history []llm.Message, rec agent.Recorder, query, extra string, think bool, req Request, dec intent.Decision, routerTime time.Duration) (int, string, int) {
 	if rec == nil {
 		rec = agent.NopRecorder{}
 	}
@@ -309,20 +329,20 @@ func (r *Runner) runAnswer(ctx context.Context, client *llm.Client, snap sysctx.
 
 	if streamErr != nil {
 		if errors.Is(streamErr, context.Canceled) {
-			return 130, out
+			return 130, out, usage.PromptTokens
 		}
 		if errors.Is(streamErr, agent.ErrContextOverflow) {
 			fmt.Fprintln(r.errw(), streamErr.Error())
-			return 1, out
+			return 1, out, usage.PromptTokens
 		}
 		fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.Endpoint, streamErr, req.Trace))
-		return 1, out
+		return 1, out, usage.PromptTokens
 	}
 	if strings.TrimSpace(out) == "" {
 		fmt.Fprintln(r.errw(), "konsolai: the model returned no answer")
-		return 1, out
+		return 1, out, usage.PromptTokens
 	}
-	return 0, out
+	return 0, out, usage.PromptTokens
 }
 
 func SanitizeAnswerHistory(hist []llm.Message) []llm.Message {
