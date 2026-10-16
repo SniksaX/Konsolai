@@ -832,6 +832,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	forceExport := false
 	shellFail := false
 	planRejected := false
+	approvedAll := false
 	consecFail := 0
 	var st Stats
 	st.RouterTime = cfg.RouterTime
@@ -1127,57 +1128,64 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				summary += " " + ui.Current().Muted("(in plan)")
 			}
 			if !inPlanHit && kind != tools.ReadOnly && kind != tools.Final {
-				var d ui.Decision
-				var reason string
-				var err error
-				if outside && !cfg.AutoApprove {
-					d, reason, err = cfg.Confirmer.ConfirmForced(summary, action.Preview())
-				} else {
-					if outside && cfg.AutoApprove {
-						fmt.Fprintln(cfg.Out, ui.Current().Warn(summary))
-					}
-					d, reason, err = cfg.Confirmer.Confirm(summary, action.Preview())
-				}
-				if err != nil {
-					return err
-				}
-				switch d {
-				case ui.Reject:
-					if kind == tools.Plan {
-						planRejected = true
-					}
-					tm := llm.Message{
-						Role:       llm.RoleTool,
-						Content:    "user rejected: " + reason,
-						ToolCallID: call.ID,
-					}
-					msgs = append(msgs, tm)
-					_ = rec.Message(ctx, tm)
-					_ = rec.Action(ctx, ActionRecord{Tool: call.Function.Name, Args: args, Kind: kind, Decision: "rejected", RejectReason: reason, IsError: true, Output: tm.Content})
-					continue
-				case ui.Quit:
-					return ErrAborted
-				case ui.Approve:
-					decision = "approved"
-					if cfg.AutoApprove {
-						decision = "auto"
-					}
-					if kind == tools.Plan {
-						planApproved = true
-						planRejected = false
-						planFiles = planFilesOf(action)
-						planCmds = planCmdsOf(action)
-					}
-				case ui.ApproveAll:
+				_, isCmd := commandOf(action)
+				if outside && approvedAll && isCmd && !cfg.AutoApprove {
+					summary += " " + ui.Current().Muted("(outside plan, approved by a)")
 					decision = "approved_all"
-					if cfg.AutoApprove {
-						decision = "auto"
+				} else {
+					var d ui.Decision
+					var reason string
+					var err error
+					if outside && !cfg.AutoApprove {
+						d, reason, err = cfg.Confirmer.ConfirmForced(summary, action.Preview())
+					} else {
+						if outside && cfg.AutoApprove {
+							fmt.Fprintln(cfg.Out, ui.Current().Warn(summary))
+						}
+						d, reason, err = cfg.Confirmer.Confirm(summary, action.Preview())
 					}
-					if kind == tools.Plan {
-						planApproved = true
-						planRejected = false
-						planFiles = planFilesOf(action)
-						planCmds = planCmdsOf(action)
+					if err != nil {
+						return err
+					}
+					switch d {
+					case ui.Reject:
+						if kind == tools.Plan {
+							planRejected = true
+						}
+						tm := llm.Message{
+							Role:       llm.RoleTool,
+							Content:    "user rejected: " + reason,
+							ToolCallID: call.ID,
+						}
+						msgs = append(msgs, tm)
+						_ = rec.Message(ctx, tm)
+						_ = rec.Action(ctx, ActionRecord{Tool: call.Function.Name, Args: args, Kind: kind, Decision: "rejected", RejectReason: reason, IsError: true, Output: tm.Content})
+						continue
+					case ui.Quit:
+						return ErrAborted
+					case ui.Approve:
+						decision = "approved"
+						if cfg.AutoApprove {
+							decision = "auto"
+						}
+						if kind == tools.Plan {
+							planApproved = true
+							planRejected = false
+							planFiles = planFilesOf(action)
+							planCmds = planCmdsOf(action)
+						}
+					case ui.ApproveAll:
+						decision = "approved_all"
+						approvedAll = true
+						if cfg.AutoApprove {
+							decision = "auto"
+						}
+						if kind == tools.Plan {
+							planApproved = true
+							planRejected = false
+							planFiles = planFilesOf(action)
+							planCmds = planCmdsOf(action)
+						}
 					}
 				}
 			}
