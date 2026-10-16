@@ -136,6 +136,45 @@ func TestShellBlocksExportRenderers(t *testing.T) {
 	}
 }
 
+func TestDocsTaskRejectsBuildCommands(t *testing.T) {
+	g, err := safety.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool, ok := NewRegistry(g, io.Discard, nil, nil, nil, Options{DocsTask: true}).Get("run_shell")
+	if !ok {
+		t.Fatal("missing run_shell")
+	}
+	blocked := []string{
+		"go run ./cmd/render_overview",
+		"go build ./cmd/foo",
+		"node ./render.js",
+		"npx mmdc -i x.mmd",
+		"python3 app.py",
+		"tsx src/render.ts",
+		"rm internal/docrender/foo.go",
+	}
+	for _, cmd := range blocked {
+		_, err := tool.Prepare(`{"cmd":` + jsonQuote(cmd) + `}`)
+		if err == nil || err.Error() != DocsSourceReject {
+			t.Errorf("%q: %v", cmd, err)
+		}
+	}
+	if _, err := tool.Prepare(`{"cmd":"cat internal/docrender/render.go"}`); err != nil {
+		t.Fatalf("readonly docrender: %v", err)
+	}
+	if _, err := tool.Prepare(`{"cmd":"go version"}`); err != nil {
+		t.Fatalf("readonly go: %v", err)
+	}
+	if _, err := tool.Prepare(`{"cmd":"ls"}`); err != nil {
+		t.Fatalf("ls: %v", err)
+	}
+	plain, _ := NewRegistry(g, io.Discard, nil, nil, nil).Get("run_shell")
+	if _, err := plain.Prepare(`{"cmd":"go build ./cmd/foo"}`); err != nil {
+		t.Fatalf("non-docs build: %v", err)
+	}
+}
+
 func TestShellCancelKillsGrandchild(t *testing.T) {
 	act, err := shellToolFor(t).Prepare(`{"cmd":"sleep 30 & wait"}`)
 	if err != nil {
