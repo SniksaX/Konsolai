@@ -53,7 +53,7 @@ func TestRecallFormatting(t *testing.T) {
 	}
 	vec := make([]float32, store.EmbeddingDim)
 	vec[0] = 1
-	content := "plan gate is enforced in internal/agent before mutating tools run"
+	content := "plan gate is enforced in internal/agent before mutating tools run " + t.Name()
 	ok, err := st.InsertChunk(ctx, store.ChunkIn{
 		Profile:   "recalltest",
 		ProjectID: &pid,
