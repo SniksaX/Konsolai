@@ -16,9 +16,11 @@ import (
 	"github.com/siraj/konsolai/internal/agent"
 	"github.com/siraj/konsolai/internal/commands"
 	"github.com/siraj/konsolai/internal/config"
+	"github.com/siraj/konsolai/internal/embed"
 	"github.com/siraj/konsolai/internal/intent"
 	"github.com/siraj/konsolai/internal/llm"
 	"github.com/siraj/konsolai/internal/memory"
+	"github.com/siraj/konsolai/internal/rag"
 	"github.com/siraj/konsolai/internal/repl"
 	"github.com/siraj/konsolai/internal/store"
 	"github.com/siraj/konsolai/internal/turn"
@@ -257,8 +259,28 @@ func run() int {
 		Version:    version,
 		SlashHelp:  commands.Default().SlashLines(),
 	}
+	isRepl := inv.Slash == "" && inv.Cmd == cmdRequest && strings.TrimSpace(inv.Request) == "" && stdinIsTTY() && stdoutIsTTY()
+	if st != nil && prof.RAGEnabled() {
+		if !st.RAGAvailable(ctx) {
+			fmt.Fprintln(os.Stderr, ui.Current().Warn("rag unavailable"))
+		} else {
+			ing := rag.New(st, embed.New(prof.EmbedEndpoint, prof.RerankEndpoint), prof.Name)
+			runner.Ingest = ing
+			if isRepl {
+				ing.Start()
+				defer ing.Stop()
+			} else if inv.Slash == "" && inv.Cmd == cmdRequest {
+				defer func() {
+					n := ing.Flush(context.Background(), rag.FlushCap)
+					if inv.Trace && n > 0 {
+						fmt.Fprintf(os.Stderr, "rag: dropped %d pending items\n", n)
+					}
+				}()
+			}
+		}
+	}
 
-	if inv.Slash == "" && inv.Cmd == cmdRequest && strings.TrimSpace(inv.Request) == "" && stdinIsTTY() && stdoutIsTTY() {
+	if isRepl {
 		env := commandEnv(runner, mem, prof, cwd, projectID, inv)
 		env.InRepl = true
 		model := prof.Model
