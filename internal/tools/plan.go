@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/siraj/konsolai/internal/llm"
+	"github.com/siraj/konsolai/internal/safety"
 )
 
 const PlanExportReject = "plan must produce the PDF/HTML with the export_doc tool (write Markdown first, then export_doc)"
@@ -80,6 +81,9 @@ func (t *proposePlanTool) Prepare(rawArgs string) (Action, error) {
 		if placeholderCmd(c) {
 			return nil, errors.New(PlanCommandReject)
 		}
+		if err := safety.PlanCommandForbidden(c); err != nil {
+			return nil, err
+		}
 	}
 	return &proposePlanAction{summary: args.Summary, steps: args.Steps, files: args.Files, commands: args.Commands}, nil
 }
@@ -100,6 +104,17 @@ func placeholderCmd(s string) bool {
 
 func (a *proposePlanAction) PlanFiles() []string    { return a.files }
 func (a *proposePlanAction) PlanCommands() []string { return a.commands }
+func (a *proposePlanAction) PlanText() string {
+	var b strings.Builder
+	b.WriteString(a.summary)
+	b.WriteByte('\n')
+	b.WriteString(strings.Join(a.steps, "\n"))
+	b.WriteByte('\n')
+	b.WriteString(strings.Join(a.files, "\n"))
+	b.WriteByte('\n')
+	b.WriteString(strings.Join(a.commands, "\n"))
+	return b.String()
+}
 
 func (a *proposePlanAction) Summary() string { return "plan: " + a.summary }
 
