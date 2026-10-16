@@ -3,6 +3,8 @@ package commands
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -115,6 +117,9 @@ func projectIDOf(ctx context.Context, env *Env) *int64 {
 		return nil
 	}
 	root := repo.Root(env.Cwd)
+	if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
+		return nil
+	}
 	p := repo.Detect(root)
 	id, err := s.UpsertProject(ctx, root, p.Kinds, p.Commands)
 	if err != nil {
