@@ -212,19 +212,25 @@ func langLine(d intent.Decision) string {
 func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, mem *memory.Guard, sessionID string, projectID *int64, req Request, cwd string, confirmer agent.Confirmer, dec intent.Decision, routerTime time.Duration, thinkMode ThinkMode) (int, string, int) {
 	lang := langLine(dec)
 	if dec.Intent == intent.Answer {
+		prompt := agent.AnswerPrompt + "\n" + lang
+		if r.SlashHelp != "" {
+			prompt += "\nSlash commands:\n" + r.SlashHelp
+		}
 		answerClient := client
 		if dec.EffectiveEffort() == intent.EffortNone {
 			if fc := r.fastClient(); fc != nil && fc.Reachable(ctx) {
-				answerClient = fc
+				if r.fastPromptTooLarge(ctx, fc, snap, history, req.Text, prompt) {
+					if req.Trace {
+						fmt.Fprintln(r.errw(), "fast model skipped (history too large)")
+					}
+				} else {
+					answerClient = fc
+				}
 			}
 		}
 		think := dec.EffectiveEffort() == intent.EffortHigh || thinkMode == ThinkAlways
 		if thinkMode == ThinkNever {
 			think = false
-		}
-		prompt := agent.AnswerPrompt + "\n" + lang
-		if r.SlashHelp != "" {
-			prompt += "\nSlash commands:\n" + r.SlashHelp
 		}
 		return r.runAnswer(ctx, answerClient, snap, history, rec, req.Text, prompt, think, req, dec, routerTime)
 	}
@@ -298,7 +304,9 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		sys = codeContext(ctx, snap, root) + facts
 	default:
 		cfg.Prompt = agent.ActPrompt + "\n" + lang + "\n" + agent.ScopeRule + sub
-		cfg.RequirePlan = true
+		if dec.EffectiveEffort() == intent.EffortHigh {
+			cfg.RequirePlan = true
+		}
 		cfg.MaxSteps = 15
 		cfg.ExploreBudget = agent.ExploreBudgetFor("act", string(dec.Task))
 		cfg.ExploreNote = agent.ExploreNoteLookup
@@ -336,6 +344,25 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 	}
 	fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.Endpoint, err, req.Trace))
 	return 1, "", tok
+}
+
+const fastWindowFillPct = 60
+
+func FastWindowTooFull(est, window int) bool {
+	if window <= 0 {
+		window = 8192
+	}
+	return est > window*fastWindowFillPct/100
+}
+
+func (r *Runner) fastPromptTooLarge(ctx context.Context, fc *llm.Client, snap sysctx.Snapshot, history []llm.Message, query, extra string) bool {
+	_, _ = fc.ResolveModel(ctx)
+	sys := llm.Message{Role: llm.RoleSystem, Content: extra + "\n\n" + snap.Brief()}
+	user := llm.Message{Role: llm.RoleUser, Content: query}
+	msgs := []llm.Message{sys}
+	msgs = append(msgs, SanitizeAnswerHistory(history)...)
+	msgs = append(msgs, user)
+	return FastWindowTooFull(fc.EstimatePromptTokens(msgs, nil), fc.ContextWindow())
 }
 
 func (r *Runner) runAnswer(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, history []llm.Message, rec agent.Recorder, query, extra string, think bool, req Request, dec intent.Decision, routerTime time.Duration) (int, string, int) {
