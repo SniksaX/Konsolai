@@ -441,6 +441,9 @@ func runCompact(ctx context.Context, r *turn.Runner, env *commands.Env, st *sess
 		return 0
 	}
 	turn.PersistCompact(ctx, env.Mem, st.id, env.Profile.Name, st.cwd, sum, upto, hist)
+	if r.Ingest != nil {
+		r.Ingest.EnqueueSummary(turn.UpsertProject(ctx, env.Mem, st.cwd), st.id, sum, upto)
+	}
 	after := r.Client.EstimatePromptTokens(turn.HistoryWithSummary(hist, sum, upto), nil)
 	turn.PrintCompacted(env.Out, upto, before, after, win)
 	return 0
