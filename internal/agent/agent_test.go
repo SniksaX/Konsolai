@@ -46,6 +46,7 @@ type replay struct {
 	maxTokens    []int
 	promptTokens []int
 	truncates    []bool
+	modelLen     int
 }
 
 func newReplay(t *testing.T, replies []llm.Message) (*llm.Client, *replay) {
@@ -53,6 +54,10 @@ func newReplay(t *testing.T, replies []llm.Message) (*llm.Client, *replay) {
 	r := &replay{t: t, replies: replies}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, req *http.Request) {
+		win := r.modelLen
+		if win <= 0 {
+			win = 94208
+		}
 		_ = json.NewEncoder(w).Encode(struct {
 			Data []struct {
 				ID          string `json:"id"`
@@ -61,7 +66,7 @@ func newReplay(t *testing.T, replies []llm.Message) (*llm.Client, *replay) {
 		}{Data: []struct {
 			ID          string `json:"id"`
 			MaxModelLen int    `json:"max_model_len"`
-		}{{ID: "test", MaxModelLen: 94208}}})
+		}{{ID: "test", MaxModelLen: win}}})
 	})
 	mux.HandleFunc("/v1/chat/completions", r.serve)
 	srv := httptest.NewServer(mux)
@@ -91,8 +96,11 @@ func (r *replay) serve(w http.ResponseWriter, req *http.Request) {
 	r.maxTokens = append(r.maxTokens, body.MaxTokens)
 	i := len(r.reqs) - 1
 	pt := 1000
-	if i < len(r.promptTokens) && r.promptTokens[i] > 0 {
-		pt = r.promptTokens[i]
+	if r.promptTokens != nil {
+		pt = 0
+		if i < len(r.promptTokens) {
+			pt = r.promptTokens[i]
+		}
 	}
 	r.mu.Unlock()
 	if i >= len(r.replies) {
@@ -355,13 +363,109 @@ func TestContextElision(t *testing.T) {
 	found := false
 	for _, req := range rep.reqs {
 		for _, m := range req {
-			if m.Role == llm.RoleTool && m.Content == elidedOutput {
+			if m.Role == llm.RoleTool && isElided(m.Content) {
 				found = true
 			}
 		}
 	}
 	if !found {
 		t.Fatal("expected an elided tool message")
+	}
+}
+
+func samePrefix(prev, next []llm.Message) bool {
+	if len(next) < len(prev) {
+		return false
+	}
+	for i := range prev {
+		if prev[i].Role != next[i].Role || prev[i].Content != next[i].Content || prev[i].ToolCallID != next[i].ToolCallID {
+			return false
+		}
+		if len(prev[i].ToolCalls) != len(next[i].ToolCalls) {
+			return false
+		}
+		for j := range prev[i].ToolCalls {
+			if prev[i].ToolCalls[j].ID != next[i].ToolCalls[j].ID ||
+				prev[i].ToolCalls[j].Function.Name != next[i].ToolCalls[j].Function.Name ||
+				prev[i].ToolCalls[j].Function.Arguments != next[i].ToolCalls[j].Function.Arguments {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func TestHysteresisElisionOnePass(t *testing.T) {
+	root := t.TempDir()
+	big := strings.Repeat("hello world\n", 400)
+	const nfiles = 14
+	for i := 0; i < nfiles; i++ {
+		name := fmt.Sprintf("f%d.txt", i)
+		if err := os.WriteFile(filepath.Join(root, name), []byte(big), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var replies []llm.Message
+	for i := 0; i < nfiles; i++ {
+		replies = append(replies, assistant(call(fmt.Sprintf("c%d", i), "read_file", fmt.Sprintf(`{"path":"f%d.txt"}`, i))))
+	}
+	replies = append(replies, llm.Message{Role: llm.RoleAssistant, Content: "done"})
+	client, rep := newReplay(t, replies)
+	rep.modelLen = 32768
+	rep.promptTokens = make([]int, len(replies))
+	reg := tools.NewRegistry(g, io.Discard, nil, nil, nil).Named("read_file")
+	var errW strings.Builder
+	err = Run(context.Background(), Config{
+		Client: client, Tools: reg, Confirmer: stubConfirm{d: ui.Approve},
+		Out: io.Discard, MaxSteps: 15, Trace: true, Err: &errW, Intent: "act",
+	}, "sys", "task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	window := client.ContextWindow()
+	if window != 32768 {
+		t.Fatalf("window %d", window)
+	}
+	passes := 0
+	for i := 1; i < len(rep.reqs); i++ {
+		if samePrefix(rep.reqs[i-1], rep.reqs[i]) {
+			continue
+		}
+		nElided := 0
+		for _, m := range rep.reqs[i] {
+			if m.Role == llm.RoleTool && isElided(m.Content) {
+				nElided++
+			}
+		}
+		if nElided < 2 {
+			t.Fatalf("prefix changed at %d without a batch elide (%d)", i, nElided)
+		}
+		est := client.EstimatePromptTokens(rep.reqs[i], rep.tools[i])
+		if float64(est) > contextTarget*float64(window)+1 {
+			t.Fatalf("one pass should reach <=40%%, est=%d window=%d", est, window)
+		}
+		passes++
+	}
+	if passes < 1 {
+		t.Fatal("expected a hysteresis pass")
+	}
+	if !strings.Contains(errW.String(), "elided") || !strings.Contains(errW.String(), "tool outputs") {
+		t.Fatalf("trace %q", errW.String())
+	}
+}
+
+func TestElidedMarkerDeterministic(t *testing.T) {
+	a := elidedMarker("read_file", elideSummary("hello world\nmore"))
+	b := elidedMarker("read_file", elideSummary("hello world\nmore"))
+	if a != b || a != "[tool output elided: read_file hello world]" {
+		t.Fatalf("%q %q", a, b)
+	}
+	if FormatElide(ElideStats{Count: 9, Before: 57467, After: 35799}, 94208) != "  elided 9 tool outputs (ctx 61% -> 38%)" {
+		t.Fatalf("%q", FormatElide(ElideStats{Count: 9, Before: 57467, After: 35799}, 94208))
 	}
 }
 
