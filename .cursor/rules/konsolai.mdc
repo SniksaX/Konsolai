@@ -86,6 +86,6 @@
 - NEVER start, stop, restart or remove the user's container `konsolai-pg` (port 55432, volume konsolai-pg).
 - Integration tests use a separate throwaway container. Bring it up and down with `scripts/test-db.sh up` / `down`.
  docker run -d --rm --name konsolai-pg-test --network host \
- -e POSTGRES_PASSWORD=ktest -e POSTGRES_DB=konsolai_test -e PGPORT=55433 postgres:17
+ -e POSTGRES_PASSWORD=ktest -e POSTGRES_DB=konsolai_test -e PGPORT=55433 pgvector/pgvector:pg17
  KONSOLAI_TEST_DATABASE_URL=postgres://postgres:ktest@localhost:55433/konsolai_test?sslmode=disable
 - End-to-end runs that need memory use the user's DB as-is, and must not depend on its contents.
