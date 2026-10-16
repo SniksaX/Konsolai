@@ -12,9 +12,10 @@ import (
 type rlReader struct {
 	sh     *readline.Shell
 	prompt string
+	footer func() string
 }
 
-func NewReadline(completer func(line []rune, cursor int) readline.Completions) (LineReader, error) {
+func NewReadline(completer func(line []rune, cursor int) readline.Completions, footer func() string) (LineReader, error) {
 	sh := readline.NewShell()
 	_ = sh.Config.Set("enable-bracketed-paste", true)
 	_ = sh.Config.Set("history-size", histCap)
@@ -22,6 +23,8 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions) (
 	_ = sh.Config.Set("autocomplete", true)
 	_ = sh.Config.Set("usage-hint-always", true)
 	_ = sh.Config.Set("completion-description-style", "\x1b[38;5;245m")
+	_ = sh.Config.Set("prompt-transient", true)
+	_ = sh.Config.Set("transient-prompt", true)
 	sh.History.Add("repl", loadFileHistory(HistoryPath()))
 	sh.Keymap.Register(map[string]func(){
 		"insert-newline": func() {
@@ -35,8 +38,19 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions) (
 	if completer != nil {
 		sh.Completer = completer
 	}
-	r := &rlReader{sh: sh}
+	r := &rlReader{sh: sh, footer: footer}
 	sh.Prompt.Primary(func() string { return r.prompt })
+	sh.Prompt.Transient(func() string { return r.prompt })
+	sh.Hint.SetProvider(func(line []rune, cursor int) []rune {
+		if r.footer == nil {
+			return nil
+		}
+		s := r.footer()
+		if s == "" {
+			return nil
+		}
+		return []rune(s)
+	})
 	return r, nil
 }
 
