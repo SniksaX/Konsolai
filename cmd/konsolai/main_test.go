@@ -109,6 +109,25 @@ func TestParseArgs(t *testing.T) {
 	}
 }
 
+func TestParseArgsSlashAndVersion(t *testing.T) {
+	got, err := parseArgs([]string{"--version"})
+	if err != nil || !got.Version || got.Request != "" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	got, err = parseArgs([]string{"/copy", "answer", "2"})
+	if err != nil || got.Slash != "copy" || got.SlashN != 2 || got.SlashArgs[0] != "answer" || got.SlashArgs[1] != "2" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	got, err = parseArgs([]string{"/resume", "3", "and then?"})
+	if err != nil || got.Slash != "resume" || got.SlashN != 2 || got.SlashArgs[1] != "and then?" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	got, err = parseArgs([]string{"history"})
+	if err != nil || got.Cmd != cmdHistory || got.Slash != "" {
+		t.Fatalf("bare history %+v %v", got, err)
+	}
+}
+
 func TestParseArgsHelp(t *testing.T) {
 	_, err := parseArgs([]string{"-h"})
 	if !errors.Is(err, flag.ErrHelp) {
