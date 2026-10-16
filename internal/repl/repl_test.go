@@ -105,10 +105,47 @@ func osMkdirGit(dir, head string) error {
 	return os.WriteFile(filepath.Join(dir, ".git", "HEAD"), []byte(head), 0644)
 }
 
-func TestFormatPrompt(t *testing.T) {
-	s := formatPrompt("/tmp/kp", 12, true, true)
-	if !strings.Contains(s, "kp") || !strings.Contains(s, "ctx 12%") || !strings.Contains(s, "●") {
-		t.Fatalf("%q", s)
+func TestFormatFooter(t *testing.T) {
+	t.Setenv("COLUMNS", "80")
+	dir := t.TempDir()
+	if err := osMkdirGit(dir, "ref: refs/heads/dev\n"); err != nil {
+		t.Fatal(err)
+	}
+	s := formatFooter(footerInfo{
+		Cwd: dir, Model: "org/qwen38.nvfp4", Routing: "fast",
+		CtxPct: 12, ShowCtx: true, Down: true,
+	})
+	if !strings.Contains(s, "dev") || !strings.Contains(s, "qwen38.nvfp4") || !strings.Contains(s, "ctx 12%") {
+		t.Fatalf("left %q", s)
+	}
+	if !strings.Contains(s, "routing fast") || !strings.Contains(s, "●") {
+		t.Fatalf("right %q", s)
+	}
+	sh := formatFooter(footerInfo{Cwd: dir, Model: "qwen", Routing: "main", Shell: true})
+	if !strings.Contains(sh, "shell") || strings.Contains(sh, "qwen") {
+		t.Fatalf("shell footer %q", sh)
+	}
+}
+
+func TestInputPrompt(t *testing.T) {
+	if !strings.Contains(inputPrompt(false), "› ") {
+		t.Fatalf("ai %q", inputPrompt(false))
+	}
+	if !strings.Contains(inputPrompt(true), "$ ") {
+		t.Fatalf("shell %q", inputPrompt(true))
+	}
+}
+
+func TestShortPathAndModel(t *testing.T) {
+	t.Setenv("HOME", "/home/u")
+	if shortPath("/home/u/src/k") != "~/src/k" {
+		t.Fatalf("%q", shortPath("/home/u/src/k"))
+	}
+	if shortPath("/home/u") != "~" {
+		t.Fatalf("%q", shortPath("/home/u"))
+	}
+	if shortModel("acme/qwen38.nvfp4") != "qwen38.nvfp4" {
+		t.Fatalf("%q", shortModel("acme/qwen38.nvfp4"))
 	}
 }
 
