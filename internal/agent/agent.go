@@ -221,6 +221,7 @@ func PrintSummary(w io.Writer, intent string, s Stats) {
 	if w == nil {
 		return
 	}
+	fmt.Fprintln(w)
 	fmt.Fprintln(w, ui.Current().Muted(FormatSummary(intent, s)))
 }
 
@@ -293,9 +294,10 @@ func printReject(w io.Writer, name, args, reason string) {
 	if w == nil {
 		return
 	}
+	ui.BeforeOutput()
 	callLine, rejectLine := ui.RejectCall(name, shortArgSummary(args), reason)
-	fmt.Fprintln(w, callLine)
-	fmt.Fprintln(w, rejectLine)
+	fmt.Fprintln(w, ui.CallIndent+callLine)
+	fmt.Fprintln(w, ui.OutIndent+rejectLine)
 }
 
 func (p ThinkingPolicy) enabled(planApproved, shellFail bool, consecFail int) bool {
@@ -1049,7 +1051,13 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		}
 		narration := trimLeadingBlanks(msg.Content)
 		if strings.TrimSpace(narration) != "" && len(msg.ToolCalls) > 0 && !hasFinishCall(msg) {
-			fmt.Fprintln(cfg.Out, ui.Current().Muted(narration))
+			ui.BeforeOutput()
+			fmt.Fprintln(cfg.Out)
+			text := ui.CollapseBlankLines(narration)
+			fmt.Fprint(cfg.Out, ui.Current().Muted(ui.Indent(text, 2)))
+			if !strings.HasSuffix(text, "\n") {
+				fmt.Fprintln(cfg.Out)
+			}
 		}
 		if len(msg.ToolCalls) > 0 {
 			msg.Content = truncateNarration(msg.Content)
@@ -1082,6 +1090,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		stepReadOnly := 0
 		stepOther := 0
 		lastReadOnly := -1
+		hadLiveOut := false
 		for _, call := range msg.ToolCalls {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -1187,11 +1196,14 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					var reason string
 					var err error
 					if outside && !cfg.AutoApprove {
+						ui.BeforeOutput()
 						d, reason, err = cfg.Confirmer.ConfirmForced(summary, action.Preview())
 					} else {
 						if outside && cfg.AutoApprove {
-							fmt.Fprintln(cfg.Out, ui.Current().Warn(summary))
+							ui.BeforeOutput()
+							fmt.Fprintln(cfg.Out, ui.Current().Warn(ui.CallIndent+summary))
 						}
+						ui.BeforeOutput()
 						d, reason, err = cfg.Confirmer.Confirm(summary, action.Preview())
 					}
 					if err != nil {
@@ -1260,7 +1272,11 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				key := call.Function.Name + "\x00" + canonicalJSON(call.Function.Arguments)
 				if _, dup := seenRead[key]; dup {
 					if !finish {
-						fmt.Fprintln(cfg.Out, ui.Current().Accent("▸")+" "+summary+" (duplicate, skipped)")
+						if hadLiveOut {
+							fmt.Fprintln(cfg.Out)
+						}
+						ui.BeforeOutput()
+						fmt.Fprintln(cfg.Out, ui.CallIndent+ui.Current().Accent("▸")+" "+summary+" (duplicate, skipped)")
 					}
 					tm := llm.Message{
 						Role: llm.RoleTool, Content: "note: you already made this exact call; its result is above.",
@@ -1274,7 +1290,11 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				seenRead[key] = struct{}{}
 			}
 			if !finish {
-				fmt.Fprintln(cfg.Out, ui.Current().Accent("▸")+" "+summary)
+				if hadLiveOut {
+					fmt.Fprintln(cfg.Out)
+				}
+				ui.BeforeOutput()
+				fmt.Fprintln(cfg.Out, ui.CallIndent+ui.Current().Accent("▸")+" "+summary)
 			}
 			start := time.Now()
 			result, err := action.Run(ctx)
@@ -1336,7 +1356,8 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			if result.IsError {
 				mark = pal.Error("✗")
 			}
-			fmt.Fprintf(cfg.Out, "%s %s · %s\n", mark, pal.Muted(displayMeta(result)), pal.Muted(formatDuration(elapsed)))
+			fmt.Fprintf(cfg.Out, "%s%s %s · %s\n", ui.OutIndent, mark, pal.Muted(displayMeta(result)), pal.Muted(formatDuration(elapsed)))
+			hadLiveOut = toolPrintedOutput(call.Function.Name, result)
 			content := result.Output
 			if cfg.Task == "analysis" && analysisSourceRead(call.Function.Name, call.Function.Arguments) && !result.IsError {
 				sourceReads++
@@ -1514,16 +1535,29 @@ func planOnlySpecs(specs []llm.ToolSpec) []llm.ToolSpec {
 }
 
 func writeAnswer(w io.Writer, text string, plain bool) {
+	ui.BeforeOutput()
+	text = ui.CollapseBlankLines(text)
 	if plain {
 		fmt.Fprintln(w, text)
 		return
 	}
-	r := ui.NewRenderer(w, false)
+	r := ui.NewRenderer(ui.NewIndentWriter(w, 2), false)
 	_, _ = r.Write([]byte(text))
 	if !strings.HasSuffix(text, "\n") {
 		_, _ = r.Write([]byte("\n"))
 	}
 	_ = r.Flush()
+}
+
+func toolPrintedOutput(name string, r tools.Result) bool {
+	if name != "run_shell" {
+		return false
+	}
+	s := r.Output
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return strings.TrimSpace(s[i+1:]) != ""
+	}
+	return false
 }
 
 func formatDuration(d time.Duration) string {
@@ -1579,7 +1613,8 @@ func skipCoveredRead(action tools.Action, call llm.ToolCall, spans []readSpan, m
 	}
 	summary := action.Summary()
 	if out != nil {
-		fmt.Fprintln(out, ui.Current().Accent("▸")+" "+summary+" (already shown, skipped)")
+		ui.BeforeOutput()
+		fmt.Fprintln(out, ui.CallIndent+ui.Current().Accent("▸")+" "+summary+" (already shown, skipped)")
 	}
 	return true, llm.Message{
 		Role:       llm.RoleTool,
