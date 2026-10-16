@@ -55,6 +55,7 @@ const (
 	DocsFileNote   = "The user asked for a file. Write it with write_file, then export_doc if a PDF/HTML was requested."
 	DocsExportNote = "Write the Markdown with write_file, then call export_doc with format pdf and/or html. export_doc is available and renders Mermaid diagrams."
 	MaxStepsNote   = "Step limit reached. Summarize what you found or did, and what remains."
+	PostPlanNote   = "You have the plan approved. Make progress now: perform the next planned change (write_file, edit_file, run_shell, export_doc) or call finish."
 )
 
 const preferReadOnlyCmd = "Prefer running a read-only command (e.g. `go version`, `ss -ltnp`) over guessing from files when the question is about the installed or running state of the machine."
