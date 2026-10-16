@@ -219,7 +219,7 @@ func (t *readFileTool) Prepare(rawArgs string) (Action, error) {
 	if strings.TrimSpace(args.Path) == "" {
 		return nil, errors.New("tools: read_file: path is required")
 	}
-	resolved, err := t.guard.ResolvePath(args.Path)
+	resolved, err := t.guard.ResolveRead(args.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +309,7 @@ func (t *listDirTool) Prepare(rawArgs string) (Action, error) {
 	if display == "" {
 		display = "."
 	}
-	resolved, err := t.guard.ResolvePath(display)
+	resolved, err := t.guard.ResolveReadDir(display)
 	if err != nil {
 		return nil, err
 	}
