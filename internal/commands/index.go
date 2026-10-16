@@ -57,6 +57,16 @@ func runIndex(ctx context.Context, env *Env, args []string) int {
 	}
 	fmt.Fprintf(env.out(), "indexed %d files (%d chunks, %d unchanged) in %s\n",
 		stats.Indexed, stats.Chunks, stats.Unchanged, formatIndexDur(stats.Duration))
+	if filter != "" && stats.Considered == 0 {
+		fmt.Fprintf(env.errw(), "no files matched %s\n", filter)
+		return 1
+	}
+	if stats.Failed > 0 {
+		fmt.Fprintf(env.errw(), "failed %d files\n", stats.Failed)
+		if stats.LastError != nil {
+			fmt.Fprintln(env.errw(), stats.LastError)
+		}
+	}
 	return 0
 }
 
