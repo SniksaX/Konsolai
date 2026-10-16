@@ -201,16 +201,9 @@ func loadSessionByID(ctx context.Context, mem *memory.Guard, id string, cands []
 	return ResumeCandidate{ID: id, Messages: msgs}
 }
 
-func langLine(d intent.Decision) string {
-	lang := d.Language
-	if lang == "" {
-		lang = "en"
-	}
-	return "Reply in the user's language (" + lang + ")."
-}
-
 func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, mem *memory.Guard, sessionID string, projectID *int64, req Request, cwd string, confirmer agent.Confirmer, dec intent.Decision, routerTime time.Duration, thinkMode ThinkMode) (int, string, int) {
-	lang := langLine(dec)
+	dec.Language = intent.ResolveLanguage(req.Text, lastUserOf(history), dec.Language, r.Profile.DefaultLanguage, r.Profile.Languages)
+	lang := agent.ReplyInstruction(dec.Language)
 	if dec.Intent == intent.Answer {
 		prompt := agent.AnswerPrompt + "\n" + lang
 		if r.SlashHelp != "" {
