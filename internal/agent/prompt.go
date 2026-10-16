@@ -61,7 +61,7 @@ const preferReadOnlyCmd = "Prefer running a read-only command (e.g. `go version`
 
 const batchReads = "Batch independent reads: request several read_file/outline calls in the same step instead of one per step."
 
-const FenceRule = "When showing file contents that themselves contain ``` code blocks, wrap them in a ```` (4 backticks) fence."
+const FenceRule = "Use a ```` fence ONLY when the content itself contains ``` lines; otherwise use ```."
 
 const SecretRule = "Never print a secret value in full. Refer to it by name and its first 4 characters."
 
