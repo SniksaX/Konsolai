@@ -40,6 +40,7 @@ type session struct {
 	down    bool
 	ctxPct  int
 	showCtx bool
+	shell   bool
 	cancel  context.CancelFunc
 	warns   []string
 }
@@ -111,7 +112,9 @@ func Run(ctx context.Context, cfg Config) int {
 	rd := cfg.Reader
 	if rd == nil {
 		var err error
-		rd, err = NewReadline(Completer(reg, func() string { return st.cwd }))
+		rd, err = NewReadline(Completer(reg, func() string { return st.cwd }), func() string {
+			return sessionFooter(st, cfg)
+		})
 		if err != nil {
 			fmt.Fprintln(errw, "konsolai:", err)
 			return 1
@@ -129,7 +132,10 @@ func Run(ctx context.Context, cfg Config) int {
 		flushWarns(errw, st)
 		ui.ResetDisplay()
 		tracked.ensureNL()
-		prompt := formatPrompt(st.cwd, st.ctxPct, st.showCtx, st.down)
+		st.mu.Lock()
+		shell := st.shell
+		st.mu.Unlock()
+		prompt := inputPrompt(shell)
 		line, err := rd.ReadLine(ctx, prompt)
 		if err != nil {
 			if err == ErrEOF {
@@ -222,6 +228,26 @@ func splitCmd(line string) (string, []string) {
 }
 
 func unicodeSpace(r rune) bool { return r == ' ' || r == '\t' }
+
+func sessionFooter(st *session, cfg Config) string {
+	st.mu.Lock()
+	cwd, down, ctxPct, showCtx, shell := st.cwd, st.down, st.ctxPct, st.showCtx, st.shell
+	st.mu.Unlock()
+	routing := "main"
+	if cfg.Runner != nil && cfg.Runner.RouterSource != "" {
+		routing = cfg.Runner.RouterSource
+	} else if cfg.Env != nil && cfg.Env.Profile.FastEndpoint != "" {
+		routing = "fast"
+	}
+	model := cfg.Model
+	if model == "" && cfg.Env != nil {
+		model = cfg.Env.Profile.Model
+	}
+	return formatFooter(footerInfo{
+		Cwd: cwd, Model: model, Routing: routing,
+		CtxPct: ctxPct, ShowCtx: showCtx, Down: down, Shell: shell,
+	})
+}
 
 func wireEnv(env *commands.Env, st *session, cfg Config) {
 	env.OnCwd = func(dir string) error {
