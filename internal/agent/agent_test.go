@@ -2048,6 +2048,80 @@ func TestPostPlanResetOnMutation(t *testing.T) {
 	}
 }
 
+func TestDocsExportNoteAfterWrite(t *testing.T) {
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("p", "propose_plan", `{"summary":"s","steps":["write","export"],"files":["docs/OVERVIEW.md","docs/OVERVIEW.pdf"]}`)),
+		assistant(call("w", "write_file", `{"path":"docs/OVERVIEW.md","content":"# x\n"}`)),
+		assistant(call("1", "read_file", `{"path":"docs/OVERVIEW.md"}`)),
+		assistant(call("2", "finish", `{"summary":"done"}`)),
+	}, stubConfirm{d: ui.Approve}, Config{
+		RequirePlan: true, AutoApprove: true, Intent: "build", Task: "docs",
+		Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil), MaxSteps: 12,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, msgs := range rep.reqs {
+		for _, m := range msgs {
+			if m.Role == llm.RoleUser && m.Content == DocsExportNote {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing export_doc note after write")
+	}
+}
+
+func TestDocsExportForceAfterWrite(t *testing.T) {
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("p", "propose_plan", `{"summary":"s","steps":["write","export"],"files":["docs/OVERVIEW.md","docs/OVERVIEW.pdf"]}`)),
+		assistant(call("w", "write_file", `{"path":"docs/OVERVIEW.md","content":"# x\n"}`)),
+		assistant(call("1", "list_dir", `{"path":"."}`)),
+		assistant(call("2", "list_dir", `{"path":"docs"}`)),
+		assistant(call("3", "finish", `{"summary":"done"}`)),
+	}, stubConfirm{d: ui.Approve}, Config{
+		RequirePlan: true, AutoApprove: true, Intent: "build", Task: "docs",
+		Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil), MaxSteps: 14,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	forced := false
+	for i, specs := range rep.tools {
+		var choice struct {
+			Type     string `json:"type"`
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		}
+		if err := json.Unmarshal(rep.toolChoices[i], &choice); err != nil || choice.Function.Name != "export_doc" {
+			continue
+		}
+		if hasSpec(specs, "read_file") || hasSpec(specs, "run_shell") || hasSpec(specs, "write_file") {
+			t.Fatalf("forced export still has extra tools: %v", specNames(specs))
+		}
+		if !hasSpec(specs, "export_doc") {
+			t.Fatalf("forced export missing export_doc: %v", specNames(specs))
+		}
+		forced = true
+	}
+	if !forced {
+		t.Fatalf("want tool_choice export_doc after 3 post-write steps, choices=%v", rep.toolChoices)
+	}
+}
+
 func TestPostPlanDocsFileNote(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("x\n"), 0644); err != nil {
