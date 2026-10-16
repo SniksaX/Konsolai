@@ -242,6 +242,32 @@ func PrintTrace(w io.Writer, step int, think bool, d time.Duration, in, out, win
 	fmt.Fprintln(w, FormatTrace(step, think, d, in, out, window, names))
 }
 
+func shortArgSummary(raw string) string {
+	var m map[string]any
+	if json.Unmarshal([]byte(raw), &m) == nil {
+		for _, k := range []string{"path", "cmd", "summary"} {
+			if s, ok := m[k].(string); ok && strings.TrimSpace(s) != "" {
+				return s
+			}
+		}
+	}
+	s := strings.TrimSpace(raw)
+	r := []rune(s)
+	if len(r) > 60 {
+		return string(r[:60])
+	}
+	return s
+}
+
+func printReject(w io.Writer, name, args, reason string) {
+	if w == nil {
+		return
+	}
+	callLine, rejectLine := ui.RejectCall(name, shortArgSummary(args), reason)
+	fmt.Fprintln(w, callLine)
+	fmt.Fprintln(w, rejectLine)
+}
+
 func (p ThinkingPolicy) enabled(planApproved, shellFail bool) bool {
 	switch p {
 	case ThinkOn:
@@ -742,9 +768,11 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			tool, ok := cfg.Tools.Get(call.Function.Name)
 			args := json.RawMessage(call.Function.Arguments)
 			if !ok {
+				reason := "unknown tool " + call.Function.Name
+				printReject(cfg.Out, call.Function.Name, call.Function.Arguments, reason)
 				tm := llm.Message{
 					Role:       llm.RoleTool,
-					Content:    "error: unknown tool " + call.Function.Name,
+					Content:    "error: " + reason,
 					ToolCallID: call.ID,
 				}
 				msgs = append(msgs, tm)
@@ -754,6 +782,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			}
 			action, err := tool.Prepare(call.Function.Arguments)
 			if err != nil {
+				printReject(cfg.Out, call.Function.Name, call.Function.Arguments, err.Error())
 				tm := llm.Message{
 					Role:       llm.RoleTool,
 					Content:    "error: " + err.Error(),
@@ -771,9 +800,11 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				stepOther++
 			}
 			if kind == tools.Mutating && cfg.RequirePlan && !planApproved {
+				reason := "plan not approved. Explore with read-only tools, then call propose_plan."
+				printReject(cfg.Out, call.Function.Name, call.Function.Arguments, reason)
 				tm := llm.Message{
 					Role:       llm.RoleTool,
-					Content:    "error: plan not approved. Explore with read-only tools, then call propose_plan.",
+					Content:    "error: " + reason,
 					ToolCallID: call.ID,
 				}
 				msgs = append(msgs, tm)
