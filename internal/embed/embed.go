@@ -36,11 +36,26 @@ type Scored struct {
 	Text  string
 }
 
+func newHTTP(d time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: d,
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
+			ForceAttemptHTTP2:     false,
+			DisableKeepAlives:     true,
+			ResponseHeaderTimeout: d,
+			TLSHandshakeTimeout:   5 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		},
+	}
+}
+
 func New(embedEndpoint, rerankEndpoint string) *Client {
 	return &Client{
 		embedURL:  strings.TrimRight(embedEndpoint, "/"),
 		rerankURL: strings.TrimRight(rerankEndpoint, "/"),
-		http:      &http.Client{Timeout: embedTimeout},
+		http:      newHTTP(embedTimeout),
 	}
 }
 
@@ -195,11 +210,7 @@ func (c *Client) Rerank(ctx context.Context, query string, texts []string) ([]Sc
 		return nil, fmt.Errorf("embed: rerank request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	httpClient := c.http
-	if httpClient.Timeout != rerankTimeout {
-		httpClient = &http.Client{Timeout: rerankTimeout}
-	}
-	resp, err := httpClient.Do(req)
+	resp, err := newHTTP(rerankTimeout).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("embed: rerank: %w", err)
 	}
