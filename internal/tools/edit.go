@@ -13,9 +13,14 @@ import (
 	"github.com/siraj/konsolai/internal/safety"
 )
 
-type editFileTool struct{ guard *safety.Guard }
+type editFileTool struct {
+	guard    *safety.Guard
+	docsTask bool
+}
 
-func newEditFile(g *safety.Guard) *editFileTool { return &editFileTool{guard: g} }
+func newEditFile(g *safety.Guard, docsTask bool) *editFileTool {
+	return &editFileTool{guard: g, docsTask: docsTask}
+}
 
 func (t *editFileTool) Spec() llm.ToolSpec {
 	return llm.ToolSpec{
@@ -54,6 +59,9 @@ func (t *editFileTool) Prepare(rawArgs string) (Action, error) {
 	}
 	if strings.TrimSpace(args.Path) == "" {
 		return nil, errors.New("tools: edit_file: path is required")
+	}
+	if t.docsTask && !DocsPathAllowed(args.Path) {
+		return nil, errors.New(DocsSourceReject)
 	}
 	if args.OldStr == "" {
 		return nil, errors.New("tools: edit_file: old_str must be non-empty")
