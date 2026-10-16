@@ -57,6 +57,7 @@ const (
 	ThinkOn
 	ThinkUntilPlan
 	ThinkPlanStep
+	ThinkLookup
 )
 
 func ParseBuildThinking(s string) ThinkingPolicy {
@@ -242,6 +243,27 @@ func PrintTrace(w io.Writer, step int, think bool, d time.Duration, in, out, win
 	fmt.Fprintln(w, FormatTrace(step, think, d, in, out, window, names))
 }
 
+func ShortModel(id string) string {
+	if id == "" {
+		return "-"
+	}
+	if i := strings.LastIndex(id, "/"); i >= 0 && i+1 < len(id) {
+		return id[i+1:]
+	}
+	return id
+}
+
+func FormatRouter(model string, d time.Duration, effort string) string {
+	return fmt.Sprintf("router %s %s · effort %s", ShortModel(model), formatDuration(d), effort)
+}
+
+func PrintRouter(w io.Writer, model string, d time.Duration, effort string) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintln(w, FormatRouter(model, d, effort))
+}
+
 func shortArgSummary(raw string) string {
 	var m map[string]any
 	if json.Unmarshal([]byte(raw), &m) == nil {
@@ -268,7 +290,8 @@ func printReject(w io.Writer, name, args, reason string) {
 	fmt.Fprintln(w, rejectLine)
 }
 
-func (p ThinkingPolicy) enabled(planApproved, shellFail bool) bool {
+func (p ThinkingPolicy) enabled(planApproved, shellFail bool, consecFail int) bool {
+	recover := shellFail || consecFail >= 2
 	switch p {
 	case ThinkOn:
 		return true
@@ -276,12 +299,14 @@ func (p ThinkingPolicy) enabled(planApproved, shellFail bool) bool {
 		if !planApproved {
 			return true
 		}
-		return shellFail
+		return recover
 	case ThinkPlanStep:
 		if !planApproved {
 			return false
 		}
-		return shellFail
+		return recover
+	case ThinkLookup:
+		return consecFail >= 2
 	default:
 		return false
 	}
@@ -806,6 +831,8 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	forceMutating := false
 	forceExport := false
 	shellFail := false
+	planRejected := false
+	consecFail := 0
 	var st Stats
 	st.RouterTime = cfg.RouterTime
 	defer func() {
@@ -822,7 +849,10 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	}()
 
 	for step := 0; step < analysisLimit(cfg, sourceReads); step++ {
-		think := cfg.ThinkingPolicy.enabled(planApproved, shellFail)
+		think := cfg.ThinkingPolicy.enabled(planApproved, shellFail, consecFail)
+		if cfg.ThinkingPolicy == ThinkPlanStep && planRejected && !planApproved {
+			think = true
+		}
 		opts := llm.ChatOptions{Thinking: think, Temperature: temp}
 		shellFail = false
 		forcingPlan := toolsGone && cfg.RequirePlan && !planApproved
@@ -1113,6 +1143,9 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				}
 				switch d {
 				case ui.Reject:
+					if kind == tools.Plan {
+						planRejected = true
+					}
 					tm := llm.Message{
 						Role:       llm.RoleTool,
 						Content:    "user rejected: " + reason,
@@ -1131,6 +1164,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					}
 					if kind == tools.Plan {
 						planApproved = true
+						planRejected = false
 						planFiles = planFilesOf(action)
 						planCmds = planCmdsOf(action)
 					}
@@ -1141,6 +1175,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					}
 					if kind == tools.Plan {
 						planApproved = true
+						planRejected = false
 						planFiles = planFilesOf(action)
 						planCmds = planCmdsOf(action)
 					}
@@ -1235,6 +1270,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				sourceReads++
 			}
 			if result.IsError {
+				consecFail++
 				sum := sha256.Sum256([]byte(result.Output))
 				key := call.Function.Name + call.Function.Arguments + string(sum[:])
 				if _, dup := seenFail[key]; dup {
@@ -1242,6 +1278,8 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				} else {
 					seenFail[key] = struct{}{}
 				}
+			} else {
+				consecFail = 0
 			}
 			tm := llm.Message{
 				Role:       llm.RoleTool,
