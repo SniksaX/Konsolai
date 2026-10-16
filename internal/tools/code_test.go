@@ -188,3 +188,31 @@ func TestWriteFileDiffPreview(t *testing.T) {
 		t.Fatalf("preview %q", act.Preview())
 	}
 }
+
+func TestDocsTaskRejectsSourceEdit(t *testing.T) {
+	root := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "a.py"), []byte("x = 1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "a.md"), []byte("# x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	reg := NewRegistry(g, os.Stdout, nil, nil, nil, Options{DocsTask: true})
+	tool, _ := reg.Get("edit_file")
+	_, err = tool.Prepare(`{"path":"a.py","old_str":"x = 1","new_str":"x = 2"}`)
+	if err == nil || err.Error() != DocsSourceReject {
+		t.Fatalf("py: %v", err)
+	}
+	if _, err := tool.Prepare(`{"path":"a.md","old_str":"# x","new_str":"# y"}`); err != nil {
+		t.Fatalf("md: %v", err)
+	}
+	plain := NewRegistry(g, os.Stdout, nil, nil, nil)
+	e, _ := plain.Get("edit_file")
+	if _, err := e.Prepare(`{"path":"a.py","old_str":"x = 1","new_str":"x = 2"}`); err != nil {
+		t.Fatalf("non-docs: %v", err)
+	}
+}
