@@ -16,11 +16,13 @@ const (
 )
 
 type LastSession struct {
-	Profile   string        `json:"profile"`
-	CWD       string        `json:"cwd"`
-	Title     string        `json:"title"`
-	UpdatedAt time.Time     `json:"updated_at"`
-	Messages  []llm.Message `json:"messages"`
+	Profile        string        `json:"profile"`
+	CWD            string        `json:"cwd"`
+	Title          string        `json:"title"`
+	UpdatedAt      time.Time     `json:"updated_at"`
+	Messages       []llm.Message `json:"messages"`
+	CompactSummary string        `json:"compact_summary,omitempty"`
+	CompactedUpto  int           `json:"compacted_upto,omitempty"`
 }
 
 func StateDir() string {
