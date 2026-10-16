@@ -114,7 +114,16 @@ func TestClassifySchemaAndRecent(t *testing.T) {
 			effortReq = true
 		}
 	}
-	if !found || !taskReq || !contReq || !effortReq {
+	memReq := false
+	for _, r := range wrap.JSONSchema.Schema.Required {
+		if r == "needs_memory" {
+			memReq = true
+		}
+	}
+	if _, ok := wrap.JSONSchema.Schema.Properties["needs_memory"]; !ok {
+		t.Fatal("schema missing needs_memory")
+	}
+	if !found || !taskReq || !contReq || !effortReq || !memReq {
 		t.Fatalf("required %v", wrap.JSONSchema.Schema.Required)
 	}
 	if !strings.Contains(joined, `effort is required`) || !strings.Contains(joined, "okey good") {
@@ -143,6 +152,9 @@ func TestClassifySchemaAndRecent(t *testing.T) {
 	}
 	if !strings.Contains(joined, "PDF overview after a README request") {
 		t.Fatal("router prompt missing PDF-after-README example")
+	}
+	if !strings.Contains(joined, "needs_memory=true") || !strings.Contains(joined, "la dernière fois") {
+		t.Fatal("router prompt missing needs_memory rule")
 	}
 }
 
@@ -291,5 +303,23 @@ func TestFormatCandidates(t *testing.T) {
 	})
 	if !strings.Contains(got, "1. [1m ago] pdf build") || !strings.Contains(got, "2. [5m ago] how do I list git branches?") {
 		t.Fatalf("%q", got)
+	}
+}
+
+func TestLooksLikeMemory(t *testing.T) {
+	for _, s := range []string{
+		"what did we decide last time?",
+		"we decided to use RRF",
+		"remember when we set the threshold",
+		"la dernière fois on avait dit 0.1",
+		"on avait dit k=60",
+		"as I mentioned earlier",
+	} {
+		if !LooksLikeMemory(s) {
+			t.Fatalf("want memory %q", s)
+		}
+	}
+	if LooksLikeMemory("what is a mutex") {
+		t.Fatal("false positive")
 	}
 }
