@@ -8,6 +8,24 @@ import (
 	"github.com/siraj/konsolai/internal/turn"
 )
 
+func runCmd(ctx context.Context, env *Env, args []string) int {
+	if len(args) == 1 && strings.EqualFold(args[0], "clear") {
+		if env.OnCmdClear != nil {
+			env.OnCmdClear()
+		}
+		return 0
+	}
+	if len(args) != 0 {
+		fmt.Fprintln(env.errw(), "usage: /cmd [clear]")
+		return 2
+	}
+	if env.OnCmd != nil {
+		return env.OnCmd()
+	}
+	fmt.Fprintln(env.errw(), "/cmd is only available in the REPL")
+	return 2
+}
+
 func runExit(ctx context.Context, env *Env, _ []string) int {
 	if env.OnExit != nil {
 		return env.OnExit()
