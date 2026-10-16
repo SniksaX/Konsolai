@@ -24,13 +24,33 @@ func ModelErrorLine(endpoint string, err error, trace bool) string {
 		return "konsolai: the model's answer was cut off; try a narrower request."
 	}
 	var he *llm.HTTPError
-	if errors.As(err, &he) && he.Status >= 400 && he.Status < 500 {
-		return "konsolai: the model server rejected the request: " + firstErrLine(he.Body)
+	if errors.As(err, &he) {
+		if he.Status >= 500 {
+			return "konsolai: the model server returned an error (" + host + "). Try again."
+		}
+		if he.Status >= 400 {
+			if msg := friendlyErrBody(he.Body); msg != "" {
+				return "konsolai: the model server rejected the request: " + msg
+			}
+			return "konsolai: the model server rejected the request."
+		}
 	}
 	if isDialErr(err) {
 		return "konsolai: cannot reach the model server at " + host + "."
 	}
-	return "konsolai: " + err.Error()
+	s := err.Error()
+	if strings.Contains(s, "{") || strings.Contains(s, `"error"`) {
+		return "konsolai: the model server returned an error (" + host + "). Try again."
+	}
+	return "konsolai: " + s
+}
+
+func friendlyErrBody(s string) string {
+	s = firstErrLine(s)
+	if s == "" || strings.HasPrefix(s, "{") || strings.HasPrefix(s, "[") {
+		return ""
+	}
+	return s
 }
 
 func EndpointHost(endpoint string) string {
