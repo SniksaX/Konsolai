@@ -9,8 +9,9 @@ import (
 )
 
 type Guard struct {
-	root string
-	base string
+	root  string
+	base  string
+	extra []string
 }
 
 func New(root string) (*Guard, error) {
@@ -111,8 +112,17 @@ func (g *Guard) ResolveFromRoot(p string) (string, error) {
 }
 
 func (g *Guard) resolve(p, joinRoot string) (string, error) {
+	raw := p
 	if strings.HasPrefix(p, "~") {
-		return "", &DeniedError{Rule: "tilde", Detail: p}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", &DeniedError{Rule: "tilde", Detail: raw}
+		}
+		exp, ok := expandHome(p, home)
+		if !ok {
+			return "", &DeniedError{Rule: "tilde", Detail: raw}
+		}
+		p = exp
 	}
 	if p == "" {
 		p = "."
@@ -123,15 +133,19 @@ func (g *Guard) resolve(p, joinRoot string) (string, error) {
 	} else {
 		abs = filepath.Clean(filepath.Join(joinRoot, p))
 	}
-	if !containsPath(g.root, abs) {
-		return "", &DeniedError{Rule: "escape", Detail: p}
+	if !g.allowedAbs(abs) {
+		rule := "escape"
+		if strings.HasPrefix(raw, "~") {
+			rule = "tilde"
+		}
+		return "", &DeniedError{Rule: rule, Detail: raw}
 	}
 	resolved, err := evalDeepest(abs)
 	if err != nil {
 		return "", fmt.Errorf("safety: eval path: %w", err)
 	}
-	if !containsPath(g.root, resolved) {
-		return "", &DeniedError{Rule: "symlink-escape", Detail: p}
+	if !g.allowedAbs(resolved) {
+		return "", &DeniedError{Rule: "symlink-escape", Detail: raw}
 	}
 	return resolved, nil
 }
