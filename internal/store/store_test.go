@@ -265,6 +265,46 @@ func TestSeqOrderingAndRedaction(t *testing.T) {
 	}
 }
 
+func TestActionFullOutput(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	id, err := s.CreateSession(ctx, NewSession{
+		Profile: "fullout", CWD: "/tmp/x", Mode: "do", Model: "m", Title: "t",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	big := strings.Repeat("x", 9000)
+	seq, err := s.NextSeq(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordAction(ctx, ActionIn{
+		SessionID: id, Seq: seq, Tool: "run_shell",
+		Args: []byte(`{"cmd":"echo"}`), Kind: "read_only", Decision: "auto",
+		Output: big,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var out, full string
+	if err := s.pool.QueryRow(ctx, `SELECT output, full_output FROM actions WHERE session_id = $1::uuid`, id).Scan(&out, &full); err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != maxOutput {
+		t.Fatalf("output len %d want %d", len(out), maxOutput)
+	}
+	if full != big {
+		t.Fatalf("full_output len %d want %d", len(full), len(big))
+	}
+	got, err := s.RecentShellOutputs(ctx, "fullout", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != big {
+		t.Fatalf("%d %d", len(got), len(got[0]))
+	}
+}
+
 func TestSensitiveFileUndoBlocked(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
