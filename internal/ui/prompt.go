@@ -116,6 +116,13 @@ func (p *Prompter) confirm(summary, preview string, force bool) (Decision, strin
 	}
 }
 
+func (p *Prompter) Cancel() {
+	if p == nil || p.tty == nil {
+		return
+	}
+	_ = p.tty.SetReadDeadline(time.Now())
+}
+
 func (p *Prompter) Close() error {
 	if p == nil || p.tty == nil {
 		return nil
