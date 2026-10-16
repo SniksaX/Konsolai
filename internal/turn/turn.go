@@ -15,14 +15,16 @@ import (
 )
 
 type Runner struct {
-	Profile     config.Profile
-	Client      *llm.Client
-	Mem         *memory.Guard
-	Out         io.Writer
-	Err         io.Writer
-	OpenConfirm func(yes bool) (agent.Confirmer, func(), error)
-	Copy        func(ctx context.Context, text string) (backend string, err error)
-	Version     string
+	Profile          config.Profile
+	Client           *llm.Client
+	Mem              *memory.Guard
+	Out              io.Writer
+	Err              io.Writer
+	OpenConfirm      func(yes bool) (agent.Confirmer, func(), error)
+	Copy             func(ctx context.Context, text string) (backend string, err error)
+	Version          string
+	LastPromptTokens int
+	LastWindow       int
 }
 
 type Request struct {
@@ -34,14 +36,17 @@ type Request struct {
 	Plain         bool
 	New           bool
 	ResumeSession string
+	KeepOpen      bool
 	Cwd           string
 }
 
 type Result struct {
-	SessionID string
-	Intent    string
-	ExitCode  int
-	Answer    string
+	SessionID    string
+	Intent       string
+	ExitCode     int
+	Answer       string
+	PromptTokens int
+	Window       int
 }
 
 type ResumeCandidate struct {
@@ -83,15 +88,34 @@ func (r *Runner) mem() *memory.Guard {
 	return memory.NewGuard(nil, nil)
 }
 
-func (r *Runner) confirm(yes bool) (agent.Confirmer, func(), error) {
+func (r *Runner) confirm(ctx context.Context, yes bool) (agent.Confirmer, func(), error) {
+	var conf agent.Confirmer
+	var closeConf func()
 	if r.OpenConfirm != nil {
-		return r.OpenConfirm(yes)
+		c, closer, err := r.OpenConfirm(yes)
+		if err != nil {
+			return nil, func() {}, err
+		}
+		conf, closeConf = c, closer
+	} else {
+		p, err := ui.OpenPrompter(yes)
+		if err != nil {
+			return nil, func() {}, err
+		}
+		conf = p
+		closeConf = func() { _ = p.Close() }
 	}
-	p, err := ui.OpenPrompter(yes)
-	if err != nil {
-		return nil, func() {}, err
-	}
-	return p, func() { _ = p.Close() }, nil
+	stop := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			if p, ok := conf.(*ui.Prompter); ok {
+				p.Cancel()
+			}
+		case <-stop:
+		}
+	}()
+	return conf, func() { close(stop); closeConf() }, nil
 }
 
 func ThinkingFor(dec intent.Decision, buildThinking string) agent.ThinkingPolicy {
