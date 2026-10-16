@@ -29,6 +29,7 @@ type Config struct {
 	Out     io.Writer
 	Err     io.Writer
 	Trace   bool
+	Pastes  *PasteStore
 }
 
 type session struct {
@@ -41,6 +42,7 @@ type session struct {
 	ctxPct  int
 	showCtx bool
 	shell   bool
+	pastes  *PasteStore
 	cancel  context.CancelFunc
 	warns   []string
 }
@@ -92,7 +94,11 @@ func Run(ctx context.Context, cfg Config) int {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	st := &session{cwd: cwd, yes: env.Yes, trace: cfg.Trace}
+	pastes := cfg.Pastes
+	if pastes == nil {
+		pastes = NewPasteStore()
+	}
+	st := &session{cwd: cwd, yes: env.Yes, trace: cfg.Trace, pastes: pastes}
 	env.InRepl = true
 	env.Cwd = cwd
 	wireEnv(env, st, cfg)
@@ -114,7 +120,7 @@ func Run(ctx context.Context, cfg Config) int {
 		var err error
 		rd, err = NewReadline(Completer(reg, func() string { return st.cwd }), func() string {
 			return sessionFooter(st, cfg)
-		})
+		}, st.pastes)
 		if err != nil {
 			fmt.Fprintln(errw, "konsolai:", err)
 			return 1
@@ -155,6 +161,7 @@ func Run(ctx context.Context, cfg Config) int {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
+		line = st.pastes.Expand(line)
 		if strings.HasPrefix(strings.TrimSpace(line), "/") {
 			code := dispatchLine(ctx, reg, env, line)
 			if code == -1 {
