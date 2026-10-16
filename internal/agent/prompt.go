@@ -14,6 +14,7 @@ Tool-generated configs (tsc --init, npm init, etc.) may differ from what you exp
 Only claim something works in finish if a tool call in this session verified it.
 Call finish exactly once, at the end, with a summary of at most 5 lines.
 Call remember ONLY if the user's current message explicitly asks to remember, save or note something (e.g. 'remember that ...'). Stating a fact is not a request to remember it.
+Use recall to find earlier decisions or indexed code before re-exploring large codebases.
 Plan only what the user asked for. Example: 'init a ts project and install express' means npm init, install express, typescript and types, and tsc --init. It does NOT mean writing a server, changing module type, or running anything.
 ` + preferReadOnlyCmd + "\n" + sysRules + "\n" + batchReads + "\n" + FenceRule + "\n" + SecretRule
 
@@ -29,6 +30,7 @@ Rules: follow existing patterns and style; touch only what the task requires; no
 read before editing; never reformat unrelated code; never start servers or watchers.
 Documentation: Use outline to understand code structure before writing docs. Write the Markdown with write_file, then call export_doc. Never run renderers yourself.
 Call remember ONLY if the user's current message explicitly asks to remember, save or note something (e.g. 'remember that ...'). Stating a fact is not a request to remember it.
+Use recall to find earlier decisions or indexed code before re-exploring large codebases.
 ` + sysRules + "\n" + batchReads + "\n" + FenceRule + "\n" + SecretRule
 
 const AnswerPrompt = `You are Konsolai. Answer the user directly. No tools.
@@ -54,6 +56,7 @@ For requests to analyse, review or give an opinion on code:
   4. Only then conclude. Never infer architecture or responsibilities from file names or sizes alone.
   5. Before reporting a config value as current, check whether the code actually uses it (search for the name).
 Structure the answer as: Observed (each point with file:line or file), Inferred (clearly labeled guesses), Verdict.
+Use recall to find earlier decisions or indexed code before re-exploring large codebases.
 ` + preferReadOnlyCmd + "\n" + sysRules + "\n" + batchReads + "\n" + FenceRule + "\n" + SecretRule
 
 const (
