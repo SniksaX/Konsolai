@@ -37,18 +37,10 @@ type Scored struct {
 }
 
 func newHTTP(d time.Duration) *http.Client {
-	return &http.Client{
-		Timeout: d,
-		Transport: &http.Transport{
-			Proxy:                 http.ProxyFromEnvironment,
-			DialContext:           (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
-			ForceAttemptHTTP2:     false,
-			DisableKeepAlives:     true,
-			ResponseHeaderTimeout: d,
-			TLSHandshakeTimeout:   5 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-		},
-	}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.DisableKeepAlives = true
+	tr.ResponseHeaderTimeout = d
+	return &http.Client{Timeout: d, Transport: tr}
 }
 
 func New(embedEndpoint, rerankEndpoint string) *Client {
