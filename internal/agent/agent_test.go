@@ -1849,6 +1849,257 @@ func TestReadDedupeInvalidatedByElision(t *testing.T) {
 	}
 }
 
+func padAfter(msgs []llm.Message) []llm.Message {
+	for i := 0; i < protectLastMsgs; i++ {
+		msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: fmt.Sprintf("pad%d", i)})
+	}
+	return msgs
+}
+
+func TestElisionDropsDedupeRecords(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "a.go")
+	if err := os.WriteFile(p, []byte("package a\nfunc F() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	msgs := padAfter([]llm.Message{
+		assistant(call("t1", "read_file", `{"path":"a.go"}`)),
+		{Role: llm.RoleTool, Content: strings.Repeat("body\n", 40), ToolCallID: "t1"},
+	})
+	spans := []readSpan{{abs: p, hash: "h", start: 1, end: 10, step: 1, toolID: "t1"}}
+	key := "read_file\x00" + canonicalJSON(`{"path":"a.go"}`)
+	seen := map[string]struct{}{key: {}}
+	if !elideOneTool(msgs, &spans, seen) {
+		t.Fatal("want elide")
+	}
+	if len(spans) != 0 {
+		t.Fatalf("span survived %+v", spans)
+	}
+	if _, ok := seen[key]; ok {
+		t.Fatal("seen survived")
+	}
+	if !isElided(msgs[1].Content) {
+		t.Fatalf("not elided %q", msgs[1].Content)
+	}
+	for _, sp := range spans {
+		if !spanVisible(sp, msgs) {
+			t.Fatalf("dedupe refers to elided %+v", sp)
+		}
+	}
+}
+
+func TestElideReadPlaceholderOutline(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "main.go")
+	body := "package main\nfunc Hello() {}\nfunc World() {}\n"
+	if err := os.WriteFile(p, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	a, ok := fileElidePlaceholder(p, "main.go")
+	if !ok {
+		t.Fatal("want placeholder")
+	}
+	b, _ := fileElidePlaceholder(p, "main.go")
+	if a != b {
+		t.Fatal("not deterministic")
+	}
+	if !strings.Contains(a, "[elided] main.go") || !strings.Contains(a, "Outline:") {
+		t.Fatalf("%q", a)
+	}
+	if !strings.Contains(a, "Hello") || !strings.Contains(a, "Re-read only the specific line ranges") {
+		t.Fatalf("%q", a)
+	}
+	huge := dir + "/big.go"
+	var buf strings.Builder
+	buf.WriteString("package p\n")
+	for i := 0; i < 400; i++ {
+		fmt.Fprintf(&buf, "func F%d() {}\n", i)
+	}
+	if err := os.WriteFile(huge, []byte(buf.String()), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := fileElidePlaceholder(huge, "big.go")
+	if !ok {
+		t.Fatal("want huge placeholder")
+	}
+	idx := strings.Index(got, "Outline:\n")
+	if idx < 0 {
+		t.Fatal(got)
+	}
+	rest := strings.TrimPrefix(got[idx+len("Outline:\n"):], "")
+	end := strings.Index(rest, "\nRe-read")
+	if end < 0 {
+		t.Fatal(got)
+	}
+	if len(rest[:end]) > elideOutlineCap {
+		t.Fatalf("outline %d > %d", len(rest[:end]), elideOutlineCap)
+	}
+}
+
+func TestPostPlanNoteAtFour(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("p", "propose_plan", `{"summary":"s","steps":["write"],"files":["out.md"]}`)),
+		assistant(call("1", "read_file", `{"path":"a.txt"}`)),
+		assistant(call("2", "list_dir", `{"path":"."}`)),
+		assistant(call("3", "list_dir", `{"path":"."}`)),
+		assistant(call("4", "read_file", `{"path":"a.txt"}`)),
+		assistant(call("5", "finish", `{"summary":"done"}`)),
+	}, stubConfirm{d: ui.Approve}, Config{
+		RequirePlan: true, AutoApprove: true, Intent: "build",
+		Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil), MaxSteps: 12,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, msgs := range rep.reqs {
+		for _, m := range msgs {
+			if m.Role == llm.RoleUser && m.Content == PostPlanNote {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing post-plan note at 4")
+	}
+}
+
+func TestPostPlanForceAtSix(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("p", "propose_plan", `{"summary":"s","steps":["write"],"files":["out.md"]}`)),
+		assistant(call("1", "read_file", `{"path":"a.txt"}`)),
+		assistant(call("2", "list_dir", `{"path":"."}`)),
+		assistant(call("3", "list_dir", `{"path":"."}`)),
+		assistant(call("4", "read_file", `{"path":"a.txt"}`)),
+		assistant(call("5", "list_dir", `{"path":"."}`)),
+		assistant(call("6", "list_dir", `{"path":"."}`)),
+		assistant(call("7", "write_file", `{"path":"out.md","content":"# x\n"}`)),
+		{Role: llm.RoleAssistant, Content: "done"},
+	}, stubConfirm{d: ui.Approve}, Config{
+		RequirePlan: true, AutoApprove: true, Intent: "build",
+		Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil), MaxSteps: 16,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	forced := false
+	for i, specs := range rep.tools {
+		if string(rep.toolChoices[i]) == `"required"` {
+			if hasSpec(specs, "read_file") || hasSpec(specs, "outline") || hasSpec(specs, "propose_plan") {
+				t.Fatalf("forced call still has readonly/plan: %v", specNames(specs))
+			}
+			if !hasSpec(specs, "write_file") || !hasSpec(specs, "finish") {
+				t.Fatalf("forced call missing mutating tools: %v", specNames(specs))
+			}
+			forced = true
+		}
+	}
+	if !forced {
+		t.Fatalf("want tool_choice required after 6 readonly, choices=%v", rep.toolChoices)
+	}
+}
+
+func TestPostPlanResetOnMutation(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("p", "propose_plan", `{"summary":"s","steps":["write"],"files":["out.md"]}`)),
+		assistant(call("1", "read_file", `{"path":"a.txt"}`)),
+		assistant(call("2", "list_dir", `{"path":"."}`)),
+		assistant(call("w", "write_file", `{"path":"out.md","content":"# x\n"}`)),
+		assistant(call("3", "read_file", `{"path":"a.txt"}`)),
+		assistant(call("4", "list_dir", `{"path":"."}`)),
+		{Role: llm.RoleAssistant, Content: "done"},
+	}, stubConfirm{d: ui.Approve}, Config{
+		RequirePlan: true, AutoApprove: true, Intent: "build",
+		Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil), MaxSteps: 14,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, msgs := range rep.reqs {
+		for _, m := range msgs {
+			if m.Role == llm.RoleUser && m.Content == PostPlanNote {
+				t.Fatal("note should reset after write_file")
+			}
+		}
+	}
+}
+
+func TestPostPlanDocsFileNote(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("p", "propose_plan", `{"summary":"s","steps":["write"],"files":["docs/OVERVIEW.md","docs/OVERVIEW.pdf"]}`)),
+		assistant(call("1", "read_file", `{"path":"a.txt"}`)),
+		assistant(call("2", "list_dir", `{"path":"."}`)),
+		assistant(call("3", "list_dir", `{"path":"."}`)),
+		assistant(call("4", "finish", `{"summary":"done"}`)),
+	}, stubConfirm{d: ui.Approve}, Config{
+		RequirePlan: true, AutoApprove: true, Intent: "build", Task: "docs",
+		Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil), MaxSteps: 12,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, msgs := range rep.reqs {
+		for _, m := range msgs {
+			if m.Role == llm.RoleUser && strings.Contains(m.Content, "docs/OVERVIEW.md") && strings.Contains(m.Content, "write_file") {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing docs file note")
+	}
+}
+
+func hasSpec(specs []llm.ToolSpec, name string) bool {
+	for _, s := range specs {
+		if s.Function.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func specNames(specs []llm.ToolSpec) []string {
+	var out []string
+	for _, s := range specs {
+		out = append(out, s.Function.Name)
+	}
+	return out
+}
+
 func TestPlanStepInvalidPlanNoRetry(t *testing.T) {
 	_, rep, err := setupCfg(t, []llm.Message{
 		assistant(call("1", "propose_plan", `{"summary":"x"}`)),
