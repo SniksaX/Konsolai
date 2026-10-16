@@ -81,7 +81,50 @@ func runStatus(ctx context.Context, env *Env, _ []string) int {
 		pol = "plan_step"
 	}
 	fmt.Fprintf(env.out(), "build_thinking %s\n", pol)
+	fmt.Fprintf(env.out(), "embed          %s  %s\n", turn.EndpointHost(env.Profile.EmbedEndpoint), httpReach(ctx, env.Profile.EmbedEndpoint))
+	fmt.Fprintf(env.out(), "rerank         %s  %s\n", turn.EndpointHost(env.Profile.RerankEndpoint), httpReach(ctx, env.Profile.RerankEndpoint))
+	if env.Mem != nil && env.Mem.Store() != nil && env.Mem.Store().RAGAvailable(ctx) {
+		pid := env.ProjectID
+		counts, err := env.Mem.Store().ChunkCounts(ctx, env.Profile.Name, pid)
+		if err == nil {
+			fmt.Fprintf(env.out(), "chunks         turn=%d summary=%d web=%d code=%d\n",
+				counts["turn"], counts["summary"], counts["web"], counts["code"])
+		}
+		indexed := "no"
+		if pid != nil {
+			if _, has, err := env.Mem.Store().LastIndexedAt(ctx, *pid); err == nil && has {
+				indexed = "yes"
+			}
+		}
+		fmt.Fprintf(env.out(), "project index  %s\n", indexed)
+	} else if env.Profile.RAGEnabled() {
+		fmt.Fprintln(env.out(), "rag            unavailable")
+	}
 	return 0
+}
+
+func httpReach(ctx context.Context, endpoint string) string {
+	if endpoint == "" {
+		return "unreachable"
+	}
+	url := strings.TrimRight(endpoint, "/") + "/info"
+	cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	t0 := time.Now()
+	req, err := http.NewRequestWithContext(cctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "unreachable"
+	}
+	resp, err := http.DefaultClient.Do(req)
+	d := time.Since(t0).Round(time.Millisecond)
+	if err != nil {
+		return "unreachable"
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Sprintf("error %d %s", resp.StatusCode, d)
+	}
+	return "ok " + d.String()
 }
 
 func modelsProbe(ctx context.Context, endpoint string) (reach, model string) {
