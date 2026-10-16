@@ -22,11 +22,12 @@ var (
 )
 
 const (
-	defaultEndpoint    = "http://fatboy:11436/v1"
-	defaultIdleMinutes = 30
-	defaultRetention   = 90
-	defaultLLMIdle     = 120
-	builtinProfile     = "default"
+	defaultEndpoint     = "http://fatboy:11436/v1"
+	defaultFastEndpoint = "http://fatboy:11435/v1"
+	defaultIdleMinutes  = 30
+	defaultRetention    = 90
+	defaultLLMIdle      = 120
+	builtinProfile      = "default"
 )
 
 type File struct {
@@ -39,6 +40,8 @@ type Profile struct {
 	DatabaseURL           string `json:"database_url"`
 	Endpoint              string `json:"endpoint"`
 	Model                 string `json:"model"`
+	FastEndpoint          string `json:"fast_endpoint"`
+	FastModel             string `json:"fast_model"`
 	SessionIdleMinutes    int    `json:"session_idle_minutes"`
 	RetentionDays         int    `json:"retention_days"`
 	LLMIdleTimeoutSeconds int    `json:"llm_idle_timeout_seconds"`
@@ -97,6 +100,9 @@ func (f File) Resolve(name string) (Profile, error) {
 	if p.Endpoint == "" {
 		p.Endpoint = defaultEndpoint
 	}
+	if p.FastEndpoint == "" {
+		p.FastEndpoint = defaultFastEndpoint
+	}
 	if p.SessionIdleMinutes == 0 {
 		p.SessionIdleMinutes = defaultIdleMinutes
 	}
@@ -114,6 +120,12 @@ func (f File) Resolve(name string) (Profile, error) {
 	}
 	if v := os.Getenv("KONSOLAI_MODEL"); v != "" {
 		p.Model = v
+	}
+	if v := os.Getenv("KONSOLAI_FAST_ENDPOINT"); v != "" {
+		p.FastEndpoint = v
+	}
+	if v := os.Getenv("KONSOLAI_FAST_MODEL"); v != "" {
+		p.FastModel = v
 	}
 	if v := os.Getenv("KONSOLAI_BUILD_THINKING"); v != "" {
 		p.BuildThinking = v
