@@ -17,6 +17,7 @@
 - Approved: github.com/jackc/pgx/v5 (pgxpool). Raw SQL only; no ORM; no migration library.
 - Approved: github.com/alecthomas/chroma/v2 (code-block highlighting only).
 - Approved: github.com/yuin/goldmark (with its built-in GFM extension).
+- Approved: github.com/reeflective/readline (REPL line editor only).
 - Module github.com/siraj/konsolai.
 
 ## Layout
@@ -38,6 +39,7 @@
 - internal/turn (one request: Runner.RunTurn)
 - internal/commands (slash-command registry; REPL reuses it)
 - internal/clip (clipboard: wl-copy, xclip, xsel, OSC 52)
+- internal/repl (interactive TTY loop; LineReader + reeflective/readline)
 - New packages only when the architect specifies them.
 - Grammar:
  konsolai [--yes] [--profile NAME] [--intent answer|lookup|act|build] [--trace] [--plain] [--version] [new] ["<request>"]
@@ -45,7 +47,7 @@
  konsolai [--profile NAME] history | undo | facts | prune
  konsolai [--profile NAME] remember [--project] "<fact>"
  konsolai [--profile NAME] forget user|project <id>
- No request and a TTY: interactive raw input. No request and a pipe: stdin is the request.
+ No request and stdin+stdout are TTYs: REPL. No request and a pipe: stdin is the request.
  A request and a pipe: stdin is attached as context.
 - answer: stream, no tools. lookup: read-only tools, ExploreBudget 6, MaxSteps 10.
  act: all tools, no plan, ExploreBudget 6, MaxSteps 15.
