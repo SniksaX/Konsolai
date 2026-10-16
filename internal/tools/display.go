@@ -55,6 +55,6 @@ func (l *LineLimiter) Close(w io.Writer) {
 		l.pending = nil
 	}
 	if l.hidden > 0 {
-		fmt.Fprintln(w, ui.Dim(fmt.Sprintf("  … %d more lines hidden", l.hidden)))
+		fmt.Fprintln(w, ui.Dim(fmt.Sprintf("  … %d more lines hidden (/output to show all)", l.hidden)))
 	}
 }
