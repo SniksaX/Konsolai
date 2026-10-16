@@ -27,9 +27,14 @@ const (
 	previewLines = 20
 )
 
-type writeFileTool struct{ guard *safety.Guard }
+type writeFileTool struct {
+	guard    *safety.Guard
+	docsTask bool
+}
 
-func newWriteFile(g *safety.Guard) *writeFileTool { return &writeFileTool{guard: g} }
+func newWriteFile(g *safety.Guard, docsTask bool) *writeFileTool {
+	return &writeFileTool{guard: g, docsTask: docsTask}
+}
 
 func (t *writeFileTool) Spec() llm.ToolSpec {
 	return llm.ToolSpec{
@@ -64,6 +69,9 @@ func (t *writeFileTool) Prepare(rawArgs string) (Action, error) {
 	}
 	if strings.TrimSpace(args.Path) == "" {
 		return nil, errors.New("tools: write_file: path is required")
+	}
+	if t.docsTask && !DocsPathAllowed(args.Path) {
+		return nil, errors.New(DocsSourceReject)
 	}
 	resolved, err := t.guard.ResolvePath(args.Path)
 	if err != nil {
