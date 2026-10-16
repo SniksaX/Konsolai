@@ -596,6 +596,71 @@ func TestContextWindowFromMaxModelLen(t *testing.T) {
 	}
 }
 
+func TestContextWindowFromNCtx(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/models") {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{"id": "mini", "meta": map[string]any{"n_ctx": 8192}}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	c := NewFast(srv.URL+"/v1", "mini")
+	if _, err := c.ResolveModel(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if c.ContextWindow() != 8192 {
+		t.Fatalf("window %d", c.ContextWindow())
+	}
+}
+
+func TestContextWindowFromProps(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/models"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"data": []map[string]any{{"id": "mini"}},
+			})
+		case strings.HasSuffix(r.URL.Path, "/props"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"default_generation_settings": map[string]any{"n_ctx": 4096},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	c := NewFast(srv.URL+"/v1", "mini")
+	if _, err := c.ResolveModel(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if c.ContextWindow() != 4096 {
+		t.Fatalf("window %d", c.ContextWindow())
+	}
+}
+
+func TestFastWindowFallback8192(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/models") {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{"id": "mini"}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	c := NewFast(srv.URL+"/v1", "mini")
+	if _, err := c.ResolveModel(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if c.ContextWindow() != 8192 {
+		t.Fatalf("window %d", c.ContextWindow())
+	}
+}
+
 func TestContextWindowFallback(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/models") {
