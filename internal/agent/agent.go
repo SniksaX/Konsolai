@@ -7,12 +7,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/siraj/konsolai/internal/llm"
+	"github.com/siraj/konsolai/internal/redact"
 	"github.com/siraj/konsolai/internal/tools"
 	"github.com/siraj/konsolai/internal/ui"
 )
@@ -81,6 +84,7 @@ type Config struct {
 	ExploreBudget  int
 	ExploreNote    string
 	Trace          bool
+	SessionID      string
 	Intent         string
 	Task           string
 	RouterTime     time.Duration
@@ -125,6 +129,21 @@ func FormatSummary(intent string, s Stats) string {
 		FormatTokens(s.PromptTokens), FormatTokens(s.CompletionTokens))
 }
 
+func formatArgSize(n int) string {
+	if n < 1000 {
+		return fmt.Sprintf("%dB", n)
+	}
+	return fmt.Sprintf("%.1fKB", float64(n)/1000)
+}
+
+func FormatTraceCalls(calls []llm.ToolCall) []string {
+	names := make([]string, len(calls))
+	for i, c := range calls {
+		names[i] = fmt.Sprintf("%s(args %s)", c.Function.Name, formatArgSize(len(c.Function.Arguments)))
+	}
+	return names
+}
+
 func FormatTrace(step int, think bool, d time.Duration, in, out, window int, names []string) string {
 	th := "off"
 	if think {
@@ -137,6 +156,56 @@ func FormatTrace(step int, think bool, d time.Duration, in, out, window int, nam
 	return fmt.Sprintf("  [step %d] think=%s  %s  in=%s out=%s  ctx %d%% (%s/%s)  -> %s",
 		step, th, formatDuration(d), FormatTokens(in), FormatTokens(out),
 		pct, FormatTokens(in), FormatTokens(window), strings.Join(names, ", "))
+}
+
+func truncateNarration(s string) string {
+	if utf8.RuneCountInString(s) <= 500 {
+		return s
+	}
+	n := 0
+	for i := range s {
+		if n == 300 {
+			return s[:i]
+		}
+		n++
+	}
+	return s
+}
+
+func stateHome() string {
+	if d := os.Getenv("XDG_STATE_HOME"); d != "" {
+		return d
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return os.TempDir()
+	}
+	return filepath.Join(home, ".local", "state")
+}
+
+func dumpTrace(session string, step int, msg llm.Message) {
+	if session == "" {
+		session = "session"
+	}
+	dir := filepath.Join(stateHome(), "konsolai", "trace")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return
+	}
+	calls := make([]llm.ToolCall, len(msg.ToolCalls))
+	copy(calls, msg.ToolCalls)
+	for i := range calls {
+		calls[i].Function.Arguments = string(redact.JSON([]byte(calls[i].Function.Arguments)))
+	}
+	payload := struct {
+		Content   string         `json:"content"`
+		ToolCalls []llm.ToolCall `json:"tool_calls"`
+	}{Content: redact.String(msg.Content), ToolCalls: calls}
+	b, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return
+	}
+	path := filepath.Join(dir, fmt.Sprintf("%s-%d.json", session, step))
+	_ = os.WriteFile(path, b, 0600)
 }
 
 func PrintSummary(w io.Writer, intent string, s Stats) {
@@ -559,15 +628,12 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		}
 		if cfg.ThinkingPolicy == ThinkPlanStep && !think && !planApproved && hasProposePlan(msg) {
 			if cfg.Trace {
-				var names []string
-				for _, c := range msg.ToolCalls {
-					names = append(names, c.Function.Name)
-				}
 				st.Steps++
 				st.ModelTime += modelElapsed
 				st.PromptTokens += usage.PromptTokens
 				st.CompletionTokens += usage.CompletionTokens
-				PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, cfg.Client.ContextWindow(), names)
+				dumpTrace(cfg.SessionID, st.Steps, msg)
+				PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, cfg.Client.ContextWindow(), FormatTraceCalls(msg.ToolCalls))
 			} else {
 				st.Steps++
 				st.ModelTime += modelElapsed
@@ -631,12 +697,15 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		st.ModelTime += modelElapsed
 		st.PromptTokens += usage.PromptTokens
 		st.CompletionTokens += usage.CompletionTokens
-		var names []string
-		for _, c := range msg.ToolCalls {
-			names = append(names, c.Function.Name)
-		}
 		if cfg.Trace {
-			PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, cfg.Client.ContextWindow(), names)
+			dumpTrace(cfg.SessionID, st.Steps, msg)
+			PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, cfg.Client.ContextWindow(), FormatTraceCalls(msg.ToolCalls))
+		}
+		if text := trimLeadingBlanks(msg.Content); strings.TrimSpace(text) != "" && len(msg.ToolCalls) > 0 {
+			fmt.Fprintln(cfg.Out, ui.Current().Muted(text))
+		}
+		if len(msg.ToolCalls) > 0 {
+			msg.Content = truncateNarration(msg.Content)
 		}
 		msgs = append(msgs, msg)
 		_ = rec.Message(ctx, msg)
@@ -660,9 +729,6 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			fmt.Fprintln(cfg.Out)
 			writeAnswer(cfg.Out, text, cfg.Plain)
 			return nil
-		}
-		if text := trimLeadingBlanks(msg.Content); strings.TrimSpace(text) != "" {
-			fmt.Fprintln(cfg.Out, ui.Current().Muted(text))
 		}
 
 		noteWasSent := noteSent
