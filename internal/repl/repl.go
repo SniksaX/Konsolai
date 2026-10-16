@@ -196,6 +196,7 @@ func Run(ctx context.Context, cfg Config) int {
 			}
 			if err == ErrInterrupt {
 				if strings.TrimSpace(line) == "" {
+					clearEmptyPrompt(origOut)
 					fmt.Fprintln(out, p.Muted("press Ctrl+D or type /exit to quit"))
 				}
 				continue
@@ -319,6 +320,18 @@ func splitCmd(line string) (string, []string) {
 }
 
 func unicodeSpace(r rune) bool { return r == ' ' || r == '\t' }
+
+func clearEmptyPrompt(w io.Writer) {
+	f, ok := w.(*os.File)
+	if !ok {
+		return
+	}
+	fi, err := f.Stat()
+	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return
+	}
+	fmt.Fprint(w, "\033[1A\r\033[K")
+}
 
 func sessionFooter(st *session, cfg Config) string {
 	st.mu.Lock()
