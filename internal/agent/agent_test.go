@@ -1427,6 +1427,9 @@ func TestPromptNotes(t *testing.T) {
 		if !strings.Contains(p, "pacman -Qo") || !strings.Contains(p, "Never launch GUI") || !strings.Contains(p, "Run these yourself:") {
 			t.Fatal("prompt missing sys rules")
 		}
+		if !strings.Contains(p, "Use recall to find earlier decisions or indexed code") {
+			t.Fatal("prompt missing recall rule")
+		}
 	}
 }
 
