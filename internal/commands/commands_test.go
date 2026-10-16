@@ -480,3 +480,36 @@ func TestNewClearsLocalFallback(t *testing.T) {
 		t.Fatal("fallback should be cleared")
 	}
 }
+
+func TestOutputFromRunner(t *testing.T) {
+	env, out, errb := testEnv(t)
+	env.Runner = &turn.Runner{}
+	env.Runner.RememberShell("first\n")
+	env.Runner.RememberShell("second\n")
+	if code := runOutput(context.Background(), env, nil); code != 0 {
+		t.Fatalf("%d %s", code, errb.String())
+	}
+	if out.String() != "second\n" {
+		t.Fatalf("last %q", out.String())
+	}
+	out.Reset()
+	if code := runOutput(context.Background(), env, []string{"2"}); code != 0 {
+		t.Fatal(code)
+	}
+	if out.String() != "first\n" {
+		t.Fatalf("n=2 %q", out.String())
+	}
+	if code := runOutput(context.Background(), env, []string{"9"}); code != 2 {
+		t.Fatalf("want usage %d", code)
+	}
+}
+
+func TestOutputMissing(t *testing.T) {
+	env, _, errb := testEnv(t)
+	if code := runOutput(context.Background(), env, nil); code != 1 {
+		t.Fatalf("%d", code)
+	}
+	if !strings.Contains(errb.String(), "no shell output") {
+		t.Fatalf("%q", errb.String())
+	}
+}
