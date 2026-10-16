@@ -133,6 +133,7 @@ func Run(ctx context.Context, cfg Config) int {
 			Text: line, Yes: st.yes, Trace: st.trace, Cwd: st.cwd,
 			ResumeSession: st.id, New: st.id == "", KeepOpen: true,
 		})
+		cancelled := res.ExitCode == 130 || (turnCtx.Err() != nil && ctx.Err() == nil)
 		cancel()
 		st.mu.Lock()
 		st.cancel = nil
@@ -144,7 +145,7 @@ func Run(ctx context.Context, cfg Config) int {
 			st.showCtx = true
 		}
 		st.mu.Unlock()
-		if res.ExitCode == 130 || turnCtx.Err() != nil && ctx.Err() == nil {
+		if cancelled {
 			fmt.Fprintln(out, p.Muted("cancelled"))
 		}
 		fmt.Fprintln(out)
