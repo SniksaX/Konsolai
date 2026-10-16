@@ -12,6 +12,7 @@ import (
 
 	"github.com/siraj/konsolai/internal/agent"
 	"github.com/siraj/konsolai/internal/config"
+	"github.com/siraj/konsolai/internal/intent"
 	"github.com/siraj/konsolai/internal/llm"
 	"github.com/siraj/konsolai/internal/memory"
 	"github.com/siraj/konsolai/internal/ui"
@@ -155,12 +156,70 @@ func TestRunTurnResolvesWindow(t *testing.T) {
 	}
 }
 
+func TestThinkingForEffort(t *testing.T) {
+	if g := ThinkingFor(intent.Decision{Intent: intent.Answer, Effort: intent.EffortNone}, "", ThinkAuto); g != agent.ThinkOff {
+		t.Fatalf("none %v", g)
+	}
+	if g := ThinkingFor(intent.Decision{Intent: intent.Answer, Effort: intent.EffortLow}, "", ThinkAuto); g != agent.ThinkOff {
+		t.Fatalf("low %v", g)
+	}
+	if g := ThinkingFor(intent.Decision{Intent: intent.Answer, Effort: intent.EffortHigh}, "", ThinkAuto); g != agent.ThinkOn {
+		t.Fatalf("high %v", g)
+	}
+	if g := ThinkingFor(intent.Decision{Intent: intent.Lookup}, "plan_step", ThinkAuto); g != agent.ThinkLookup {
+		t.Fatalf("lookup %v", g)
+	}
+	if g := ThinkingFor(intent.Decision{Intent: intent.Act}, "plan_step", ThinkAuto); g != agent.ThinkPlanStep {
+		t.Fatalf("act %v", g)
+	}
+	if g := ThinkingFor(intent.Decision{Intent: intent.Answer, Effort: intent.EffortNone}, "", ThinkAlways); g != agent.ThinkOn {
+		t.Fatalf("override on %v", g)
+	}
+	if g := ThinkingFor(intent.Decision{Intent: intent.Answer, Effort: intent.EffortHigh}, "", ThinkNever); g != agent.ThinkOff {
+		t.Fatalf("override off %v", g)
+	}
+}
+
+func TestStripThinkPrefix(t *testing.T) {
+	got, ok := StripThinkPrefix("think hard why is this slow")
+	if !ok || got != "why is this slow" {
+		t.Fatalf("%q %v", got, ok)
+	}
+	got, ok = StripThinkPrefix("Réfléchis bien: fix the bug")
+	if !ok || got != "fix the bug" {
+		t.Fatalf("%q %v", got, ok)
+	}
+	if _, ok := StripThinkPrefix("hello"); ok {
+		t.Fatal("no prefix")
+	}
+}
+
+func TestFastUnreachableFallsBack(t *testing.T) {
+	llm.ResetReachCache()
+	t.Cleanup(llm.ResetReachCache)
+	client := fakeLLM(t, []llm.Message{{Role: llm.RoleAssistant, Content: `{"intent":"answer","language":"en","reason":"hi","reasoning":false,"effort":"none","task":"other","continues_session":0}`}, {Role: llm.RoleAssistant, Content: "hello"}})
+	r := testRunner(t, client, autoConfirm{})
+	r.Profile.FastEndpoint = "http://127.0.0.1:1/v1"
+	r.FastClient = llm.NewFast(r.Profile.FastEndpoint, "mini")
+	var errB strings.Builder
+	r.Err = &errB
+	res := r.RunTurn(context.Background(), Request{Text: "hi", Trace: true, Yes: true, Cwd: t.TempDir(), New: true})
+	if res.ExitCode != 0 {
+		t.Fatalf("exit %d %s", res.ExitCode, errB.String())
+	}
+	if r.RouterSource != "main" {
+		t.Fatalf("source %s", r.RouterSource)
+	}
+	if !strings.Contains(errB.String(), "router") || !strings.Contains(errB.String(), "effort") {
+		t.Fatalf("trace %q", errB.String())
+	}
+}
+
 func TestRunTurnAbortExit(t *testing.T) {
-	client := fakeLLM(t, []llm.Message{
-		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{
-			ID: "1", Type: "function", Function: llm.FunctionCall{Name: "propose_plan", Arguments: `{"summary":"x","steps":["y"],"files":["a.txt"]}`},
-		}}},
-	})
+	plan := llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{
+		ID: "1", Type: "function", Function: llm.FunctionCall{Name: "propose_plan", Arguments: `{"summary":"x","steps":["y"],"files":["a.txt"]}`},
+	}}}
+	client := fakeLLM(t, []llm.Message{plan, plan})
 	r := testRunner(t, client, quitConfirm{})
 	res := r.RunTurn(context.Background(), Request{Text: "write a", Intent: "act", Yes: false, Cwd: t.TempDir(), New: true})
 	if res.ExitCode != 3 {
