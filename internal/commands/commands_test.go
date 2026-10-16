@@ -1,0 +1,397 @@
+package commands
+
+import (
+	"bytes"
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/siraj/konsolai/internal/config"
+	"github.com/siraj/konsolai/internal/llm"
+	"github.com/siraj/konsolai/internal/memory"
+	"github.com/siraj/konsolai/internal/turn"
+	"github.com/siraj/konsolai/internal/ui"
+)
+
+func testEnv(t *testing.T) (*Env, *bytes.Buffer, *bytes.Buffer) {
+	t.Helper()
+	var out, errb bytes.Buffer
+	var copied string
+	env := &Env{
+		Profile: config.Profile{Name: "default", Model: "m", Endpoint: "http://127.0.0.1:9/v1"},
+		Out:     &out,
+		Err:     &errb,
+		Cwd:     t.TempDir(),
+		Copy: func(_ context.Context, text string) (string, error) {
+			copied = text
+			return "fake", nil
+		},
+		Version: "test",
+	}
+	t.Cleanup(func() { _ = copied })
+	return env, &out, &errb
+}
+
+func samplePairs() []histItem {
+	return []histItem{{
+		ID:     "s1",
+		Title:  "one-liner",
+		Mode:   "answer",
+		Status: "finished",
+		CWD:    "/tmp/ko",
+		Msgs: []llm.Message{
+			{Role: llm.RoleUser, Content: "biggest files?"},
+			{Role: llm.RoleAssistant, Content: "use du:\n```bash\ndu -ah | sort -nr | head -3\n```\n"},
+			{Role: llm.RoleUser, Content: "and ls?"},
+			{Role: llm.RoleAssistant, Content: "```sh\nls -la\n```\n```python\nprint(1)\n```\n"},
+		},
+		ShellCmds: []string{"echo from-action"},
+		Changes:   []fileChange{{Path: "a.txt", Diff: "--- a\n+++ b\n+hi\n"}},
+	}}
+}
+
+func TestCopyAnswerAllCodeCmd(t *testing.T) {
+	env, out, errb := testEnv(t)
+	var got string
+	env.Copy = func(_ context.Context, text string) (string, error) {
+		got = text
+		return "fake", nil
+	}
+	env.LoadHistory = func(context.Context, int) []histItem { return samplePairs() }
+
+	if code := runCopy(context.Background(), env, []string{"answer"}); code != 0 {
+		t.Fatalf("answer %d %s", code, errb.String())
+	}
+	if got != "```sh\nls -la\n```\n```python\nprint(1)\n```\n" {
+		t.Fatalf("last answer %q", got)
+	}
+	if !strings.Contains(out.String(), "copied answer") || !strings.Contains(out.String(), "via fake") {
+		t.Fatalf("print %q", out.String())
+	}
+
+	out.Reset()
+	if code := runCopy(context.Background(), env, []string{"answer", "2"}); code != 0 {
+		t.Fatal(code)
+	}
+	if !strings.Contains(got, "\n\n---\n\n") || !strings.Contains(got, "use du:") {
+		t.Fatalf("two answers %q", got)
+	}
+
+	out.Reset()
+	if code := runCopy(context.Background(), env, []string{"all", "2"}); code != 0 {
+		t.Fatal(code)
+	}
+	if !strings.Contains(got, "### Prompt") || !strings.Contains(got, "biggest files?") || !strings.Contains(got, "### Answer") {
+		t.Fatalf("all %q", got)
+	}
+
+	out.Reset()
+	if code := runCopy(context.Background(), env, []string{"code"}); code != 0 {
+		t.Fatal(code)
+	}
+	if got != "ls -la\n\nprint(1)" {
+		t.Fatalf("code all %q", got)
+	}
+	if code := runCopy(context.Background(), env, []string{"code", "1"}); code != 0 {
+		t.Fatal(code)
+	}
+	if got != "print(1)" {
+		t.Fatalf("code last %q", got)
+	}
+
+	if code := runCopy(context.Background(), env, []string{"cmd"}); code != 0 {
+		t.Fatal(code)
+	}
+	if got != "echo from-action" {
+		t.Fatalf("cmd %q", got)
+	}
+}
+
+func TestCopyNLimits(t *testing.T) {
+	env, _, errb := testEnv(t)
+	env.LoadHistory = func(context.Context, int) []histItem { return samplePairs() }
+	if code := runCopy(context.Background(), env, []string{"answer", "6"}); code != 2 {
+		t.Fatalf("want 2 got %d", code)
+	}
+	if !strings.Contains(errb.String(), "at most 5") {
+		t.Fatalf("%q", errb.String())
+	}
+	errb.Reset()
+	if code := runCopy(context.Background(), env, []string{"code", "6"}); code != 2 {
+		t.Fatalf("code n %d", code)
+	}
+	if code := runCopy(context.Background(), env, nil); code != 2 {
+		t.Fatalf("usage %d", code)
+	}
+}
+
+func TestCopyFromLocalFallback(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+	env, out, _ := testEnv(t)
+	var got string
+	env.Copy = func(_ context.Context, text string) (string, error) {
+		got = text
+		return "osc52", nil
+	}
+	cwd := env.Cwd
+	if err := memory.SaveLast(memory.LastSession{
+		Profile: "default",
+		CWD:     cwd,
+		Title:   "local",
+		Messages: []llm.Message{
+			{Role: llm.RoleUser, Content: "hi"},
+			{Role: llm.RoleAssistant, Content: "hello **there**"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if code := runCopy(context.Background(), env, []string{"answer"}); code != 0 {
+		t.Fatalf("code %d", code)
+	}
+	if got != "hello **there**" {
+		t.Fatalf("%q", got)
+	}
+	if !strings.Contains(out.String(), "via osc52") {
+		t.Fatalf("%q", out.String())
+	}
+}
+
+func TestCopyCmdFallsBackToBashBlock(t *testing.T) {
+	env, _, _ := testEnv(t)
+	var got string
+	env.Copy = func(_ context.Context, text string) (string, error) {
+		got = text
+		return "fake", nil
+	}
+	env.LoadHistory = func(context.Context, int) []histItem {
+		return []histItem{{
+			Msgs: []llm.Message{
+				{Role: llm.RoleUser, Content: "q"},
+				{Role: llm.RoleAssistant, Content: "```bash\necho hi\n```\n"},
+			},
+		}}
+	}
+	if code := runCopy(context.Background(), env, []string{"cmd"}); code != 0 {
+		t.Fatal(code)
+	}
+	if got != "echo hi" {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestHistoryShowDiffResumeNew(t *testing.T) {
+	env, out, errb := testEnv(t)
+	env.LoadHistory = func(_ context.Context, limit int) []histItem {
+		items := samplePairs()
+		if limit < len(items) {
+			return items[:limit]
+		}
+		return items
+	}
+	if code := runHistory(context.Background(), env, nil); code != 0 {
+		t.Fatal(code)
+	}
+	if !strings.Contains(out.String(), "1  ") || !strings.Contains(out.String(), "one-liner") {
+		t.Fatalf("hist %q", out.String())
+	}
+	out.Reset()
+	if code := runShow(context.Background(), env, []string{"1"}); code != 0 {
+		t.Fatal(code)
+	}
+	if !strings.Contains(out.String(), "biggest files?") {
+		t.Fatalf("show %q", out.String())
+	}
+	if code := runShow(context.Background(), env, nil); code != 2 {
+		t.Fatalf("show usage %d", code)
+	}
+	out.Reset()
+	if code := runDiff(context.Background(), env, nil); code != 0 {
+		t.Fatal(code)
+	}
+	if !strings.Contains(out.String(), "a.txt") {
+		t.Fatalf("diff %q", out.String())
+	}
+
+	var gotReq turn.Request
+	env.RunTurn = func(_ context.Context, req turn.Request) turn.Result {
+		gotReq = req
+		return turn.Result{ExitCode: 0, SessionID: "s1"}
+	}
+	if code := runResume(context.Background(), env, []string{"1", "and then?"}); code != 0 {
+		t.Fatal(code)
+	}
+	if gotReq.ResumeSession != "s1" || gotReq.Text != "and then?" {
+		t.Fatalf("%+v", gotReq)
+	}
+	if code := runResume(context.Background(), env, []string{"1"}); code != 2 {
+		t.Fatalf("resume usage %d %s", code, errb.String())
+	}
+
+	closed := false
+	env.CloseAll = func(context.Context) error { closed = true; return nil }
+	if code := runNew(context.Background(), env, nil); code != 0 {
+		t.Fatal(code)
+	}
+	if !closed {
+		t.Fatal("CloseAll not called")
+	}
+}
+
+func TestHistoryNLimit(t *testing.T) {
+	env, _, errb := testEnv(t)
+	if code := runHistory(context.Background(), env, []string{"51"}); code != 2 {
+		t.Fatalf("%d", code)
+	}
+	if !strings.Contains(errb.String(), "at most 50") {
+		t.Fatalf("%q", errb.String())
+	}
+}
+
+func TestDispatchUnknownAndHelp(t *testing.T) {
+	env, out, errb := testEnv(t)
+	reg := Default()
+	if code := reg.Dispatch(context.Background(), env, "hsitory", nil); code != 2 {
+		t.Fatalf("%d", code)
+	}
+	if !strings.Contains(errb.String(), "unknown command /hsitory") || !strings.Contains(errb.String(), "did you mean /history") {
+		t.Fatalf("%q", errb.String())
+	}
+	if code := runHelp(context.Background(), env, nil); code != 0 {
+		t.Fatal(code)
+	}
+	if !strings.Contains(out.String(), "/help") || !strings.Contains(out.String(), "/status") || !strings.Contains(out.String(), "/copy") {
+		t.Fatalf("help %q", out.String())
+	}
+}
+
+func TestStatus(t *testing.T) {
+	env, out, _ := testEnv(t)
+	if code := runStatus(context.Background(), env, nil); code != 0 {
+		t.Fatal(code)
+	}
+	s := out.String()
+	for _, want := range []string{"version", "test", "profile", "endpoint", "model", "database", "cwd", "repo", "clipboard", "build_thinking"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("missing %s in %q", want, s)
+		}
+	}
+	if strings.Contains(s, "postgres://") || strings.Contains(s, "PASSWORD") {
+		t.Fatalf("credentials %q", s)
+	}
+}
+
+func TestRememberFactsForgetPruneNoStore(t *testing.T) {
+	env, _, errb := testEnv(t)
+	env.Mem = memory.NewGuard(nil, nil)
+	if code := runRemember(context.Background(), env, []string{"a fact"}); code != 1 {
+		t.Fatalf("remember %d", code)
+	}
+	if !strings.Contains(errb.String(), "memory is not configured") {
+		t.Fatalf("%q", errb.String())
+	}
+	if code := runFacts(context.Background(), env, nil); code != 1 {
+		t.Fatal(code)
+	}
+	if code := runForget(context.Background(), env, []string{"user", "1"}); code != 1 {
+		t.Fatal(code)
+	}
+	if code := runPrune(context.Background(), env, nil); code != 1 {
+		t.Fatal(code)
+	}
+	if code := runRemember(context.Background(), env, nil); code != 2 {
+		t.Fatal(code)
+	}
+	if code := runForget(context.Background(), env, []string{"user"}); code != 2 {
+		t.Fatal(code)
+	}
+}
+
+type fakeConf struct{ d ui.Decision }
+
+func (f fakeConf) Confirm(string, string) (ui.Decision, string, error) {
+	return f.d, "", nil
+}
+func (f fakeConf) ConfirmForced(string, string) (ui.Decision, string, error) {
+	return f.d, "", nil
+}
+
+func TestRunBlockSelectionAndGuard(t *testing.T) {
+	env, out, errb := testEnv(t)
+	env.LoadHistory = func(context.Context, int) []histItem {
+		return []histItem{{
+			Msgs: []llm.Message{
+				{Role: llm.RoleUser, Content: "q"},
+				{Role: llm.RoleAssistant, Content: "```bash\necho one\n```\n```sh\necho two\n```\n"},
+			},
+		}}
+	}
+	if code := runRun(context.Background(), env, nil); code != 2 {
+		t.Fatalf("need k %d", code)
+	}
+	if !strings.Contains(out.String(), "1  ") || !strings.Contains(out.String(), "2  ") {
+		t.Fatalf("list %q", out.String())
+	}
+	if !strings.Contains(errb.String(), "usage: /run") {
+		t.Fatalf("%q", errb.String())
+	}
+	out.Reset()
+	errb.Reset()
+	if code := runRun(context.Background(), env, []string{"1"}); code != 0 {
+		t.Fatalf("run 1 %d %s %s", code, out.String(), errb.String())
+	}
+	if !strings.Contains(out.String(), "echo one") {
+		t.Fatalf("cmd %q", out.String())
+	}
+
+	env.LoadHistory = func(context.Context, int) []histItem {
+		return []histItem{{
+			Msgs: []llm.Message{
+				{Role: llm.RoleUser, Content: "q"},
+				{Role: llm.RoleAssistant, Content: "```bash\nsudo rm -rf /\n```\n"},
+			},
+		}}
+	}
+	out.Reset()
+	errb.Reset()
+	if code := runRun(context.Background(), env, nil); code != 1 {
+		t.Fatalf("guard %d %s %s", code, out.String(), errb.String())
+	}
+	if !strings.Contains(errb.String(), "denied") && !strings.Contains(errb.String(), "sudo") {
+		t.Fatalf("guard err %q", errb.String())
+	}
+
+	env.LoadHistory = func(context.Context, int) []histItem {
+		return []histItem{{
+			Msgs: []llm.Message{
+				{Role: llm.RoleUser, Content: "q"},
+				{Role: llm.RoleAssistant, Content: "```bash\ntouch newfile\n```\n"},
+			},
+		}}
+	}
+	env.Confirm = fakeConf{d: ui.Reject}
+	if code := runRun(context.Background(), env, nil); code != 3 {
+		t.Fatalf("reject %d", code)
+	}
+}
+
+func TestNewClearsLocalFallback(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+	env, _, _ := testEnv(t)
+	if err := memory.SaveLast(memory.LastSession{
+		Profile: "default", CWD: env.Cwd, Title: "t",
+		Messages: []llm.Message{{Role: llm.RoleUser, Content: "x"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := memory.LoadLast("default", env.Cwd, 0); !ok {
+		t.Fatal("want last")
+	}
+	if code := runNew(context.Background(), env, nil); code != 0 {
+		t.Fatal(code)
+	}
+	if _, ok := memory.LoadLast("default", env.Cwd, 0); ok {
+		t.Fatal("fallback should be cleared")
+	}
+}
