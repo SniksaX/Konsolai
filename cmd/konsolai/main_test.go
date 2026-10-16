@@ -187,16 +187,22 @@ func TestConfirmUsesTTYNotStdin(t *testing.T) {
 }
 
 func TestThinkingFor(t *testing.T) {
-	if g := thinkingFor(intent.Decision{Intent: intent.Build}); g != agent.ThinkUntilPlan {
-		t.Fatalf("build %v", g)
+	if g := thinkingFor(intent.Decision{Intent: intent.Build}, ""); g != agent.ThinkPlanStep {
+		t.Fatalf("build default %v", g)
 	}
-	if g := thinkingFor(intent.Decision{Intent: intent.Answer, Reasoning: true}); g != agent.ThinkOn {
+	if g := thinkingFor(intent.Decision{Intent: intent.Build}, "until_plan"); g != agent.ThinkUntilPlan {
+		t.Fatalf("build until %v", g)
+	}
+	if g := thinkingFor(intent.Decision{Intent: intent.Build}, "plan_step"); g != agent.ThinkPlanStep {
+		t.Fatalf("build plan_step %v", g)
+	}
+	if g := thinkingFor(intent.Decision{Intent: intent.Answer, Reasoning: true}, ""); g != agent.ThinkOn {
 		t.Fatalf("answer+reason %v", g)
 	}
-	if g := thinkingFor(intent.Decision{Intent: intent.Lookup, Reasoning: false}); g != agent.ThinkOff {
+	if g := thinkingFor(intent.Decision{Intent: intent.Lookup, Reasoning: false}, ""); g != agent.ThinkOff {
 		t.Fatalf("lookup %v", g)
 	}
-	if g := thinkingFor(intent.Decision{Intent: intent.Act, Reasoning: true}); g != agent.ThinkOn {
+	if g := thinkingFor(intent.Decision{Intent: intent.Act, Reasoning: true}, ""); g != agent.ThinkOn {
 		t.Fatalf("act+reason %v", g)
 	}
 }
