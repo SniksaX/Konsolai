@@ -247,7 +247,7 @@ func TestRunMaxSteps(t *testing.T) {
 }
 
 func TestRunRepeatedFailureNote(t *testing.T) {
-	fail := `{"cmd":"false"}`
+	fail := `{"cmd":"cp /no-such-src /no-such-dst"}`
 	_, rep, err := setup(t, []llm.Message{
 		assistant(call("1", "run_shell", fail)),
 		assistant(call("2", "run_shell", fail)),
@@ -1143,6 +1143,35 @@ func TestApproveAllDoesNotCoverOutsidePlan(t *testing.T) {
 	}
 	if cc.forced != 1 {
 		t.Fatalf("forced %d", cc.forced)
+	}
+}
+
+func TestApproveAllCoversOutsideCommands(t *testing.T) {
+	cc := &countConfirm{d: ui.ApproveAll}
+	var buf strings.Builder
+	_, _, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "propose_plan", `{"summary":"a","steps":["a"],"files":["a.txt"],"commands":["true"]}`)),
+		assistant(call("2", "run_shell", `{"cmd":"mkdir extra_dir"}`)),
+		assistant(call("3", "finish", `{"summary":"done"}`)),
+	}, cc, Config{RequirePlan: true, Out: &buf})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cc.forced != 0 {
+		t.Fatalf("outside command should not force, forced=%d", cc.forced)
+	}
+	if !strings.Contains(buf.String(), "(outside plan, approved by a)") {
+		t.Fatalf("%q", buf.String())
+	}
+}
+
+func TestInPlanMultilineCommand(t *testing.T) {
+	script := "cat <<'EOF'\nhello\nEOF"
+	if !inPlanCmd([]string{script}, "cat <<'EOF'\nhello\nEOF") {
+		t.Fatal("multiline should match")
+	}
+	if !inPlanCmd([]string{"cat <<'EOF'\nhello\nEOF"}, "cat <<'EOF'  hello  EOF") {
+		t.Fatal("whitespace-normalized multiline")
 	}
 }
 
