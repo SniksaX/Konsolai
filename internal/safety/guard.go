@@ -108,7 +108,7 @@ var (
 	reChmodRoot      = regexp.MustCompile("(?i)(?:^|[\n;|&])\\s*(?:chmod|chown)\\s+(?:-[a-zA-Z0-9]*\\s+)*-R[a-zA-Z0-9]*\\s+\\S+\\s+(?:~(?:/)?|\\$\\{HOME\\}|\\$HOME|/)(?:\\s|;|&|\\||$)")
 	reForkBomb       = regexp.MustCompile(`:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:`)
 	rePipeShell      = regexp.MustCompile("(?i)\\b(?:curl|wget)\\b[^\\n|]*\\|\\s*(?:sudo\\s+)?(?:sh|bash|zsh|sudo|python)")
-	rePrivilege      = regexp.MustCompile("(?i)(?:^|[\n;|&])\\s*(?:sudo|doas|su)\\b")
+	rePrivilege      = regexp.MustCompile("(?i)(?:^|[\n;|&])\\s*(?:sudo|doas|su|pkexec)\\b")
 	rePower          = regexp.MustCompile("(?i)(?:^|[\n;|&])\\s*(?:shutdown|reboot|poweroff|halt)\\b")
 	reSystemctlPower = regexp.MustCompile("(?i)(?:^|[\n;|&])\\s*systemctl\\s+(?:poweroff|reboot|halt)\\b")
 )
