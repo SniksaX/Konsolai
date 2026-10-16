@@ -599,9 +599,12 @@ func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 	if _, err := client.ResolveModel(ctx); err != nil {
 		return "", llm.Usage{}, err
 	}
-	_, maxTok, err := agent.PrepareCall(client, msgs, nil, "answer")
+	_, maxTok, elide, err := agent.PrepareCall(client, msgs, nil, "answer")
 	if err != nil {
 		return "", llm.Usage{}, err
+	}
+	if elide.Count > 0 {
+		fmt.Fprintln(os.Stderr, agent.FormatElide(elide, client.ContextWindow()))
 	}
 	usage, err := client.Stream(ctx, msgs, llm.ChatOptions{
 		Thinking: think, Temperature: 0.3, MaxTokens: maxTok,
