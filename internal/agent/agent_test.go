@@ -297,7 +297,7 @@ func TestPlanGateBlocksMutating(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := rep.lastTool()
-	if !strings.Contains(got.Content, "plan not approved") {
+	if !strings.Contains(got.Content, "call propose_plan first") {
 		t.Fatalf("%q", got.Content)
 	}
 	if _, err := os.Stat(filepath.Join(root, "a.txt")); !os.IsNotExist(err) {
@@ -1544,11 +1544,19 @@ func TestPrePlanExploreCountsEveryStep(t *testing.T) {
 	}
 	rep.mu.Lock()
 	defer rep.mu.Unlock()
-	if len(rep.tools) < 5 {
+	if len(rep.tools) < 4 {
 		t.Fatalf("reqs %d", len(rep.tools))
 	}
-	if len(rep.tools[4]) != 1 || rep.tools[4][0].Function.Name != "propose_plan" {
-		t.Fatalf("want forced plan after blocked shell, got %+v", rep.tools[4])
+	blocked := false
+	for _, msgs := range rep.reqs {
+		for _, m := range msgs {
+			if m.Role == llm.RoleTool && strings.Contains(m.Content, "call propose_plan first") {
+				blocked = true
+			}
+		}
+	}
+	if !blocked {
+		t.Fatal("want gated mutating rejection")
 	}
 	found := false
 	for _, msgs := range rep.reqs {
@@ -1560,6 +1568,43 @@ func TestPrePlanExploreCountsEveryStep(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("missing explore note; blocked run_shell must not reset the budget")
+	}
+}
+
+func TestGatedMutatingDoesNotConsumeExplore(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "b.txt"), []byte("b"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, rep := newReplay(t, []llm.Message{
+		assistant(call("1", "read_file", `{"path":"a.txt"}`)),
+		assistant(call("2", "write_file", `{"path":"a.txt","content":"x"}`)),
+		assistant(call("3", "read_file", `{"path":"b.txt"}`)),
+		assistant(call("4", "finish", `{"summary":"ok"}`)),
+	})
+	err = Run(context.Background(), Config{
+		Client: client, Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		Confirmer: stubConfirm{d: ui.Approve}, Out: io.Discard,
+		RequirePlan: true, ExploreBudget: 1, ExploreNote: ExploreNoteBuild,
+		MaxSteps: 8, Intent: "build",
+	}, "sys", "do not spend budget on gated writes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep.mu.Lock()
+	defer rep.mu.Unlock()
+	if len(rep.tools) < 4 {
+		t.Fatalf("reqs %d", len(rep.tools))
+	}
+	if !hasSpec(rep.tools[3], "read_file") {
+		t.Fatalf("gated write consumed explore; tools gone too early: %+v", specNames(rep.tools[3]))
 	}
 }
 
