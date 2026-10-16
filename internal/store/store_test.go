@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func openTest(t *testing.T) *Store {
+func openSchema(t *testing.T) *Store {
 	t.Helper()
 	u := os.Getenv("KONSOLAI_TEST_DATABASE_URL")
 	if u == "" {
@@ -45,7 +45,7 @@ func openTest(t *testing.T) *Store {
 	}
 	cfg.ConnConfig.ConnectTimeout = queryTimeout
 	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
-		_, err := conn.Exec(ctx, "SET search_path TO "+ident)
+		_, err := conn.Exec(ctx, "SET search_path TO "+ident+", public")
 		return err
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
@@ -53,11 +53,16 @@ func openTest(t *testing.T) *Store {
 		t.Fatal(err)
 	}
 	s := &Store{pool: pool}
-	if err := s.migrate(ctx); err != nil {
-		pool.Close()
+	t.Cleanup(s.Close)
+	return s
+}
+
+func openTest(t *testing.T) *Store {
+	t.Helper()
+	s := openSchema(t)
+	if err := s.migrate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(s.Close)
 	return s
 }
 
