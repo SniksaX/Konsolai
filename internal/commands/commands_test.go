@@ -276,7 +276,7 @@ func TestStatus(t *testing.T) {
 		t.Fatal(code)
 	}
 	s := out.String()
-	for _, want := range []string{"version", "test", "profile", "endpoint", "model", "database", "cwd", "repo", "clipboard", "build_thinking"} {
+	for _, want := range []string{"version", "test", "profile", "endpoint", "model", "fast_model", "routing", "database", "cwd", "repo", "clipboard", "build_thinking"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %s in %q", want, s)
 		}
@@ -313,6 +313,24 @@ func TestStatusWindowFromModels(t *testing.T) {
 	}
 	if client.ContextWindow() != 94208 {
 		t.Fatalf("client window %d", client.ContextWindow())
+	}
+}
+
+func TestThinkCommand(t *testing.T) {
+	env, out, errb := testEnv(t)
+	env.InRepl = true
+	env.Runner = &turn.Runner{}
+	if code := Default().Dispatch(context.Background(), env, "think", []string{"on"}); code != 0 {
+		t.Fatalf("%d %s", code, errb.String())
+	}
+	if env.Runner.ThinkMode != turn.ThinkAlways {
+		t.Fatalf("mode %v", env.Runner.ThinkMode)
+	}
+	if !strings.Contains(out.String(), "think on") {
+		t.Fatalf("%q", out.String())
+	}
+	if code := Default().Dispatch(context.Background(), env, "think", []string{"nope"}); code != 2 {
+		t.Fatalf("bad %d", code)
 	}
 }
 
