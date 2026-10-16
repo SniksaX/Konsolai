@@ -82,6 +82,17 @@ func New(cmds ...Command) *Registry {
 	return &Registry{cmds: cmds}
 }
 
+func (r *Registry) SlashLines() string {
+	if r == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, c := range r.cmds {
+		fmt.Fprintf(&b, "/%s: %s\n", c.Name, c.Summary)
+	}
+	return b.String()
+}
+
 func (r *Registry) All() []Command { return r.cmds }
 
 func (r *Registry) Lookup(name string) *Command {
@@ -215,6 +226,7 @@ func Default() *Registry {
 		Command{Name: "undo", Usage: "undo", Summary: "Restore files changed in recent sessions", Run: runUndo},
 		Command{Name: "diff", Usage: "diff [n]", Summary: "Show file diffs from a session", Run: runDiff},
 		Command{Name: "run", Usage: "run [k]", Summary: "Run a bash/sh block from the last answer", Run: runRun},
+		Command{Name: "output", Usage: "output [n]", Summary: "Reprint the full output of a recent command", Run: runOutput},
 		Command{Name: "status", Usage: "status", Summary: "Show version, model, database and environment", Run: runStatus},
 		Command{Name: "remember", Usage: "remember [--project] \"<fact>\"", Summary: "Store a fact", Run: runRemember},
 		Command{Name: "facts", Usage: "facts", Summary: "List remembered facts", Run: runFacts},
