@@ -43,6 +43,27 @@ type session struct {
 	warns   []string
 }
 
+type nlWriter struct {
+	w    io.Writer
+	last byte
+	any  bool
+}
+
+func (n *nlWriter) Write(p []byte) (int, error) {
+	if len(p) > 0 {
+		n.last = p[len(p)-1]
+		n.any = true
+	}
+	return n.w.Write(p)
+}
+
+func (n *nlWriter) ensureNL() {
+	if n.any && n.last != '\n' {
+		_, _ = n.w.Write([]byte("\n"))
+		n.last = '\n'
+	}
+}
+
 func Run(ctx context.Context, cfg Config) int {
 	out, errw := cfg.Out, cfg.Err
 	if out == nil {
@@ -50,6 +71,15 @@ func Run(ctx context.Context, cfg Config) int {
 	}
 	if errw == nil {
 		errw = os.Stderr
+	}
+	origOut := out
+	tracked := &nlWriter{w: out}
+	out = tracked
+	if cfg.Env != nil && (cfg.Env.Out == origOut || cfg.Env.Out == nil) {
+		cfg.Env.Out = tracked
+	}
+	if cfg.Runner != nil && (cfg.Runner.Out == origOut || cfg.Runner.Out == nil) {
+		cfg.Runner.Out = tracked
 	}
 	env := cfg.Env
 	reg := cfg.Reg
@@ -96,6 +126,8 @@ func Run(ctx context.Context, cfg Config) int {
 		default:
 		}
 		flushWarns(errw, st)
+		ui.ResetDisplay()
+		tracked.ensureNL()
 		prompt := formatPrompt(st.cwd, st.ctxPct, st.showCtx, st.down)
 		line, err := rd.ReadLine(ctx, prompt)
 		if err != nil {
