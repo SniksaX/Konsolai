@@ -167,7 +167,7 @@ func DecideIntent(ctx context.Context, client *llm.Client, forceIntent, request 
 		}
 		return intent.Decision{
 			Intent: intent.Intent(forceIntent), Language: "en", Reason: "flag",
-			ContinuesSession: n,
+			ContinuesSession: n, Effort: intent.EffortLow,
 		}
 	}
 	d, _ := intent.Classify(ctx, client, request, cands, inRepo)
