@@ -25,6 +25,7 @@ import (
 	"github.com/siraj/konsolai/internal/store"
 	"github.com/siraj/konsolai/internal/turn"
 	"github.com/siraj/konsolai/internal/ui"
+	"github.com/siraj/konsolai/internal/ui/theme"
 )
 
 var _ agent.Confirmer = (*ui.Prompter)(nil)
@@ -211,6 +212,7 @@ func run() int {
 		return 1
 	}
 	ui.ApplyUIOpts(prof.PaletteName(), prof.Appearance(), inv.Plain, prof.CodeHighlightOn(), prof.StripEmojiOn())
+	theme.SetCursorColor(prof.CursorColorOn())
 	inv.Endpoint = prof.Endpoint
 
 	needMem := inv.Cmd == cmdUndo || inv.Cmd == cmdFacts || inv.Cmd == cmdPrune || inv.Cmd == cmdRemember || inv.Cmd == cmdForget
