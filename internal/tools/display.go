@@ -15,10 +15,18 @@ type LineLimiter struct {
 	shown   int
 	hidden  int
 	pending []byte
+	limit   int
 }
 
 func NewLineLimiter(out io.Writer) *LineLimiter {
-	return &LineLimiter{out: out}
+	return NewLineLimiterN(out, 0)
+}
+
+func NewLineLimiterN(out io.Writer, limit int) *LineLimiter {
+	if limit <= 0 {
+		limit = lineLimit
+	}
+	return &LineLimiter{out: out, limit: limit}
 }
 
 func (l *LineLimiter) Write(p []byte) (int, error) {
@@ -40,7 +48,11 @@ func (l *LineLimiter) Write(p []byte) (int, error) {
 }
 
 func (l *LineLimiter) emit(line []byte) error {
-	if l.shown < lineLimit {
+	limit := l.limit
+	if limit <= 0 {
+		limit = lineLimit
+	}
+	if l.shown < limit {
 		l.shown++
 		_, err := l.out.Write(line)
 		return err
