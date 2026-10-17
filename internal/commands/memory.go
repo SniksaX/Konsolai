@@ -22,7 +22,7 @@ func runRemember(ctx context.Context, env *Env, args []string) int {
 	}
 	s := env.Mem.Store()
 	if s == nil {
-		fmt.Fprintln(env.errw(), "memory is not configured (see ~/.config/konsolai/config.json)")
+		fmt.Fprintln(env.errw(), "memory is not configured (see ~/.config/konsolai/config.yaml)")
 		return 1
 	}
 	fact := args[0]
@@ -51,7 +51,7 @@ func runFacts(ctx context.Context, env *Env, _ []string) int {
 	}
 	s := env.Mem.Store()
 	if s == nil {
-		fmt.Fprintln(env.errw(), "memory is not configured (see ~/.config/konsolai/config.json)")
+		fmt.Fprintln(env.errw(), "memory is not configured (see ~/.config/konsolai/config.yaml)")
 		return 1
 	}
 	user, proj, err := s.ListFacts(ctx, env.Profile.Name, projectIDOf(ctx, env))
@@ -93,7 +93,7 @@ func runForget(ctx context.Context, env *Env, args []string) int {
 	}
 	s := env.Mem.Store()
 	if s == nil {
-		fmt.Fprintln(env.errw(), "memory is not configured (see ~/.config/konsolai/config.json)")
+		fmt.Fprintln(env.errw(), "memory is not configured (see ~/.config/konsolai/config.yaml)")
 		return 1
 	}
 	if err := s.DeleteFact(ctx, args[0], id); err != nil {
@@ -110,7 +110,7 @@ func runPrune(ctx context.Context, env *Env, _ []string) int {
 	}
 	s := env.Mem.Store()
 	if s == nil {
-		fmt.Fprintln(env.errw(), "memory is not configured (see ~/.config/konsolai/config.json)")
+		fmt.Fprintln(env.errw(), "memory is not configured (see ~/.config/konsolai/config.yaml)")
 		return 1
 	}
 	days := env.Profile.RetentionDays
