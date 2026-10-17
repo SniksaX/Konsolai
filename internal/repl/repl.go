@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/reeflective/readline"
+	"github.com/siraj/konsolai/internal/banner"
 	"github.com/siraj/konsolai/internal/commands"
 	"github.com/siraj/konsolai/internal/config"
 	"github.com/siraj/konsolai/internal/repo"
@@ -120,13 +121,21 @@ func Run(ctx context.Context, cfg Config) int {
 
 	p := ui.Current()
 	model := cfg.Model
-	if model == "" {
+	if model == "" && env != nil {
 		model = env.Profile.Model
 	}
 	if model == "" {
 		model = "-"
 	}
-	fmt.Fprintln(out, p.Muted(fmt.Sprintf("konsolai %s · %s · /help for commands", cfg.Version, model)))
+	info := banner.Info{Version: cfg.Version, Model: shortModel(model), Dir: shortPath(cwd)}
+	if info.Model == "-" {
+		info.Model = ""
+	}
+	show := env != nil && env.Profile.ShowBanner()
+	if err := banner.Startup(out, info, show, banner.IsTTY(out), p, banner.Width(out)); err != nil {
+		fmt.Fprintln(errw, "konsolai:", err)
+		return 1
+	}
 
 	go probeBackground(ctx, env.Profile, errw, st)
 
