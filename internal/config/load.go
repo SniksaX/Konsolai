@@ -31,6 +31,9 @@ type Overlay struct {
 	Language *LanguageOverlay `yaml:"language,omitempty" json:"language,omitempty"`
 	Safety   *SafetyOverlay   `yaml:"safety,omitempty" json:"safety,omitempty"`
 	Router   *RouterOverlay   `yaml:"router,omitempty" json:"router,omitempty"`
+	Tools    *ToolsOverlay    `yaml:"tools,omitempty" json:"tools,omitempty"`
+	Store    *StoreOverlay    `yaml:"store,omitempty" json:"store,omitempty"`
+	Stats    *StatsOverlay    `yaml:"stats,omitempty" json:"stats,omitempty"`
 }
 
 type LLMOverlay struct {
@@ -62,6 +65,7 @@ type MemoryOverlay struct {
 	SessionIdleMinutes *int     `yaml:"session_idle_minutes" json:"session_idle_minutes"`
 	RetentionDays      *int     `yaml:"retention_days" json:"retention_days"`
 	CompactThreshold   *float64 `yaml:"compact_threshold" json:"compact_threshold"`
+	IsolatedTimeoutMS  *int     `yaml:"isolated_timeout_ms" json:"isolated_timeout_ms"`
 }
 
 type ContextOverlay struct {
@@ -147,6 +151,7 @@ type UIOverlay struct {
 	StartupCapMS        *int             `yaml:"startup_cap_ms" json:"startup_cap_ms"`
 	WelcomeCacheSeconds *int             `yaml:"welcome_cache_seconds" json:"welcome_cache_seconds"`
 	ModelRateCalls      *int             `yaml:"model_rate_calls" json:"model_rate_calls"`
+	ModelSlowMS         *int             `yaml:"model_slow_ms" json:"model_slow_ms"`
 	CtxWarnPct          *int             `yaml:"ctx_warn_pct" json:"ctx_warn_pct"`
 	CtxHotPct           *int             `yaml:"ctx_hot_pct" json:"ctx_hot_pct"`
 	CtxCells            *int             `yaml:"ctx_cells" json:"ctx_cells"`
@@ -175,6 +180,25 @@ type SafetyOverlay struct {
 type RouterOverlay struct {
 	ActionVerbs *[]string `yaml:"action_verbs" json:"action_verbs"`
 	Targets     *[]string `yaml:"targets" json:"targets"`
+}
+
+type ToolsOverlay struct {
+	Shell *ToolShellOverlay `yaml:"shell" json:"shell"`
+}
+
+type ToolShellOverlay struct {
+	DefaultTimeoutSec *int `yaml:"default_timeout_sec" json:"default_timeout_sec"`
+	MaxTimeoutSec     *int `yaml:"max_timeout_sec" json:"max_timeout_sec"`
+	WaitDelayMS       *int `yaml:"wait_delay_ms" json:"wait_delay_ms"`
+}
+
+type StoreOverlay struct {
+	QueryTimeoutMS   *int `yaml:"query_timeout_ms" json:"query_timeout_ms"`
+	MigrateTimeoutMS *int `yaml:"migrate_timeout_ms" json:"migrate_timeout_ms"`
+}
+
+type StatsOverlay struct {
+	InsertTimeoutMS *int `yaml:"insert_timeout_ms" json:"insert_timeout_ms"`
 }
 
 func Load(path string) (File, error) {
@@ -455,6 +479,14 @@ func Validate(c Config) error {
 		{"ui.startup_cap_ms", c.UI.StartupCapMS},
 		{"ui.welcome_cache_seconds", c.UI.WelcomeCacheSeconds},
 		{"ui.model_rate_calls", c.UI.ModelRateCalls},
+		{"ui.model_slow_ms", c.UI.ModelSlowMS},
+		{"memory.isolated_timeout_ms", c.Memory.IsolatedTimeoutMS},
+		{"tools.shell.default_timeout_sec", c.Tools.Shell.DefaultTimeoutSec},
+		{"tools.shell.max_timeout_sec", c.Tools.Shell.MaxTimeoutSec},
+		{"tools.shell.wait_delay_ms", c.Tools.Shell.WaitDelayMS},
+		{"store.query_timeout_ms", c.Store.QueryTimeoutMS},
+		{"store.migrate_timeout_ms", c.Store.MigrateTimeoutMS},
+		{"stats.insert_timeout_ms", c.Stats.InsertTimeoutMS},
 		{"ui.ctx_cells", c.UI.CtxCells},
 		{"ui.ctx_narrow_cols", c.UI.CtxNarrowCols},
 		{"ui.layout.tiny_height", c.UI.Layout.TinyHeight},
@@ -472,6 +504,9 @@ func Validate(c Config) error {
 	}
 	if err := requireURL("rag.rerank_endpoint", c.RAG.RerankEndpoint); err != nil {
 		return err
+	}
+	if c.Tools.Shell.DefaultTimeoutSec > c.Tools.Shell.MaxTimeoutSec {
+		return fmt.Errorf("config: tools.shell.default_timeout_sec (%d) must be <= tools.shell.max_timeout_sec (%d)", c.Tools.Shell.DefaultTimeoutSec, c.Tools.Shell.MaxTimeoutSec)
 	}
 	if c.UI.CtxWarnPct <= 0 || c.UI.CtxWarnPct >= 100 {
 		return fmt.Errorf("config: ui.ctx_warn_pct must be in (0,100), got %d", c.UI.CtxWarnPct)
