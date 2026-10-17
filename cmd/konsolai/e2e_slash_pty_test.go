@@ -181,12 +181,22 @@ func (s *e2eSess) plainScreen() string {
 	return s.screen().dump()
 }
 
+// promptLine is the input row up to the cursor. Readline paints the inline
+// suggestion after the cursor (dim gray fg 242); that text is not the buffer.
 func (s *e2eSess) promptLine() string {
-	for _, line := range s.screen().lines() {
-		p := strings.TrimSpace(ansiReE2E.ReplaceAllString(line, ""))
-		if strings.HasPrefix(p, "›") {
-			return p
+	sc := s.screen()
+	for i, row := range sc.cell {
+		plain := strings.TrimSpace(string(row))
+		if !strings.HasPrefix(plain, "›") {
+			continue
 		}
+		if sc.r == i && sc.c > 0 && sc.c <= len(row) {
+			cut := strings.TrimSpace(string(row[:sc.c]))
+			if strings.HasPrefix(cut, "›") {
+				return cut
+			}
+		}
+		return strings.TrimSpace(strings.TrimRight(string(row), " "))
 	}
 	return ""
 }
