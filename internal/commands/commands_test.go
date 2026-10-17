@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -543,5 +544,41 @@ func TestRunCmd(t *testing.T) {
 	}
 	if code := runCmd(context.Background(), env, []string{"nope"}); code != 2 {
 		t.Fatalf("usage %d", code)
+	}
+}
+
+func TestConfigPathAndShowMask(t *testing.T) {
+	env, out, errb := testEnv(t)
+	env.ConfigPath = "/tmp/xdg/konsolai/config.yaml"
+	env.Profile = config.Builtin()
+	env.Profile.Name = "home"
+	env.Profile.Database.URL = "postgres://user:hunter2@localhost:5432/k"
+	if code := runConfig(context.Background(), env, []string{"path"}); code != 0 {
+		t.Fatalf("path %d %s", code, errb.String())
+	}
+	if strings.TrimSpace(out.String()) != env.ConfigPath {
+		t.Fatalf("path %q", out.String())
+	}
+	out.Reset()
+	if code := runConfig(context.Background(), env, []string{"show"}); code != 0 {
+		t.Fatalf("show %d %s", code, errb.String())
+	}
+	got := out.String()
+	if strings.Contains(got, "hunter2") {
+		t.Fatalf("leaked %s", got)
+	}
+	if !strings.Contains(got, "***") || !strings.Contains(got, "profile: home") {
+		t.Fatalf("show %s", got)
+	}
+}
+
+func TestConfigValidateMissingIsOK(t *testing.T) {
+	env, out, errb := testEnv(t)
+	env.ConfigPath = filepath.Join(t.TempDir(), "missing.yaml")
+	if code := runConfig(context.Background(), env, []string{"validate"}); code != 0 {
+		t.Fatalf("validate %d %s", code, errb.String())
+	}
+	if strings.TrimSpace(out.String()) != "ok" {
+		t.Fatalf("got %q", out.String())
 	}
 }
