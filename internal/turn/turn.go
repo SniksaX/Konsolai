@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -68,6 +69,10 @@ type Runner struct {
 	lastPromise      bool
 	lastEscalate     intent.Intent
 	escalated        bool
+	statMu           sync.Mutex
+	statOn           bool
+	statIntent       string
+	statSession      string
 }
 
 type Request struct {
@@ -115,17 +120,18 @@ func (r *Runner) errw() io.Writer {
 }
 
 func (r *Runner) client() *llm.Client {
-	if r.Client != nil {
-		return r.Client
+	if r.Client == nil {
+		c := llm.New(r.Profile.Endpoint, r.Profile.Model)
+		c.SetIdleTimeout(time.Duration(r.Profile.LLMIdleTimeoutSeconds) * time.Second)
+		r.Client = c
 	}
-	c := llm.New(r.Profile.Endpoint, r.Profile.Model)
-	c.SetIdleTimeout(time.Duration(r.Profile.LLMIdleTimeoutSeconds) * time.Second)
-	r.Client = c
-	return c
+	r.attachStats(r.Client)
+	return r.Client
 }
 
 func (r *Runner) fastClient() *llm.Client {
 	if r.FastClient != nil {
+		r.attachStats(r.FastClient)
 		return r.FastClient
 	}
 	if !r.Profile.FastOn() {
@@ -138,6 +144,7 @@ func (r *Runner) fastClient() *llm.Client {
 	c := llm.NewFast(ep, r.Profile.FastModel)
 	c.SetIdleTimeout(time.Duration(r.Profile.LLMIdleTimeoutSeconds) * time.Second)
 	r.FastClient = c
+	r.attachStats(c)
 	return c
 }
 
