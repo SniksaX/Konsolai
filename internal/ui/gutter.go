@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/siraj/konsolai/internal/ui/theme"
 )
 
 const (
@@ -42,7 +44,7 @@ func (g *Gutter) Write(p []byte) (int, error) {
 
 func (g *Gutter) emit(line []byte) error {
 	p := Current()
-	_, err := io.WriteString(g.w, p.Muted(OutIndent+"│ ")+p.Muted(string(line))+"\n")
+	_, err := io.WriteString(g.w, OutIndent+p.Subtle("│ ")+theme.Style(theme.Primary, string(line))+"\n")
 	return err
 }
 
@@ -199,5 +201,5 @@ func PromptOptions() string {
 
 func IntentBadge(name string) string {
 	p := Current()
-	return p.Accent("◆") + " " + p.Muted(name)
+	return p.Accent("◆") + " " + p.Heading(name)
 }
