@@ -13,7 +13,7 @@ func TestContrastFloors(t *testing.T) {
 		AccentDim: 4.0, Subtle: 3.0,
 	}
 	var report []string
-	for _, pal := range []string{"amber", "violet"} {
+	for _, pal := range PaletteNames {
 		for _, app := range []Appearance{Dark, Light} {
 			bgs := darks
 			if app == Light {
@@ -37,26 +37,21 @@ func TestContrastFloors(t *testing.T) {
 	for _, line := range report {
 		t.Log(line)
 	}
-	t.Logf("violet dark Heading=%s Accent=%s AccentDim=%s Meta=%s Muted=%s Subtle=%s BannerTop=%s BannerBottom=%s",
-		roleColor("violet", Dark, Heading).Hex(),
-		roleColor("violet", Dark, Accent).Hex(),
-		roleColor("violet", Dark, AccentDim).Hex(),
-		roleColor("violet", Dark, Meta).Hex(),
-		roleColor("violet", Dark, Muted).Hex(),
-		roleColor("violet", Dark, Subtle).Hex(),
-		roleColor("violet", Dark, BannerTop).Hex(),
-		roleColor("violet", Dark, BannerBottom).Hex(),
-	)
-	t.Logf("violet light Heading=%s Accent=%s AccentDim=%s Meta=%s Muted=%s Subtle=%s BannerTop=%s BannerBottom=%s",
-		roleColor("violet", Light, Heading).Hex(),
-		roleColor("violet", Light, Accent).Hex(),
-		roleColor("violet", Light, AccentDim).Hex(),
-		roleColor("violet", Light, Meta).Hex(),
-		roleColor("violet", Light, Muted).Hex(),
-		roleColor("violet", Light, Subtle).Hex(),
-		roleColor("violet", Light, BannerTop).Hex(),
-		roleColor("violet", Light, BannerBottom).Hex(),
-	)
+	for _, pal := range PaletteNames {
+		for _, app := range []Appearance{Dark, Light} {
+			t.Logf("%s %s Heading=%s Accent=%s AccentDim=%s Meta=%s Muted=%s Subtle=%s BannerTop=%s BannerBottom=%s",
+				pal, app,
+				roleColor(pal, app, Heading).Hex(),
+				roleColor(pal, app, Accent).Hex(),
+				roleColor(pal, app, AccentDim).Hex(),
+				roleColor(pal, app, Meta).Hex(),
+				roleColor(pal, app, Muted).Hex(),
+				roleColor(pal, app, Subtle).Hex(),
+				roleColor(pal, app, BannerTop).Hex(),
+				roleColor(pal, app, BannerBottom).Hex(),
+			)
+		}
+	}
 }
 
 func TestStylePrimaryUncolored(t *testing.T) {
