@@ -138,6 +138,7 @@ defaults:
     theme: %s   # auto | dark | light
     code_highlight: %t
     clear_on_start: %t
+    strip_emoji: %t
   language:
     languages: %s
     default: %s
@@ -173,7 +174,7 @@ profiles:
 		b.RAG.Search.RerankTop, b.RAG.Search.K, b.RAG.Search.RerankThreshold,
 		b.RAG.Index.MaxFileKB, b.RAG.Index.ConfirmOverMinutes,
 		b.UI.DisplayLines, b.UI.PasteChipLines, b.UI.PasteChipChars, b.UI.OutputKeepKB,
-		b.UI.Palette, b.UI.Banner, b.UI.Theme, b.UI.CodeHighlight, b.UI.ClearOnStart,
+		b.UI.Palette, b.UI.Banner, b.UI.Theme, b.UI.CodeHighlight, b.UI.ClearOnStart, b.UI.StripEmoji,
 		langs, b.Language.Default,
 		verbs, targets,
 		b.LLM.Endpoint,
