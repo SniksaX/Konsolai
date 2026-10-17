@@ -63,6 +63,10 @@ type Runner struct {
 	lastLang         string
 	lastEffort       intent.Effort
 	lastTask         intent.Task
+	lastUser         string
+	lastPromise      bool
+	lastEscalate     intent.Intent
+	escalated        bool
 }
 
 type Request struct {
@@ -122,6 +126,9 @@ func (r *Runner) client() *llm.Client {
 func (r *Runner) fastClient() *llm.Client {
 	if r.FastClient != nil {
 		return r.FastClient
+	}
+	if !r.Profile.FastOn() {
+		return nil
 	}
 	ep := r.Profile.FastEndpoint
 	if ep == "" {
