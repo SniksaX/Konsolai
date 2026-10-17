@@ -35,34 +35,51 @@ func runeWindow(maxTok, overlapTok int) (size, overlap int) {
 }
 
 func SplitTurn(s string) []string {
+	return SplitTurnN(s, turnMaxTokens)
+}
+
+func SplitTurnN(s string, maxTok int) []string {
+	if maxTok <= 0 {
+		maxTok = turnMaxTokens
+	}
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return nil
 	}
-	if estimateTokens(s) <= turnMaxTokens {
+	if estimateTokens(s) <= maxTok {
 		return []string{s}
 	}
 	if parts := splitHeadings(s); len(parts) > 1 {
-		return splitEach(parts, turnMaxTokens, 0)
+		return splitEach(parts, maxTok, 0)
 	}
 	if parts := splitParagraphs(s); len(parts) > 1 {
-		return pack(parts, turnMaxTokens)
+		return pack(parts, maxTok)
 	}
-	return windows(s, turnMaxTokens, 0)
+	return windows(s, maxTok, 0)
 }
 
 func SplitWeb(s string) []string {
+	return SplitWebN(s, webMaxTokens, webOverlapTok)
+}
+
+func SplitWebN(s string, maxTok, overlap int) []string {
+	if maxTok <= 0 {
+		maxTok = webMaxTokens
+	}
+	if overlap < 0 {
+		overlap = webOverlapTok
+	}
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return nil
 	}
-	if estimateTokens(s) <= webMaxTokens {
+	if estimateTokens(s) <= maxTok {
 		return []string{s}
 	}
 	if parts := splitHeadings(s); len(parts) > 1 {
-		return splitEach(parts, webMaxTokens, webOverlapTok)
+		return splitEach(parts, maxTok, overlap)
 	}
-	return windows(s, webMaxTokens, webOverlapTok)
+	return windows(s, maxTok, overlap)
 }
 
 func splitEach(parts []string, maxTok, overlap int) []string {
