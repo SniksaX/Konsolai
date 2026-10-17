@@ -206,6 +206,78 @@ func (s *Store) ClearCodeIndex(ctx context.Context, projectID int64) error {
 	return nil
 }
 
+func (s *Store) OrphanMemoryFiles(ctx context.Context, projectID int64) ([]string, error) {
+	ctx, cancel := withTimeout(ctx)
+	defer cancel()
+	rows, err := s.pool.Query(ctx, `
+		SELECT mf.path
+		FROM memory_files mf
+		LEFT JOIN memory_chunks mc
+		  ON mc.source = 'code' AND mc.project_id = mf.project_id AND mc.ref->>'path' = mf.path
+		WHERE mf.project_id = $1
+		GROUP BY mf.path
+		HAVING count(mc.id) = 0`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("store: orphan memory files: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("store: scan orphan: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) PersistCodeFile(ctx context.Context, profile string, projectID int64, path, sha string, chunks []ChunkIn) (int, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("store: begin persist: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM memory_chunks
+		WHERE source = 'code' AND project_id = $1 AND ref->>'path' = $2`, projectID, path); err != nil {
+		return 0, fmt.Errorf("store: persist delete chunks: %w", err)
+	}
+	n := 0
+	for _, in := range chunks {
+		if in.Ref == nil {
+			in.Ref = json.RawMessage(`{}`)
+		}
+		hash := ContentHash(in.Content)
+		var id int64
+		err := tx.QueryRow(ctx, `
+			INSERT INTO memory_chunks (profile, project_id, source, ref, content, content_hash, embedding)
+			VALUES ($1, $2, $3, $4, $5, $6, $7::vector)
+			ON CONFLICT (profile, source, content_hash) DO NOTHING
+			RETURNING id`,
+			profile, projectID, "code", in.Ref, in.Content, hash, VectorLiteral(in.Embedding),
+		).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return 0, fmt.Errorf("store: persist chunk: %w", err)
+		}
+		n++
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO memory_files (project_id, path, sha256, indexed_at)
+		VALUES ($1, $2, $3, now())
+		ON CONFLICT (project_id, path) DO UPDATE SET sha256 = EXCLUDED.sha256, indexed_at = now()`,
+		projectID, path, sha); err != nil {
+		return 0, fmt.Errorf("store: persist memory file: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("store: persist commit: %w", err)
+	}
+	return n, nil
+}
+
 func (s *Store) LastIndexedAt(ctx context.Context, projectID int64) (time.Time, bool, error) {
 	ctx, cancel := withTimeout(ctx)
 	defer cancel()
