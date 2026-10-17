@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/siraj/konsolai/internal/banner"
+	"github.com/siraj/konsolai/internal/config"
 	"github.com/siraj/konsolai/internal/store"
 )
 
@@ -78,25 +79,6 @@ type Limits struct {
 	FrameWidth   int
 }
 
-func (l Limits) norm() Limits {
-	if l.TinyHeight < 1 {
-		l.TinyHeight = 22
-	}
-	if l.RecentHeight < 1 {
-		l.RecentHeight = 30
-	}
-	if l.TinyWidth < 1 {
-		l.TinyWidth = 64
-	}
-	if l.NarrowWidth < 1 {
-		l.NarrowWidth = 110
-	}
-	if l.FrameWidth < 1 {
-		l.FrameWidth = 120
-	}
-	return l
-}
-
 // Input is everything Gather needs. Tests inject endpoints, a store, and Now.
 type Input struct {
 	Endpoint       string
@@ -119,30 +101,38 @@ type Input struct {
 	RateWindow    int
 }
 
-const (
-	gatherBudget     = 400 * time.Millisecond
-	probeTimeout     = 300 * time.Millisecond
-	gitQueryLimit    = 200 * time.Millisecond
-	memoryQueryLimit = 200 * time.Millisecond
-	rateWindow       = 20
-)
-
-func orDuration(d, fallback time.Duration) time.Duration {
-	if d > 0 {
-		return d
+// resolveInput fills zero gather budgets from the built-in profile.
+// Callers that already resolved a profile pass those values through.
+func resolveInput(in Input) Input {
+	b := config.Builtin()
+	if in.ProbeBudget <= 0 {
+		in.ProbeBudget = b.ProbeDeadline()
 	}
-	return fallback
+	if in.ProbeTimeout <= 0 {
+		in.ProbeTimeout = b.ProbeTimeout()
+	}
+	if in.GitTimeout <= 0 {
+		in.GitTimeout = b.GitQueryTimeout()
+	}
+	if in.MemoryTimeout <= 0 {
+		in.MemoryTimeout = b.MemoryQueryTimeout()
+	}
+	if in.RateWindow <= 0 {
+		in.RateWindow = b.ModelRateWindow()
+	}
+	return in
 }
 
-// Gather fills one Data concurrently. The wait never exceeds the budget
-// (400ms unless Input.ProbeBudget is set); whatever has not arrived stays
-// degraded. A non-nil error is not used for probe or database failures —
-// those stay in the returned Data.
+// Gather fills one Data concurrently. The wait never exceeds ProbeBudget
+// (the built-in probe deadline when that field is zero). Whatever has not
+// arrived stays degraded. A non-nil error is not used for probe or database
+// failures — those stay in the returned Data.
 func Gather(ctx context.Context, in Input) (Data, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(ctx, orDuration(in.ProbeBudget, gatherBudget))
+	in = resolveInput(in)
+	ctx, cancel := context.WithTimeout(ctx, in.ProbeBudget)
 	defer cancel()
 
 	nowFn := in.Now
@@ -198,7 +188,7 @@ func Gather(ctx context.Context, in Input) (Data, error) {
 			g.setModel(sp.i, probeModel(ctx, in, sp.role, sp.name, sp.ep, sp.kind))
 		})
 	}
-	run(func() { loadGit(ctx, in.CWD, g, orDuration(in.GitTimeout, gitQueryLimit)) })
+	run(func() { loadGit(ctx, in.CWD, g, in.GitTimeout) })
 	run(func() { loadMemory(ctx, in, g, now) })
 
 	done := make(chan struct{})
@@ -261,7 +251,7 @@ func probeModel(ctx context.Context, in Input, role, name, endpoint, kind string
 		m.Stat = "n/a"
 		return m
 	}
-	timeout := orDuration(in.ProbeTimeout, probeTimeout)
+	timeout := in.ProbeTimeout
 	pctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	start := time.Now()
@@ -300,9 +290,6 @@ func statusFor(role string, lat time.Duration) Status {
 func statText(ctx context.Context, in Input, role, name string, lat time.Duration) string {
 	if role != "embed" && in.Store != nil && name != "" {
 		lastN := in.RateWindow
-		if lastN <= 0 {
-			lastN = rateWindow
-		}
 		rate, err := in.Store.ModelRate(ctx, name, lastN)
 		if err == nil && rate != nil {
 			return fmt.Sprintf("%.0f tokens/s", *rate)
@@ -357,7 +344,6 @@ func doProbe(ctx context.Context, endpoint, kind string, timeout time.Duration) 
 }
 
 func probeHTTP(timeout time.Duration) *http.Client {
-	timeout = orDuration(timeout, probeTimeout)
 	dialer := &net.Dialer{}
 	tr := &http.Transport{
 		DialContext:           dialer.DialContext,
@@ -434,7 +420,7 @@ func gitStatus(ctx context.Context, cwd string, timeout time.Duration) (branch s
 	if strings.TrimSpace(cwd) == "" {
 		return "not a git repo", false, 0, 0, 0, true
 	}
-	cctx, cancel := context.WithTimeout(ctx, orDuration(timeout, gitQueryLimit))
+	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(cctx, "git", "-C", cwd, "status", "--porcelain=v2", "--branch")
 	out, err := cmd.Output()
@@ -486,7 +472,7 @@ func loadMemory(ctx context.Context, in Input, g *gate, now time.Time) {
 	if in.Store == nil || g == nil {
 		return
 	}
-	cctx, cancel := context.WithTimeout(ctx, orDuration(in.MemoryTimeout, memoryQueryLimit))
+	cctx, cancel := context.WithTimeout(ctx, in.MemoryTimeout)
 	defer cancel()
 	facts, sessions, err := in.Store.WelcomeMemory(cctx, in.Profile, in.ProjectID)
 	if err != nil {
