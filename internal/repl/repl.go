@@ -103,6 +103,9 @@ func Run(ctx context.Context, cfg Config) int {
 	if pastes == nil {
 		pastes = NewPasteStore()
 	}
+	if env != nil {
+		pastes.SetChipLimits(env.Profile.PasteChipLines(), env.Profile.PasteChipChars())
+	}
 	st := &session{cwd: cwd, yes: env.Yes, trace: cfg.Trace, pastes: pastes}
 	st.mode = shellmode.New(cwd)
 	st.mode.Stdout = tracked
