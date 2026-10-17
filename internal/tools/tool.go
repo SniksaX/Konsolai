@@ -86,12 +86,15 @@ type Result struct {
 }
 
 type Options struct {
-	ReadOnlyShell bool
-	DocsTask      bool
-	Request       string
-	OnWebFetch    func(url, title, text string)
-	Recall        RecallFunc
-	DisplayLines  int
+	ReadOnlyShell       bool
+	DocsTask            bool
+	Request             string
+	OnWebFetch          func(url, title, text string)
+	Recall              RecallFunc
+	DisplayLines        int
+	ShellDefaultTimeout time.Duration
+	ShellMaxTimeout     time.Duration
+	ShellWaitDelay      time.Duration
 }
 
 const DocsSourceReject = "docs tasks may not create or modify source files; write Markdown and use export_doc for PDF/HTML"
@@ -124,7 +127,7 @@ func NewRegistry(g *safety.Guard, out io.Writer, files FileLister, cache WebCach
 		facts = NopFactStore{}
 	}
 	list := []Tool{
-		newShellLimit(g, out, o.ReadOnlyShell, o.DocsTask, o.DisplayLines),
+		newShellLimit(g, out, o.ReadOnlyShell, o.DocsTask, o.DisplayLines).withLimits(o.ShellDefaultTimeout, o.ShellMaxTimeout, o.ShellWaitDelay),
 		newWriteFile(g, o.DocsTask),
 		newReadFile(g),
 		newListDir(g),
