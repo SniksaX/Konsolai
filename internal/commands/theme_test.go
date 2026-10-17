@@ -16,7 +16,7 @@ func TestThemeListAndPersist(t *testing.T) {
 	src := `# keep
 defaults:
   ui:
-    palette: amber   # look
+    theme: amber   # look
 `
 	if err := os.WriteFile(path, []byte(src), 0600); err != nil {
 		t.Fatal(err)
@@ -31,14 +31,14 @@ defaults:
 			t.Fatalf("missing %s in %q", name, listed)
 		}
 	}
-	if !strings.Contains(listed, "◆ act") || !strings.Contains(listed, "accent") || !strings.Contains(listed, "muted") {
+	if !strings.Contains(listed, "▀") || !strings.Contains(listed, "●") {
 		t.Fatalf("preview %q", listed)
 	}
 	out.Reset()
 	if code := runTheme(context.Background(), env, []string{"rose"}); code != 0 {
 		t.Fatalf("apply %d %s", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "palette rose") {
+	if !strings.Contains(out.String(), "theme rose") {
 		t.Fatalf("apply print %q", out.String())
 	}
 	if env.Profile.PaletteName() != "rose" {
@@ -49,8 +49,26 @@ defaults:
 		t.Fatal(err)
 	}
 	s := string(got)
-	if !strings.Contains(s, "# keep") || !strings.Contains(s, "palette: rose") || !strings.Contains(s, "# look") {
+	if !strings.Contains(s, "# keep") || !strings.Contains(s, "theme: rose") || !strings.Contains(s, "# look") {
 		t.Fatalf("persist:\n%s", s)
+	}
+}
+
+func TestThemeAliasApplies(t *testing.T) {
+	env, out, errb := testEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("defaults:\n  ui:\n    theme: amber\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	env.ConfigPath = path
+	if code := runTheme(context.Background(), env, []string{"ocean"}); code != 0 {
+		t.Fatalf("apply %d %s", code, errb.String())
+	}
+	if env.Profile.PaletteName() != "glacier" {
+		t.Fatalf("live %q", env.Profile.PaletteName())
+	}
+	if !strings.Contains(out.String(), "theme glacier") {
+		t.Fatalf("print %q", out.String())
 	}
 }
 
