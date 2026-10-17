@@ -27,8 +27,8 @@ import (
 type Status string
 
 const (
-	StatusUp      Status = "up"      // latency < 1s
-	StatusSlow    Status = "slow"    // latency >= 1s (embed: latency > 1s)
+	StatusUp      Status = "up"      // latency under the slow threshold
+	StatusSlow    Status = "slow"    // latency >= threshold (embed: latency > threshold)
 	StatusDown    Status = "down"    // error
 	StatusTimeout Status = "timeout" // deadline hit
 )
@@ -99,6 +99,7 @@ type Input struct {
 	GitTimeout    time.Duration
 	MemoryTimeout time.Duration
 	RateWindow    int
+	ModelSlow     time.Duration
 }
 
 // resolveInput fills zero gather budgets from the built-in profile.
@@ -119,6 +120,9 @@ func resolveInput(in Input) Input {
 	}
 	if in.RateWindow <= 0 {
 		in.RateWindow = b.ModelRateWindow()
+	}
+	if in.ModelSlow <= 0 {
+		in.ModelSlow = b.ModelSlow()
 	}
 	return in
 }
@@ -269,19 +273,23 @@ func probeModel(ctx context.Context, in Input, role, name, endpoint, kind string
 		}
 		return m
 	}
-	m.Status = statusFor(role, lat)
+	m.Status = statusForLimit(role, lat, in.ModelSlow)
 	m.Stat = statText(ctx, in, role, name, lat)
 	return m
 }
 
 func statusFor(role string, lat time.Duration) Status {
+	return statusForLimit(role, lat, config.Builtin().ModelSlow())
+}
+
+func statusForLimit(role string, lat, slow time.Duration) Status {
 	if role == "embed" {
-		if lat > time.Second {
+		if lat > slow {
 			return StatusSlow
 		}
 		return StatusUp
 	}
-	if lat >= time.Second {
+	if lat >= slow {
 		return StatusSlow
 	}
 	return StatusUp
