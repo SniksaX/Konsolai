@@ -93,7 +93,7 @@ func (m *slashMenu) Sync(line string) {
 	}
 	if m.sel >= 0 && m.sel < len(m.items) {
 		want := "/" + m.items[m.sel].Name
-		if line == want {
+		if line == want || line == want+" " || line == m.typed {
 			m.open = true
 			return
 		}
