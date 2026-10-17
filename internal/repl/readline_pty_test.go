@@ -25,7 +25,7 @@ func TestReadlineSubmittedOnceOnPTY(t *testing.T) {
 		t.Skip("no /dev/ptmx")
 	}
 	if os.Getenv("KONSOLAI_PTY_CHILD") == "1" {
-		rd, err := NewReadline(nil, func() string { return "cwd · branch" }, nil)
+		rd, err := NewReadline(nil, func() string { return "cwd · branch" }, nil, nil)
 		if err != nil {
 			os.Stderr.WriteString(err.Error())
 			os.Exit(1)
@@ -123,7 +123,7 @@ func TestFrameNoPartialRuleAfterTurn(t *testing.T) {
 		t.Skip("no /dev/ptmx")
 	}
 	if os.Getenv("KONSOLAI_PTY_CHILD") == "turn" {
-		rd, err := NewReadline(nil, func() string { return "FOOTER_MARK · branch" }, nil)
+		rd, err := NewReadline(nil, func() string { return "FOOTER_MARK · branch" }, nil, nil)
 		if err != nil {
 			os.Stderr.WriteString(err.Error())
 			os.Exit(1)
@@ -201,7 +201,7 @@ func TestFrameNoPartialRuleAfterTurn(t *testing.T) {
 func runSlashChild() {
 	rd, err := NewReadline(Completer(commands.Default(), func() string { return os.TempDir() }), func() string {
 		return "FOOTER_MARK · branch"
-	}, nil)
+	}, nil, commands.Default())
 	if err != nil {
 		os.Stderr.WriteString(err.Error())
 		os.Exit(1)
