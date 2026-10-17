@@ -8,6 +8,7 @@ import (
 
 	"github.com/reeflective/readline"
 	"github.com/reeflective/readline/inputrc"
+	"github.com/siraj/konsolai/internal/ui"
 )
 
 type rlReader struct {
@@ -43,7 +44,7 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 	_ = sh.Config.Set("cursor-position-probe", false)
 	_ = sh.Config.Set("autocomplete", true)
 	_ = sh.Config.Set("usage-hint-always", true)
-	_ = sh.Config.Set("completion-description-style", "\x1b[38;5;245m")
+	_ = sh.Config.Set("completion-description-style", ui.Current().MutedSeq())
 	// Leave the live prompt as the only scrollback copy. RefreshTransient
 	// reprints prompt+line after accept and misses the footer/hint row, so
 	// enabling it produced a second "› line" in a real TTY.
