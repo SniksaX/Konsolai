@@ -107,6 +107,8 @@ var overlaySchema = m(map[string]schema{
 		"palette":          leaf(),
 		"banner":           leaf(),
 		"theme":            leaf(),
+		"appearance":       leaf(),
+		"cursor_color":     leaf(),
 		"code_highlight":   leaf(),
 		"clear_on_start":   leaf(),
 		"strip_emoji":      leaf(),
