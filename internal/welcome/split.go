@@ -10,7 +10,7 @@ import (
 
 func renderSplit(w io.Writer, d Data, width, height int) {
 	pal := ui.Current()
-	lim := d.Limits.norm()
+	lim := ResolveLimits(d.Limits)
 	var lines []string
 	switch {
 	case height < lim.TinyHeight:
@@ -37,7 +37,7 @@ func tinyLines(pal ui.Palette, d Data, width int, withHint bool) []string {
 }
 
 func narrowLines(pal ui.Palette, d Data, width, height int) []string {
-	lim := d.Limits.norm()
+	lim := ResolveLimits(d.Limits)
 	lines := []string{""}
 	lines = append(lines, wordmarkMin(width, lim.TinyWidth)...)
 	lines = append(lines, "")
@@ -67,7 +67,7 @@ func narrowLines(pal ui.Palette, d Data, width, height int) []string {
 }
 
 func splitWide(pal ui.Palette, d Data, width, height int) []string {
-	lim := d.Limits.norm()
+	lim := ResolveLimits(d.Limits)
 	left := append(wordmarkMin(width, lim.TinyWidth), taglineLine(pal))
 	boxW := width - 68
 	if boxW < 16 {
