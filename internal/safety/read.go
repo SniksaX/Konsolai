@@ -37,7 +37,7 @@ func (g *Guard) ResolveRead(p string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if SensitiveRead(abs) {
+	if SensitiveRead(abs) || g.ExtraReadMatch(abs) {
 		return "", ErrSensitiveFile
 	}
 	return abs, nil
