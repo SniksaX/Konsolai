@@ -35,7 +35,7 @@ func runExit(ctx context.Context, env *Env, _ []string) int {
 }
 
 func runClear(ctx context.Context, env *Env, _ []string) int {
-	fmt.Fprint(env.out(), theme.ClearHome)
+	fmt.Fprint(env.out(), theme.ClearScroll)
 	if env.OnClear != nil {
 		env.OnClear()
 	}
