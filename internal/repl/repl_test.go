@@ -61,6 +61,27 @@ func TestReplCommandsAndExit(t *testing.T) {
 	}
 }
 
+func TestReplBannerOffUsesMutedLine(t *testing.T) {
+	var out, errb bytes.Buffer
+	prof := config.Builtin()
+	prof.UI.Banner = false
+	prof.Model = "m"
+	env := &commands.Env{Profile: prof, Out: &out, Err: &errb, Cwd: t.TempDir()}
+	code := Run(context.Background(), Config{
+		Env: env, Reg: commands.Default(), Reader: &scriptReader{lines: []string{"/exit"}},
+		Version: "v9", Model: "m", Out: &out, Err: &errb,
+	})
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "konsolai v9 · m · /help for commands") {
+		t.Fatalf("want muted line, got %q", out.String())
+	}
+	if strings.Contains(out.String(), "█") {
+		t.Fatalf("pixel banner on non-TTY: %q", out.String())
+	}
+}
+
 func TestReplInterruptEmpty(t *testing.T) {
 	var out, errb bytes.Buffer
 	env := &commands.Env{Out: &out, Err: &errb, Cwd: t.TempDir(), Profile: config.Profile{Name: "p"}}
