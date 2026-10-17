@@ -148,10 +148,8 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 		}
 	}
 	ui.BeforeOutput()
-	if req.Plain {
-		fmt.Fprintln(r.out(), "· "+string(dec.Intent))
-	} else {
-		fmt.Fprintln(r.out(), ui.IntentBadge(string(dec.Intent)))
+	if dec.Intent != intent.Answer {
+		r.emitBadge(req, string(dec.Intent), false)
 	}
 	if intent.LooksLikeMemory(req.Text) {
 		dec.NeedsMemory = true
@@ -181,6 +179,8 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	r.lastLang = dec.Language
 	r.lastEffort = dec.EffectiveEffort()
 	r.lastTask = dec.Task
+	r.lastUser = req.Text
+	r.lastAssistant = answer
 	if sessionID != "" && !req.KeepOpen {
 		if s := mem.Store(); s != nil {
 			endCtx, cancel := memory.Isolated(ctx)
@@ -220,6 +220,21 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 		SessionID: sessionID, Intent: string(dec.Intent), ExitCode: code, Answer: answer,
 		PromptTokens: ptok, Window: r.LastWindow,
 	}
+}
+
+func (r *Runner) emitBadge(req Request, name string, escalated bool) {
+	if r == nil {
+		return
+	}
+	if req.Plain {
+		suf := ""
+		if escalated {
+			suf = " · escalated"
+		}
+		fmt.Fprintln(r.out(), "· "+name+suf)
+		return
+	}
+	fmt.Fprintln(r.out(), ui.IntentBadgeLine(name, escalated))
 }
 
 func loadSessionByID(ctx context.Context, mem *memory.Guard, id string, cands []ResumeCandidate) ResumeCandidate {
@@ -268,9 +283,9 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			r.lastPromise = true
 			r.lastUser = req.Text
 			r.lastEscalate = esc
-			fmt.Fprintln(r.out(), ui.Current().Muted("· escalated to "+string(esc)))
 			dec.Intent = esc
 			dec.Effort = intent.EffortHigh
+			r.emitBadge(req, string(dec.Intent), true)
 		} else {
 			r.lastPromise = intent.IsPromise(answer)
 			if r.lastPromise {
@@ -494,6 +509,7 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 	if !r.escalated && intent.IsPromise(out) {
 		return 0, out, ptok, usedMain, intent.EscalateIntent(query, r.Profile.Router.ActionVerbs, r.Profile.Router.Targets)
 	}
+	r.emitBadge(req, string(dec.Intent), false)
 	_, _ = io.Copy(r.out(), &buf)
 	_ = rec.Message(ctx, llm.Message{Role: llm.RoleAssistant, Content: out})
 	st := agent.Stats{
@@ -582,9 +598,6 @@ func StreamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 	}
 	_ = rend.Flush()
 	out := strings.TrimLeft(collected.String(), "\r\n")
-	if out != "" && !strings.HasSuffix(out, "\n") {
-		_, _ = io.WriteString(outw, "\n")
-	}
 	return out, usage, err
 }
 
