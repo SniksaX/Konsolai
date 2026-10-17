@@ -97,6 +97,71 @@ var violetRoles = map[Role]roleRGB{
 	Link:         {hexRGB(0x6CB6FF), hexRGB(0x0B63CE)},
 }
 
+// Ocean: teal/cyan at the same WCAG floors as amber. Light Accent/Muted are
+// darkened so they still clear 4.5:1 on #FAF7F0.
+var oceanRoles = map[Role]roleRGB{
+	Heading:      {hexRGB(0x7AF2FF), hexRGB(0x006E7A)},
+	Accent:       {hexRGB(0x1FE9FF), hexRGB(0x007D8B)},
+	AccentDim:    {hexRGB(0x2EB8C7), hexRGB(0x138693)},
+	Meta:         {hexRGB(0x66D9E6), hexRGB(0x1C7D88)},
+	Muted:        {hexRGB(0x5CA8B0), hexRGB(0x48797F)},
+	Subtle:       {hexRGB(0x4A858C), hexRGB(0x6B979C)},
+	BannerTop:    {hexRGB(0x7AF2FF), hexRGB(0x007D8B)},
+	BannerBottom: {hexRGB(0x1FE9FF), hexRGB(0x006E7A)},
+	Success:      {hexRGB(0x7BD88F), hexRGB(0x1E7B34)},
+	Error:        {hexRGB(0xFF6B6B), hexRGB(0xC62828)},
+	Warn:         {hexRGB(0xFFD166), hexRGB(0x9A6700)},
+	Link:         {hexRGB(0x6CB6FF), hexRGB(0x0B63CE)},
+}
+
+// Forest: green accents, same floors.
+var forestRoles = map[Role]roleRGB{
+	Heading:      {hexRGB(0x7AFFAB), hexRGB(0x007A2D)},
+	Accent:       {hexRGB(0x1FFF71), hexRGB(0x008430)},
+	AccentDim:    {hexRGB(0x2EC766), hexRGB(0x128C3F)},
+	Meta:         {hexRGB(0x66E695), hexRGB(0x1A8241)},
+	Muted:        {hexRGB(0x5CB07B), hexRGB(0x477D5B)},
+	Subtle:       {hexRGB(0x4A8C62), hexRGB(0x689A7B)},
+	BannerTop:    {hexRGB(0x7AFFAB), hexRGB(0x008430)},
+	BannerBottom: {hexRGB(0x1FFF71), hexRGB(0x007A2D)},
+	Success:      {hexRGB(0x7BD88F), hexRGB(0x1E7B34)},
+	Error:        {hexRGB(0xFF6B6B), hexRGB(0xC62828)},
+	Warn:         {hexRGB(0xFFD166), hexRGB(0x9A6700)},
+	Link:         {hexRGB(0x6CB6FF), hexRGB(0x0B63CE)},
+}
+
+// Rose: pink/red. Dark Accent/Muted are lifted so they clear 4.5:1 on #232627.
+var roseRoles = map[Role]roleRGB{
+	Heading:      {hexRGB(0xFF7A95), hexRGB(0x7A0018)},
+	Accent:       {hexRGB(0xFF4167), hexRGB(0xB30024)},
+	AccentDim:    {hexRGB(0xD85771), hexRGB(0x9A142F)},
+	Meta:         {hexRGB(0xE66680), hexRGB(0x8A1C32)},
+	Muted:        {hexRGB(0xBE7886), hexRGB(0x824A55)},
+	Subtle:       {hexRGB(0xA55767), hexRGB(0xA2747D)},
+	BannerTop:    {hexRGB(0xFF7A95), hexRGB(0xB30024)},
+	BannerBottom: {hexRGB(0xFF4167), hexRGB(0x7A0018)},
+	Success:      {hexRGB(0x7BD88F), hexRGB(0x1E7B34)},
+	Error:        {hexRGB(0xFF6B6B), hexRGB(0xC62828)},
+	Warn:         {hexRGB(0xFFD166), hexRGB(0x9A6700)},
+	Link:         {hexRGB(0x6CB6FF), hexRGB(0x0B63CE)},
+}
+
+// Mono: grayscale Meta/Muted/Subtle plus a steel-blue accent hue.
+var monoRoles = map[Role]roleRGB{
+	Heading:      {hexRGB(0x98B6E1), hexRGB(0x1B375F)},
+	Accent:       {hexRGB(0x5E8ED0), hexRGB(0x28518B)},
+	AccentDim:    {hexRGB(0x6485B3), hexRGB(0x32517C)},
+	Meta:         {hexRGB(0xA6A6A6), hexRGB(0x535353)},
+	Muted:        {hexRGB(0x8C8C8C), hexRGB(0x666666)},
+	Subtle:       {hexRGB(0x6F6F6F), hexRGB(0x8B8B8B)},
+	BannerTop:    {hexRGB(0x98B6E1), hexRGB(0x28518B)},
+	BannerBottom: {hexRGB(0x5E8ED0), hexRGB(0x1B375F)},
+	Success:      {hexRGB(0x7BD88F), hexRGB(0x1E7B34)},
+	Error:        {hexRGB(0xFF6B6B), hexRGB(0xC62828)},
+	Warn:         {hexRGB(0xFFD166), hexRGB(0x9A6700)},
+	Link:         {hexRGB(0x6CB6FF), hexRGB(0x0B63CE)},
+}
+
 func Apply(c Config) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -131,11 +196,43 @@ func stdoutTTY() bool {
 	return fi.Mode()&os.ModeCharDevice != 0
 }
 
-func normalizePalette(s string) string {
-	if strings.EqualFold(strings.TrimSpace(s), "violet") {
-		return "violet"
+// PaletteNames is the set of ui.palette values, amber first (default).
+var PaletteNames = []string{"amber", "violet", "ocean", "forest", "rose", "mono"}
+
+func KnownPalette(s string) (string, bool) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	for _, n := range PaletteNames {
+		if n == s {
+			return n, true
+		}
+	}
+	return "", false
+}
+
+func NormalizePalette(s string) string {
+	if n, ok := KnownPalette(s); ok {
+		return n
 	}
 	return "amber"
+}
+
+func normalizePalette(s string) string { return NormalizePalette(s) }
+
+func paletteRoles(name string) map[Role]roleRGB {
+	switch NormalizePalette(name) {
+	case "violet":
+		return violetRoles
+	case "ocean":
+		return oceanRoles
+	case "forest":
+		return forestRoles
+	case "rose":
+		return roseRoles
+	case "mono":
+		return monoRoles
+	default:
+		return amberRoles
+	}
 }
 
 func snap() snapshot {
@@ -210,10 +307,7 @@ func roleColor(palette string, appear Appearance, role Role) RGB {
 	if appear == Auto || appear == "" {
 		appear = Dark
 	}
-	set := amberRoles
-	if palette == "violet" {
-		set = violetRoles
-	}
+	set := paletteRoles(palette)
 	pair, ok := set[role]
 	if !ok {
 		return RGB{}
@@ -225,10 +319,7 @@ func roleColor(palette string, appear Appearance, role Role) RGB {
 }
 
 func AllRoleRGB(palette string, appear Appearance) map[Role]RGB {
-	set := amberRoles
-	if palette == "violet" {
-		set = violetRoles
-	}
+	set := paletteRoles(palette)
 	out := make(map[Role]RGB, len(set))
 	for r := range set {
 		out[r] = roleColor(palette, appear, r)
