@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/siraj/konsolai/internal/agent"
+	"github.com/siraj/konsolai/internal/config"
 	"github.com/siraj/konsolai/internal/llm"
 	"github.com/siraj/konsolai/internal/store"
 	"github.com/siraj/konsolai/internal/tools"
@@ -34,6 +35,7 @@ type Guard struct {
 	store    Backend
 	disabled bool
 	onFail   func(error)
+	isolated time.Duration
 }
 
 func isNilBackend(s Backend) bool {
@@ -79,8 +81,32 @@ func (g *Guard) live() Backend {
 	return g.store
 }
 
+// SetIsolatedTimeout sets the detached memory deadline. Zero keeps the built-in limit.
+func (g *Guard) SetIsolatedTimeout(d time.Duration) {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	g.isolated = d
+	g.mu.Unlock()
+}
+
+// Isolated detaches ctx and bounds the call by the guard's timeout.
+func (g *Guard) Isolated(ctx context.Context) (context.Context, context.CancelFunc) {
+	d := time.Duration(0)
+	if g != nil {
+		g.mu.Lock()
+		d = g.isolated
+		g.mu.Unlock()
+	}
+	if d <= 0 {
+		d = config.Builtin().IsolatedTimeout()
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), d)
+}
+
 func Isolated(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	return (&Guard{}).Isolated(ctx)
 }
 
 func CausedByCancel(err error) bool {
