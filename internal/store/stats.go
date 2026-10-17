@@ -22,7 +22,7 @@ func (s *Store) RecordTurnStat(ctx context.Context, st TurnStat) error {
 	if s == nil || s.pool == nil {
 		return fmt.Errorf("store: record turn stat: no pool")
 	}
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	var sid *string
 	if st.SessionID != "" {
@@ -52,7 +52,7 @@ func (s *Store) ModelRate(ctx context.Context, model string, lastN int) (*float6
 	if lastN <= 0 {
 		lastN = 20
 	}
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	var tokens, ms int64
 	err := s.pool.QueryRow(ctx, `
