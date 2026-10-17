@@ -3,10 +3,12 @@ package repl
 import (
 	"bytes"
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/creack/pty"
 	"github.com/siraj/konsolai/internal/banner"
 	"github.com/siraj/konsolai/internal/welcome"
 )
@@ -38,6 +40,37 @@ func TestAwaitStartupAbandonsSlowGather(t *testing.T) {
 	}
 	if view.Placeholder != "" || len(view.Models) != 0 {
 		t.Fatalf("used a late payload %+v", view)
+	}
+}
+
+func TestTermBoxReadsWrappedTTY(t *testing.T) {
+	if _, err := os.Stat("/dev/ptmx"); err != nil {
+		t.Skip("no /dev/ptmx")
+	}
+	ptmx, tty, err := pty.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ptmx.Close()
+	defer tty.Close()
+	if err := pty.Setsize(ptmx, &pty.Winsize{Rows: 40, Cols: 200}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COLUMNS", "")
+	t.Setenv("LINES", "")
+	w, h := termBox(&nlWriter{w: tty})
+	if w != 200 || h != 40 {
+		t.Fatalf("wrapped tty %dx%d, want 200x40", w, h)
+	}
+	bare, bareH := termBox(tty)
+	if bare != 200 || bareH != 40 {
+		t.Fatalf("tty %dx%d, want 200x40", bare, bareH)
+	}
+	t.Setenv("COLUMNS", "180")
+	t.Setenv("LINES", "36")
+	bw, bh := termBox(&bytes.Buffer{})
+	if bw != 180 || bh != 36 {
+		t.Fatalf("buffer %dx%d, want 180x36", bw, bh)
 	}
 }
 
