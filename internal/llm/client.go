@@ -94,6 +94,7 @@ type Client struct {
 	windowReady     bool
 	tokensPerChar   float64
 	sendThinkKwargs bool
+	onCall          func(CallInfo)
 }
 
 func New(baseURL, model string) *Client {
@@ -171,6 +172,51 @@ func ToolsSchemaChars(tools []ToolSpec) int {
 func (c *Client) EstimatePromptTokens(msgs []Message, tools []ToolSpec) int {
 	ratio := c.TokensPerChar()
 	return int(float64(MessageChars(msgs))*ratio + float64(ToolsSchemaChars(tools))*ratio)
+}
+
+// CallInfo is one chat completion attempt. ModelMS is the wall time of that attempt.
+type CallInfo struct {
+	Model            string
+	Endpoint         string
+	PromptTokens     int
+	CompletionTokens int
+	ModelMS          int
+}
+
+// SetCallObserver installs a best-effort hook invoked after each completion
+// attempt. A nil hook disables it. The hook must not affect the call result.
+func (c *Client) SetCallObserver(fn func(CallInfo)) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.onCall = fn
+	c.mu.Unlock()
+}
+
+func (c *Client) observeCall(usage Usage, d time.Duration) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	fn := c.onCall
+	model := c.model
+	c.mu.Unlock()
+	if fn == nil {
+		return
+	}
+	ms := int(d / time.Millisecond)
+	if ms < 0 {
+		ms = 0
+	}
+	defer func() { _ = recover() }()
+	fn(CallInfo{
+		Model:            model,
+		Endpoint:         c.baseURL,
+		PromptTokens:     usage.PromptTokens,
+		CompletionTokens: usage.CompletionTokens,
+		ModelMS:          ms,
+	})
 }
 
 func (c *Client) observePrompt(msgs []Message, usage Usage) {
@@ -449,7 +495,9 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, opts ChatOptions, o
 
 func (c *Client) complete(ctx context.Context, msgs []Message, tools []ToolSpec, opts ChatOptions, onDelta func(string) error) (Message, Usage, error) {
 	msgs = Normalize(msgs)
+	t0 := time.Now()
 	msg, usage, err, gotBytes := c.completeAttempt(ctx, msgs, tools, opts, onDelta)
+	c.observeCall(usage, time.Since(t0))
 	if err == nil || !shouldRetry(err, gotBytes) {
 		c.observePrompt(msgs, usage)
 		return msg, usage, err
@@ -465,7 +513,9 @@ func (c *Client) complete(ctx context.Context, msgs []Message, tools []ToolSpec,
 		return Message{}, Usage{}, ctx.Err()
 	case <-t.C:
 	}
+	t1 := time.Now()
 	msg, usage, err, _ = c.completeAttempt(ctx, msgs, tools, opts, onDelta)
+	c.observeCall(usage, time.Since(t1))
 	c.observePrompt(msgs, usage)
 	return msg, usage, err
 }
