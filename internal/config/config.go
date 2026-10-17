@@ -49,6 +49,9 @@ type Config struct {
 	Language Language `yaml:"language"`
 	Safety   Safety   `yaml:"safety"`
 	Router   Router   `yaml:"router"`
+	Tools    Tools    `yaml:"tools"`
+	Store    Store    `yaml:"store"`
+	Stats    Stats    `yaml:"stats"`
 
 	DatabaseURL           string   `yaml:"-" json:"-"`
 	Endpoint              string   `yaml:"-" json:"-"`
@@ -95,6 +98,7 @@ type Memory struct {
 	SessionIdleMinutes int     `yaml:"session_idle_minutes"`
 	RetentionDays      int     `yaml:"retention_days"`
 	CompactThreshold   float64 `yaml:"compact_threshold"`
+	IsolatedTimeoutMS  int     `yaml:"isolated_timeout_ms"`
 }
 
 type Context struct {
@@ -180,6 +184,7 @@ type UI struct {
 	StartupCapMS        int      `yaml:"startup_cap_ms"`
 	WelcomeCacheSeconds int      `yaml:"welcome_cache_seconds"`
 	ModelRateCalls      int      `yaml:"model_rate_calls"`
+	ModelSlowMS         int      `yaml:"model_slow_ms"`
 	CtxWarnPct          int      `yaml:"ctx_warn_pct"`
 	CtxHotPct           int      `yaml:"ctx_hot_pct"`
 	CtxCells            int      `yaml:"ctx_cells"`
@@ -211,6 +216,25 @@ type Router struct {
 	Targets     []string `yaml:"targets"`
 }
 
+type Tools struct {
+	Shell ToolShell `yaml:"shell"`
+}
+
+type ToolShell struct {
+	DefaultTimeoutSec int `yaml:"default_timeout_sec"`
+	MaxTimeoutSec     int `yaml:"max_timeout_sec"`
+	WaitDelayMS       int `yaml:"wait_delay_ms"`
+}
+
+type Store struct {
+	QueryTimeoutMS   int `yaml:"query_timeout_ms"`
+	MigrateTimeoutMS int `yaml:"migrate_timeout_ms"`
+}
+
+type Stats struct {
+	InsertTimeoutMS int `yaml:"insert_timeout_ms"`
+}
+
 func Builtin() Config {
 	on := true
 	c := Config{
@@ -229,6 +253,7 @@ func Builtin() Config {
 			SessionIdleMinutes: defaultIdleMinutes,
 			RetentionDays:      defaultRetention,
 			CompactThreshold:   0.7,
+			IsolatedTimeoutMS:  2000,
 		},
 		Context: Context{ElideTrigger: 0.60, ElideTarget: 0.40},
 		Agent: Agent{
@@ -261,7 +286,7 @@ func Builtin() Config {
 			Banner: true, Welcome: "split", Theme: "amber", Appearance: "auto", CursorColor: true,
 			CodeHighlight: true, ClearOnStart: true, StripEmoji: true,
 			ProbeDeadlineMS: 400, ProbeTimeoutMS: 300, GitQueryMS: 200, MemoryQueryMS: 200,
-			StartupCapMS: 500, WelcomeCacheSeconds: 60, ModelRateCalls: 20,
+			StartupCapMS: 500, WelcomeCacheSeconds: 60, ModelRateCalls: 20, ModelSlowMS: 1000,
 			CtxWarnPct: 60, CtxHotPct: 85, CtxCells: 8, CtxNarrowCols: 90,
 			Layout: UILayout{
 				TinyHeight: 22, RecentHeight: 30, TinyWidth: 64,
@@ -274,6 +299,9 @@ func Builtin() Config {
 			ActionVerbs: defaultActionVerbs(),
 			Targets:     defaultTargets(),
 		},
+		Tools:     Tools{Shell: ToolShell{DefaultTimeoutSec: 120, MaxTimeoutSec: 600, WaitDelayMS: 2000}},
+		Store:     Store{QueryTimeoutMS: 2000, MigrateTimeoutMS: 15000},
+		Stats:     Stats{InsertTimeoutMS: 2000},
 		MemoryRAG: &on,
 	}
 	c.syncFlat()
@@ -477,6 +505,46 @@ func (c Config) WelcomeCacheFor() time.Duration {
 // ModelRateWindow is how many recent calls feed tokens/s. Omitted config keeps 20.
 func (c Config) ModelRateWindow() int {
 	return nonzero(c.UI.ModelRateCalls, 20)
+}
+
+// ModelSlow is the welcome latency that counts as slow. Omitted config keeps 1s.
+func (c Config) ModelSlow() time.Duration {
+	return time.Duration(nonzero(c.UI.ModelSlowMS, 1000)) * time.Millisecond
+}
+
+// ShellDefaultTimeout is run_shell's timeout when the model omits one. Omitted config keeps 120s.
+func (c Config) ShellDefaultTimeout() time.Duration {
+	return time.Duration(nonzero(c.Tools.Shell.DefaultTimeoutSec, 120)) * time.Second
+}
+
+// ShellMaxTimeout is the longest run_shell timeout. Omitted config keeps 600s.
+func (c Config) ShellMaxTimeout() time.Duration {
+	return time.Duration(nonzero(c.Tools.Shell.MaxTimeoutSec, 600)) * time.Second
+}
+
+// ShellWaitDelay is how long a cancelled shell may take to exit. Omitted config keeps 2s.
+func (c Config) ShellWaitDelay() time.Duration {
+	return time.Duration(nonzero(c.Tools.Shell.WaitDelayMS, 2000)) * time.Millisecond
+}
+
+// StoreQueryTimeout bounds a database call. Omitted config keeps 2s.
+func (c Config) StoreQueryTimeout() time.Duration {
+	return time.Duration(nonzero(c.Store.QueryTimeoutMS, 2000)) * time.Millisecond
+}
+
+// StoreMigrateTimeout bounds schema migration. Omitted config keeps 15s.
+func (c Config) StoreMigrateTimeout() time.Duration {
+	return time.Duration(nonzero(c.Store.MigrateTimeoutMS, 15000)) * time.Millisecond
+}
+
+// IsolatedTimeout bounds a memory call detached from the turn. Omitted config keeps 2s.
+func (c Config) IsolatedTimeout() time.Duration {
+	return time.Duration(nonzero(c.Memory.IsolatedTimeoutMS, 2000)) * time.Millisecond
+}
+
+// StatsInsertTimeout bounds a turn-stat insert. Omitted config keeps 2s.
+func (c Config) StatsInsertTimeout() time.Duration {
+	return time.Duration(nonzero(c.Stats.InsertTimeoutMS, 2000)) * time.Millisecond
 }
 
 func (c Config) CtxWarnPct() int { return nonzero(c.UI.CtxWarnPct, 60) }
