@@ -30,7 +30,7 @@ docker run -d --rm --name "$name" --network host \
 	-e POSTGRES_PASSWORD=ktest \
 	-e POSTGRES_DB=konsolai_test \
 	-e PGPORT=55433 \
-	pgvector/pgvector:pg17 >/dev/null
+	pgvector/pgvector:pg17-trixie >/dev/null
 
 for _ in $(seq 1 40); do
 	if docker exec "$name" pg_isready -h 127.0.0.1 -p 55433 -U postgres >/dev/null 2>&1; then
