@@ -33,12 +33,27 @@ func ApplyTheme(scheme string, plain bool) {
 }
 
 func ApplyUI(palette, appearance string, plain, codeHighlight bool) {
+	ApplyUIOpts(palette, appearance, plain, codeHighlight, true)
+}
+
+func ApplyUIOpts(palette, appearance string, plain, codeHighlight, stripEmoji bool) {
 	app := theme.Appearance(strings.ToLower(strings.TrimSpace(appearance)))
 	if app != theme.Light && app != theme.Dark {
 		app = theme.Auto
 	}
 	theme.Apply(theme.Config{Palette: palette, Appearance: app, Plain: plain, CodeHighlight: codeHighlight})
+	SetStripEmoji(stripEmoji)
 }
+
+var stripEmoji = true
+
+func SetStripEmoji(on bool) (restore func()) {
+	prev := stripEmoji
+	stripEmoji = on
+	return func() { stripEmoji = prev }
+}
+
+func StripEmojiOn() bool { return stripEmoji }
 
 func Current() Palette {
 	return Palette{
