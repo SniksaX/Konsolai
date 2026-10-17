@@ -2,17 +2,46 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/siraj/konsolai/internal/banner"
 	"github.com/siraj/konsolai/internal/config"
 	"github.com/siraj/konsolai/internal/ui"
 	"github.com/siraj/konsolai/internal/ui/theme"
+	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
+
+var welcomeRedraw sync.Map
+
+// SetWelcomeRedraw installs the REPL hook that paints the cached welcome
+// after /theme Enter. A nil fn clears it.
+func SetWelcomeRedraw(env *Env, fn func()) {
+	if env == nil {
+		return
+	}
+	if fn == nil {
+		welcomeRedraw.Delete(env)
+		return
+	}
+	welcomeRedraw.Store(env, fn)
+}
+
+func takeWelcomeRedraw(env *Env) func() {
+	if env == nil {
+		return nil
+	}
+	v, ok := welcomeRedraw.Load(env)
+	if !ok {
+		return nil
+	}
+	fn, _ := v.(func())
+	return fn
+}
 
 func runTheme(ctx context.Context, env *Env, args []string) int {
 	if len(args) == 0 {
@@ -26,10 +55,10 @@ func runTheme(ctx context.Context, env *Env, args []string) int {
 		fmt.Fprintln(env.errw(), "usage: /theme [name]")
 		return 2
 	}
-	return applyTheme(env, args[0], true)
+	return applyTheme(env, args[0], true, true)
 }
 
-func applyTheme(env *Env, raw string, save bool) int {
+func applyTheme(env *Env, raw string, save, announce bool) int {
 	name, ok := theme.KnownPalette(raw)
 	if !ok {
 		fmt.Fprintf(env.errw(), "unknown theme %q; use /theme\n", raw)
@@ -50,7 +79,9 @@ func applyTheme(env *Env, raw string, save bool) int {
 	if env != nil {
 		env.Profile.UI.Theme = name
 	}
-	fmt.Fprintln(env.out(), "theme "+name)
+	if announce {
+		fmt.Fprintln(env.out(), "theme "+name)
+	}
 	return 0
 }
 
@@ -90,12 +121,20 @@ func runThemePicker(env *Env) int {
 	if sel < 0 {
 		sel = 0
 	}
-	preview := func(i int) {
-		setLiveTheme(env, names[i])
-		redrawPreview(env)
-		printThemeRows(env, names[i], i)
+	rows := 1 + len(names)
+	painted := false
+	paint := func() {
+		w := env.out()
+		if painted {
+			fmt.Fprint(w, theme.CursorUp(rows))
+		}
+		painted = true
+		fmt.Fprint(w, theme.ClearLine)
+		fmt.Fprintln(w, themeSample())
+		printThemeRows(env, names[sel], sel)
 	}
-	preview(sel)
+	setLiveTheme(env, names[sel])
+	paint()
 	for {
 		k, err := readPickerKey()
 		if err != nil {
@@ -107,35 +146,42 @@ func runThemePicker(env *Env) int {
 		case "up":
 			if sel > 0 {
 				sel--
-				preview(sel)
+				setLiveTheme(env, names[sel])
+				paint()
 			}
 		case "down":
 			if sel < len(names)-1 {
 				sel++
-				preview(sel)
+				setLiveTheme(env, names[sel])
+				paint()
 			}
 		case "enter":
-			return applyTheme(env, names[sel], true)
+			code := applyTheme(env, names[sel], true, false)
+			if code != 0 {
+				return code
+			}
+			fmt.Fprint(env.out(), "\x1b[H\x1b[2J\x1b[3J")
+			if fn := takeWelcomeRedraw(env); fn != nil {
+				fn()
+			}
+			fmt.Fprintln(env.out(), "theme "+names[sel])
+			return 0
 		case "esc":
 			setLiveTheme(env, prev)
-			redrawPreview(env)
+			if painted {
+				fmt.Fprint(env.out(), theme.CursorUp(rows))
+				fmt.Fprint(env.out(), theme.ClearBelow)
+			}
 			return 0
 		}
 	}
 }
 
-func redrawPreview(env *Env) {
-	w := env.out()
-	if f, ok := w.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
-		fmt.Fprint(w, theme.ClearHome)
-	}
-	info := banner.Info{
-		Version: env.Version,
-		Model:   env.Profile.Model,
-		Dir:     env.Cwd,
-		Host:    banner.HostOf(env.Profile.Endpoint),
-	}
-	_ = banner.Render(w, info, ui.Current(), theme.TermWidth(), env.Profile.ShowBanner())
+func themeSample() string {
+	p := ui.Current()
+	return "  " + p.Accent("◆") + " " + p.Heading("build") + "  " +
+		p.Accent("▸") + " " + theme.Style(theme.Primary, "read") + " " + p.Meta("go.mod") + "  " +
+		p.Success("✓") + " " + p.Muted("479 B · 0.0s")
 }
 
 func printThemeRows(env *Env, current string, selected int) {
@@ -152,6 +198,9 @@ func printThemeRows(env *Env, current string, selected int) {
 		bar := gradientBar()
 		dot := theme.Style(theme.Accent, "●")
 		restore()
+		if selected >= 0 {
+			fmt.Fprint(w, theme.ClearLine)
+		}
 		fmt.Fprintln(w, mark+namePaint+"  "+bar+"  "+dot)
 	}
 }
@@ -170,6 +219,24 @@ func padName(name string) string {
 		return name
 	}
 	return name + strings.Repeat(" ", 8-len(name))
+}
+
+func inputReady(wait time.Duration) bool {
+	ms := int(wait.Milliseconds())
+	if ms < 1 {
+		ms = 1
+	}
+	pfd := []unix.PollFd{{
+		Fd:     int32(os.Stdin.Fd()),
+		Events: unix.POLLIN,
+	}}
+	for {
+		n, err := unix.Poll(pfd, ms)
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
+		return err == nil && n > 0 && pfd[0].Revents&unix.POLLIN != 0
+	}
 }
 
 func indexOf(names []string, want string) int {
@@ -199,8 +266,11 @@ func readPickerKey() (string, error) {
 }
 
 func readArrowOrEsc() (string, error) {
-	_ = os.Stdin.SetReadDeadline(time.Now().Add(40 * time.Millisecond))
-	defer func() { _ = os.Stdin.SetReadDeadline(time.Time{}) }()
+	// PTYs reject SetReadDeadline, so a lone Esc is separated from an arrow
+	// by polling the kernel buffer.
+	if !inputReady(40 * time.Millisecond) {
+		return "esc", nil
+	}
 	b, err := ui.ReadKey()
 	if err != nil {
 		return "esc", nil
@@ -208,7 +278,9 @@ func readArrowOrEsc() (string, error) {
 	if b != '[' && b != 'O' {
 		return "esc", nil
 	}
-	_ = os.Stdin.SetReadDeadline(time.Now().Add(40 * time.Millisecond))
+	if !inputReady(40 * time.Millisecond) {
+		return "esc", nil
+	}
 	c, err := ui.ReadKey()
 	if err != nil {
 		return "esc", nil
