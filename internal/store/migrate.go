@@ -9,10 +9,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/siraj/konsolai/internal/config"
 )
 
 //go:embed migrations/*.sql
@@ -20,12 +21,15 @@ var migrationFS embed.FS
 
 const (
 	minServerVersion = 130000
-	migrateTimeout   = 15 * time.Second
 	EmbeddingDim     = 1024
 )
 
 func (s *Store) migrate(ctx context.Context) error {
-	qctx, cancel := context.WithTimeout(ctx, migrateTimeout)
+	d := s.migrateTimeout
+	if d <= 0 {
+		d = config.Builtin().StoreMigrateTimeout()
+	}
+	qctx, cancel := context.WithTimeout(ctx, d)
 	defer cancel()
 
 	var ver int
