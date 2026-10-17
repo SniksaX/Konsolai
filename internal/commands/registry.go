@@ -56,6 +56,7 @@ type Env struct {
 	OnCmdClear   func()
 	Embed        *embed.Client
 	ProjectID    *int64
+	ConfigPath   string
 }
 
 func (e *Env) out() io.Writer {
@@ -234,6 +235,7 @@ func Default() *Registry {
 		Command{Name: "run", Usage: "run [k]", Summary: "Run a bash/sh block from the last answer", Run: runRun},
 		Command{Name: "output", Usage: "output [n]", Summary: "Reprint the full output of a recent command", Run: runOutput},
 		Command{Name: "status", Usage: "status", Summary: "Show version, model, database and environment", Run: runStatus},
+		Command{Name: "config", Usage: "config path|show|init|validate", Summary: "Show or write the YAML config", Run: runConfig},
 		Command{Name: "index", Usage: "index [path]|status|clear", Summary: "Index the project for recall", Run: runIndex},
 		Command{Name: "recall", Usage: "recall \"<query>\" [--scope X]", Summary: "Search indexed memory without calling the model", Run: runRecall},
 		Command{Name: "remember", Usage: "remember [--project] \"<fact>\"", Summary: "Store a fact", Run: runRemember},
