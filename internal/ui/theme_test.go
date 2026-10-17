@@ -36,17 +36,19 @@ func TestRejectCallUsesWarn(t *testing.T) {
 }
 
 func TestPalettesResolveEveryRole(t *testing.T) {
-	roles := []theme.Role{theme.Accent, theme.Heading, theme.AccentDim, theme.Meta, theme.Muted, theme.BannerTop, theme.BannerBottom, theme.Success, theme.Error, theme.Warn, theme.Link}
-	for _, name := range []string{"amber", "violet"} {
-		restore := theme.Force(true, true, name, theme.Dark)
-		for _, role := range roles {
-			got := theme.Style(role, "x")
-			if got == "x" || !strings.Contains(got, "\x1b[") {
-				t.Fatalf("%s %s not painted: %q", name, role, got)
+	roles := []theme.Role{theme.Accent, theme.Heading, theme.AccentDim, theme.Meta, theme.Muted, theme.Subtle, theme.BannerTop, theme.BannerBottom, theme.Success, theme.Error, theme.Warn, theme.Link}
+	for _, name := range theme.PaletteNames {
+		for _, app := range []theme.Appearance{theme.Dark, theme.Light} {
+			restore := theme.Force(true, true, name, app)
+			for _, role := range roles {
+				got := theme.Style(role, "x")
+				if got == "x" || !strings.Contains(got, "\x1b[") {
+					t.Fatalf("%s %s %s not painted: %q", name, app, role, got)
+				}
 			}
+			restore()
 		}
-		restore()
-		restore = theme.Force(false, false, name, theme.Dark)
+		restore := theme.Force(false, false, name, theme.Dark)
 		if theme.Style(theme.Accent, "x") != "x" {
 			t.Fatalf("%s color-off leaked SGR", name)
 		}
