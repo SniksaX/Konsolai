@@ -409,6 +409,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		cfg.TokenCap = r.Profile.TokenCap(string(dec.Intent))
 		cfg.ElideTrigger = r.Profile.ElideTrigger()
 		cfg.ElideTarget = r.Profile.ElideTarget()
+		cfg.IdenticalRejects = r.Profile.IdenticalRejectLimit()
 
 		if dec.Intent == intent.Lookup && !r.escalated {
 			r.emitBadge(req, "lookup", false)
