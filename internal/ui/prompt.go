@@ -1,12 +1,12 @@
 package ui
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type Decision int
@@ -19,26 +19,14 @@ const (
 )
 
 type Prompter struct {
-	tty         *os.File
-	in          *bufio.Reader
+	read        KeyReader
 	out         io.Writer
 	autoApprove bool
 	approveAll  bool
 }
 
 func OpenPrompter(autoApprove bool) (*Prompter, error) {
-	p := &Prompter{autoApprove: autoApprove}
-	f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
-	if err != nil {
-		if autoApprove {
-			return p, nil
-		}
-		return nil, fmt.Errorf("ui: open tty: %w", err)
-	}
-	p.tty = f
-	p.in = bufio.NewReader(f)
-	p.out = f
-	return p, nil
+	return &Prompter{autoApprove: autoApprove, out: os.Stdout}, nil
 }
 
 func (p *Prompter) ConfirmForced(summary, preview string) (Decision, string, error) {
@@ -50,29 +38,32 @@ func (p *Prompter) Confirm(summary, preview string) (Decision, string, error) {
 }
 
 func (p *Prompter) writer() io.Writer {
-	if p.out != nil {
+	if p != nil && p.out != nil {
 		return p.out
 	}
-	return p.tty
+	return os.Stdout
 }
 
-func (p *Prompter) drain() {
-	if p.tty == nil {
-		return
+func (p *Prompter) readKey() (byte, error) {
+	if p != nil && p.read != nil {
+		return p.read()
 	}
-	_ = p.tty.SetReadDeadline(time.Now())
-	var buf [256]byte
+	if fn := currentKeyReader(); fn != nil {
+		return fn()
+	}
+	return readStdinKey()
+}
+
+func (p *Prompter) nextKey() (byte, error) {
 	for {
-		_, err := p.tty.Read(buf[:])
+		b, err := p.readKey()
 		if err != nil {
-			break
+			return 0, err
 		}
-	}
-	_ = p.tty.SetReadDeadline(time.Time{})
-	if p.in == nil {
-		p.in = bufio.NewReader(p.tty)
-	} else {
-		p.in.Reset(p.tty)
+		if b == 0 || b == '\r' || b == '\n' {
+			continue
+		}
+		return b, nil
 	}
 }
 
@@ -80,11 +71,7 @@ func (p *Prompter) confirm(summary, preview string, force bool) (Decision, strin
 	if p.autoApprove || (!force && p.approveAll) {
 		return Approve, "", nil
 	}
-	if p.in == nil && p.tty != nil {
-		p.in = bufio.NewReader(p.tty)
-	}
 	w := p.writer()
-	p.drain()
 	BeforeOutput()
 	for {
 		fmt.Fprintln(w)
@@ -102,29 +89,24 @@ func (p *Prompter) confirm(summary, preview string, force bool) (Decision, strin
 			fmt.Fprint(w, Indent(body, 4))
 		}
 		fmt.Fprintln(w, PromptOptions())
-		line, err := p.in.ReadString('\n')
+		b, err := p.nextKey()
 		if err != nil {
 			return 0, "", fmt.Errorf("ui: read prompt: %w", err)
 		}
-		switch strings.ToLower(strings.TrimSpace(line)) {
-		case "y", "yes":
+		switch unicode.ToLower(rune(b)) {
+		case 'y':
 			fmt.Fprintln(w)
 			return Approve, "", nil
-		case "a", "all":
+		case 'a':
 			p.approveAll = true
 			fmt.Fprintln(w)
 			return ApproveAll, "", nil
-		case "q", "quit":
+		case 'q', 0x03, 0x1b:
 			fmt.Fprintln(w)
 			return Quit, "", nil
-		case "n", "no":
-			fmt.Fprint(w, "reason (optional): ")
-			reason, err := p.in.ReadString('\n')
-			if err != nil {
-				return 0, "", fmt.Errorf("ui: read reason: %w", err)
-			}
+		case 'n':
 			fmt.Fprintln(w)
-			return Reject, strings.TrimSpace(reason), nil
+			return Reject, "", nil
 		default:
 			fmt.Fprintln(w, Current().Warn("answer y, n, a or q"))
 		}
@@ -132,15 +114,13 @@ func (p *Prompter) confirm(summary, preview string, force bool) (Decision, strin
 }
 
 func (p *Prompter) Cancel() {
-	if p == nil || p.tty == nil {
-		return
-	}
-	_ = p.tty.SetReadDeadline(time.Now())
+	_ = os.Stdin.SetReadDeadline(time.Now())
 }
 
 func (p *Prompter) Close() error {
-	if p == nil || p.tty == nil {
+	if p == nil {
 		return nil
 	}
-	return p.tty.Close()
+	_ = os.Stdin.SetReadDeadline(time.Time{})
+	return nil
 }
