@@ -143,6 +143,46 @@ func (s *idxStore) LastIndexedAt(context.Context, int64) (time.Time, bool, error
 	return time.Time{}, false, nil
 }
 
+func (s *idxStore) OrphanMemoryFiles(context.Context, int64) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	chunked := map[string]bool{}
+	for _, r := range s.rows {
+		var m map[string]any
+		_ = json.Unmarshal(r.Ref, &m)
+		if p, _ := m["path"].(string); p != "" {
+			chunked[p] = true
+		}
+	}
+	var out []string
+	for p := range s.files {
+		if !chunked[p] {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+func (s *idxStore) PersistCodeFile(ctx context.Context, _ string, projectID int64, path, sha string, chunks []store.ChunkIn) (int, error) {
+	if err := s.DeleteCodeChunks(ctx, projectID, path); err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, in := range chunks {
+		ok, err := s.InsertChunk(ctx, in)
+		if err != nil {
+			return 0, err
+		}
+		if ok {
+			n++
+		}
+	}
+	if err := s.UpsertMemoryFile(ctx, projectID, path, sha); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 func TestIndexIncrementalSkipChangeDelete(t *testing.T) {
 	root := t.TempDir()
 	mustWrite := func(rel, body string) {
@@ -192,5 +232,60 @@ func TestIndexIncrementalSkipChangeDelete(t *testing.T) {
 	sum := sha256.Sum256([]byte("package p\n\nfunc Keep() { _ = 1 }\n"))
 	if st.files["keep.go"] != hex.EncodeToString(sum[:]) {
 		t.Fatalf("sha %s", st.files["keep.go"])
+	}
+}
+
+func TestOrphanMemoryFileTreatedAsChanged(t *testing.T) {
+	root := t.TempDir()
+	body := "package p\n\nfunc Keep() {}\n"
+	if err := os.WriteFile(filepath.Join(root, "keep.go"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(body))
+	st := &idxStore{memStore: memStore{avail: true}, files: map[string]string{"keep.go": hex.EncodeToString(sum[:])}}
+	stats, err := Index(context.Background(), st, &fakeEmbed{}, "home", 1, root, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Orphans != 1 {
+		t.Fatalf("orphans %+v", stats)
+	}
+	if stats.Indexed != 1 || stats.Unchanged != 0 {
+		t.Fatalf("should reindex orphan %+v", stats)
+	}
+	if len(st.inserted()) == 0 {
+		t.Fatal("no chunks after persist")
+	}
+}
+
+func TestIndexSlowConfirm(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.go"), []byte("package p\nfunc A() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "b.go"), []byte("package p\nfunc B() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	asked := false
+	st := &idxStore{memStore: memStore{avail: true}}
+	hooks := IndexHooks{
+		ConfirmAfter: time.Millisecond,
+		Confirm: func(n int, eta time.Duration) bool {
+			asked = true
+			if n < 1 || eta <= 0 {
+				t.Fatalf("n=%d eta=%s", n, eta)
+			}
+			return false
+		},
+	}
+	stats, err := IndexTune(context.Background(), st, &fakeEmbed{delay: 20 * time.Millisecond}, "home", 1, root, "", Tune{}, hooks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !asked {
+		t.Fatal("confirm not asked")
+	}
+	if stats.Indexed > 1 {
+		t.Fatalf("should stop after decline %+v", stats)
 	}
 }
