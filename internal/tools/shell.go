@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/siraj/konsolai/internal/config"
 	"github.com/siraj/konsolai/internal/llm"
 	"github.com/siraj/konsolai/internal/safety"
 	"github.com/siraj/konsolai/internal/ui"
@@ -21,11 +22,14 @@ import (
 var ErrLookupMutating = errors.New("lookup can only run read-only commands")
 
 type shellTool struct {
-	guard        *safety.Guard
-	out          io.Writer
-	readOnlyOnly bool
-	docsTask     bool
-	displayLines int
+	guard          *safety.Guard
+	out            io.Writer
+	readOnlyOnly   bool
+	docsTask       bool
+	displayLines   int
+	defaultTimeout time.Duration
+	maxTimeout     time.Duration
+	waitDelay      time.Duration
 }
 
 func newShell(g *safety.Guard, out io.Writer, readOnlyOnly, docsTask bool) *shellTool {
@@ -33,7 +37,29 @@ func newShell(g *safety.Guard, out io.Writer, readOnlyOnly, docsTask bool) *shel
 }
 
 func newShellLimit(g *safety.Guard, out io.Writer, readOnlyOnly, docsTask bool, displayLines int) *shellTool {
-	return &shellTool{guard: g, out: out, readOnlyOnly: readOnlyOnly, docsTask: docsTask, displayLines: displayLines}
+	b := config.Builtin()
+	return &shellTool{
+		guard: g, out: out, readOnlyOnly: readOnlyOnly, docsTask: docsTask, displayLines: displayLines,
+		defaultTimeout: b.ShellDefaultTimeout(),
+		maxTimeout:     b.ShellMaxTimeout(),
+		waitDelay:      b.ShellWaitDelay(),
+	}
+}
+
+func (t *shellTool) withLimits(def, max, wait time.Duration) *shellTool {
+	if t == nil {
+		return nil
+	}
+	if def > 0 {
+		t.defaultTimeout = def
+	}
+	if max > 0 {
+		t.maxTimeout = max
+	}
+	if wait > 0 {
+		t.waitDelay = wait
+	}
+	return t
 }
 
 func (t *shellTool) Spec() llm.ToolSpec {
@@ -45,7 +71,7 @@ func (t *shellTool) Spec() llm.ToolSpec {
 				"Each call is a new process; do not use cd; set the cwd argument instead (relative to the current directory). " +
 				"Never start servers or watchers. " +
 				"Avoid recursive listings (ls -R, find without -maxdepth, tree) over dependency dirs like node_modules, .git, dist, vendor.",
-			Parameters: json.RawMessage(`{"type":"object","properties":{"cmd":{"type":"string","description":"Bash command to execute."},"cwd":{"type":"string","description":"Working directory relative to the current directory. Defaults to the current directory."},"timeout_sec":{"type":"integer","description":"Timeout in seconds. Default 120, maximum 600."}},"required":["cmd"]}`),
+			Parameters: json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{"cmd":{"type":"string","description":"Bash command to execute."},"cwd":{"type":"string","description":"Working directory relative to the current directory. Defaults to the current directory."},"timeout_sec":{"type":"integer","description":"Timeout in seconds. Default %d, maximum %d."}},"required":["cmd"]}`, int(t.defaultTimeout/time.Second), int(t.maxTimeout/time.Second))),
 		},
 	}
 }
@@ -60,6 +86,7 @@ type shellAction struct {
 	cmd          string
 	cwd          string
 	timeout      time.Duration
+	waitDelay    time.Duration
 	out          io.Writer
 	kind         ActionKind
 	displayLines int
@@ -109,12 +136,13 @@ func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 	}
 	sec := args.TimeoutSec
 	if sec == 0 {
-		sec = 120
+		sec = int(t.defaultTimeout / time.Second)
 	}
-	if sec < 1 || sec > 600 {
-		return nil, fmt.Errorf("tools: run_shell: timeout_sec must be between 1 and 600")
+	maxSec := int(t.maxTimeout / time.Second)
+	if sec < 1 || sec > maxSec {
+		return nil, fmt.Errorf("tools: run_shell: timeout_sec must be between 1 and %d", maxSec)
 	}
-	return &shellAction{cmd: args.Cmd, cwd: resolved, timeout: time.Duration(sec) * time.Second, out: t.out, kind: kind, displayLines: t.displayLines}, nil
+	return &shellAction{cmd: args.Cmd, cwd: resolved, timeout: time.Duration(sec) * time.Second, waitDelay: t.waitDelay, out: t.out, kind: kind, displayLines: t.displayLines}, nil
 }
 
 func (a *shellAction) Summary() string { return "run: " + CommandHeadline(a.cmd) }
@@ -143,7 +171,7 @@ func (a *shellAction) Run(ctx context.Context) (Result, error) {
 		"GIT_PAGER=cat",
 	)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.WaitDelay = 2 * time.Second
+	cmd.WaitDelay = a.waitDelay
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
 			return nil
