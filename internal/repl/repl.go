@@ -429,10 +429,19 @@ func sessionFooter(st *session, cfg Config) string {
 	if model == "" && cfg.Env != nil {
 		model = cfg.Env.Profile.Model
 	}
-	return formatFooter(footerInfo{
+	info := footerInfo{
 		Cwd: cwd, Model: model, Routing: routing,
 		CtxPct: ctxPct, ShowCtx: showCtx, Down: down, Shell: shell,
-	})
+	}
+	if cfg.Env != nil {
+		p := cfg.Env.Profile
+		info.GitQuery = p.GitQueryTimeout()
+		info.CtxWarn = p.CtxWarnPct()
+		info.CtxHot = p.CtxHotPct()
+		info.CtxCells = p.CtxCells()
+		info.CtxNarrow = p.CtxNarrowCols()
+	}
+	return formatFooter(info)
 }
 
 func wireEnv(env *commands.Env, st *session, cfg Config) {
