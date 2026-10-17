@@ -112,3 +112,31 @@ func TestHandleRecordsHistory(t *testing.T) {
 		t.Fatalf("%q", s.Hist.Format())
 	}
 }
+
+func TestClearAndResetBuiltins(t *testing.T) {
+	var out bytes.Buffer
+	called := 0
+	s := New(t.TempDir())
+	s.Stdout = &out
+	s.OnClear = func() { called++ }
+	s.Run = func(context.Context, string, string, *os.File, io.Writer) (int, time.Duration, string, error) {
+		t.Fatal("clear must not run in the pty")
+		return 0, 0, "", nil
+	}
+	for _, cmd := range []string{"clear", "reset"} {
+		out.Reset()
+		toAI, err := s.Handle(context.Background(), cmd)
+		if err != nil || toAI {
+			t.Fatalf("%s toAI=%v err=%v", cmd, toAI, err)
+		}
+		if !strings.Contains(out.String(), "\x1b[3J") {
+			t.Fatalf("%s missing 3J %q", cmd, out.String())
+		}
+	}
+	if called != 2 {
+		t.Fatalf("OnClear %d", called)
+	}
+	if s.Hist.Len() != 0 {
+		t.Fatalf("builtins should not record history: %d", s.Hist.Len())
+	}
+}
