@@ -98,6 +98,46 @@ func TestGitBranchFromHEAD(t *testing.T) {
 	}
 }
 
+func TestGitBranchUpdatesBetweenRenders(t *testing.T) {
+	dir := t.TempDir()
+	if err := osMkdirGit(dir, "ref: refs/heads/prod\n"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COLUMNS", "80")
+	a := formatFooter(footerInfo{Cwd: dir, Model: "m", Routing: "main"})
+	if !strings.Contains(a, "prod") || strings.Contains(a, "other") {
+		t.Fatalf("first %q", a)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".git", "HEAD"), []byte("ref: refs/heads/other\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	b := formatFooter(footerInfo{Cwd: dir, Model: "m", Routing: "main"})
+	if !strings.Contains(b, "other") || strings.Contains(b, "prod") {
+		t.Fatalf("second %q", b)
+	}
+}
+
+func TestGitBranchWorktreeFile(t *testing.T) {
+	root := t.TempDir()
+	gitdir := filepath.Join(root, "real.git")
+	if err := os.MkdirAll(gitdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gitdir, "HEAD"), []byte("ref: refs/heads/work\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	wt := filepath.Join(root, "wt")
+	if err := os.MkdirAll(wt, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: "+gitdir+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if gitBranch(wt) != "work" {
+		t.Fatalf("%q", gitBranch(wt))
+	}
+}
+
 func osMkdirGit(dir, head string) error {
 	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0755); err != nil {
 		return err
