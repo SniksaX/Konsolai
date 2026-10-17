@@ -164,6 +164,7 @@ type UI struct {
 	OutputKeepKB   int    `yaml:"output_keep_kb"`
 	Palette        string `yaml:"palette,omitempty"`
 	Banner         bool   `yaml:"banner"`
+	Welcome        string `yaml:"welcome"`
 	Theme          string `yaml:"theme"`
 	Appearance     string `yaml:"appearance"`
 	CursorColor    bool   `yaml:"cursor_color"`
@@ -233,7 +234,7 @@ func Builtin() Config {
 		},
 		UI: UI{
 			DisplayLines: 60, PasteChipLines: 11, PasteChipChars: 1000, OutputKeepKB: 256,
-			Banner: true, Theme: "amber", Appearance: "auto", CursorColor: true,
+			Banner: true, Welcome: "split", Theme: "amber", Appearance: "auto", CursorColor: true,
 			CodeHighlight: true, ClearOnStart: true, StripEmoji: true,
 		},
 		Language: Language{Languages: []string{"en", "fr"}, Default: "en"},
@@ -405,6 +406,16 @@ func (c Config) PaletteName() string {
 
 func (c Config) ShowBanner() bool {
 	return c.UI.Banner
+}
+
+// WelcomeLayout is ui.welcome: split, frame, or minimal. Anything else is split.
+func (c Config) WelcomeLayout() string {
+	switch strings.ToLower(strings.TrimSpace(c.UI.Welcome)) {
+	case "frame", "minimal", "split":
+		return strings.ToLower(strings.TrimSpace(c.UI.Welcome))
+	default:
+		return "split"
+	}
 }
 
 func (c Config) Appearance() string {
