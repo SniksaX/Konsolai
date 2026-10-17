@@ -54,6 +54,7 @@ type Env struct {
 	OnExit       func() int
 	OnCmd        func() int
 	OnCmdClear   func()
+	OnClear      func()
 	Embed        *embed.Client
 	ProjectID    *int64
 	ConfigPath   string
