@@ -299,7 +299,10 @@ func TestSlashMenuRenderWindowAndDetail(t *testing.T) {
 	if !strings.Contains(plain, "› ") {
 		t.Fatalf("selected mark\n%s", plain)
 	}
-	m.Sync("/")
+	m.sel = -1
+	m.typed = "/"
+	m.refilter()
+	m.open = true
 	m.Down()
 	m.Down()
 	m.Question()
