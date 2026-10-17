@@ -7,9 +7,11 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/reeflective/readline v1.3.0
+	github.com/rivo/uniseg v0.4.7
 	github.com/yuin/goldmark v1.8.6
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/sys v0.45.0
+	golang.org/x/term v0.38.0
 )
 
 require (
@@ -17,8 +19,6 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	github.com/rivo/uniseg v0.4.7 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/term v0.38.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
 )
