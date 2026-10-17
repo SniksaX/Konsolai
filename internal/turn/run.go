@@ -148,7 +148,6 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 		}
 	}
 	ui.BeforeOutput()
-	fmt.Fprintln(r.out())
 	if req.Plain {
 		fmt.Fprintln(r.out(), "· "+string(dec.Intent))
 	} else {
@@ -544,7 +543,11 @@ func StreamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 	var collected strings.Builder
 	live := ui.StartLive("thinking")
 	first := true
-	rend := ui.NewRenderer(outw, plain)
+	body := outw
+	if !plain {
+		body = ui.NewIndentWriter(outw, 4)
+	}
+	rend := ui.NewRenderer(body, plain)
 	if _, err := client.ResolveModel(ctx); err != nil {
 		return "", llm.Usage{}, err
 	}
@@ -564,7 +567,6 @@ func StreamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 			live.Stop()
 			ui.BeforeOutput()
 			first = false
-			_, _ = io.WriteString(outw, "\n")
 		}
 		collected.WriteString(s)
 		_, werr := rend.Write([]byte(s))
