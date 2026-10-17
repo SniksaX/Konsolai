@@ -162,9 +162,11 @@ type UI struct {
 	PasteChipLines int    `yaml:"paste_chip_lines"`
 	PasteChipChars int    `yaml:"paste_chip_chars"`
 	OutputKeepKB   int    `yaml:"output_keep_kb"`
-	Palette        string `yaml:"palette"`
+	Palette        string `yaml:"palette,omitempty"`
 	Banner         bool   `yaml:"banner"`
 	Theme          string `yaml:"theme"`
+	Appearance     string `yaml:"appearance"`
+	CursorColor    bool   `yaml:"cursor_color"`
 	CodeHighlight  bool   `yaml:"code_highlight"`
 	ClearOnStart   bool   `yaml:"clear_on_start"`
 	StripEmoji     bool   `yaml:"strip_emoji"`
@@ -231,7 +233,7 @@ func Builtin() Config {
 		},
 		UI: UI{
 			DisplayLines: 60, PasteChipLines: 11, PasteChipChars: 1000, OutputKeepKB: 256,
-			Palette: "amber", Banner: true, Theme: "auto",
+			Banner: true, Theme: "amber", Appearance: "auto", CursorColor: true,
 			CodeHighlight: true, ClearOnStart: true, StripEmoji: true,
 		},
 		Language: Language{Languages: []string{"en", "fr"}, Default: "en"},
@@ -392,12 +394,13 @@ func (c Config) OutputKeepBytes() int {
 }
 
 func (c Config) PaletteName() string {
-	switch strings.ToLower(strings.TrimSpace(c.UI.Palette)) {
-	case "violet", "ocean", "forest", "rose", "mono":
-		return strings.ToLower(strings.TrimSpace(c.UI.Palette))
-	default:
-		return "amber"
+	if name, ok := ResolveTheme(c.UI.Theme); ok {
+		return name
 	}
+	if name, ok := ResolveTheme(c.UI.Palette); ok {
+		return name
+	}
+	return "amber"
 }
 
 func (c Config) ShowBanner() bool {
@@ -405,12 +408,16 @@ func (c Config) ShowBanner() bool {
 }
 
 func (c Config) Appearance() string {
-	switch strings.ToLower(strings.TrimSpace(c.UI.Theme)) {
+	switch strings.ToLower(strings.TrimSpace(c.UI.Appearance)) {
 	case "light", "dark":
-		return strings.ToLower(strings.TrimSpace(c.UI.Theme))
+		return strings.ToLower(strings.TrimSpace(c.UI.Appearance))
 	default:
 		return "auto"
 	}
+}
+
+func (c Config) CursorColorOn() bool {
+	return c.UI.CursorColor
 }
 
 func (c Config) CodeHighlightOn() bool {
