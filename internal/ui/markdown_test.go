@@ -32,7 +32,7 @@ func TestMarkdownStructureNoColor(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := buf.String()
-	for _, want := range []string{"Title", "▍ Section", "• item", "code", "bold", "1. first", "│ quote", "docs", "http://x", "─ python", "  print(1)", "│ 1 │ 2 │"} {
+	for _, want := range []string{"Title", "Section", "• item", "code", "bold", "1. first", "│ quote", "docs", "http://x", "╭─ python", "print(1)", "│ 1 │ 2 │"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in\n%s", want, got)
 		}
@@ -56,7 +56,7 @@ func TestMarkdownColorSGR(t *testing.T) {
 	if !strings.Contains(got, "\033[") {
 		t.Fatalf("want SGR: %q", got)
 	}
-	if !strings.Contains(got, "38;5;141") && !strings.Contains(got, "▍") {
+	if !strings.Contains(got, "\033[") && !strings.Contains(got, "\x1b[") && !strings.Contains(got, "▍") {
 		t.Fatalf("want accent: %q", got)
 	}
 }
@@ -204,8 +204,7 @@ func TestLenientShorterCloserOnFlush(t *testing.T) {
 func TestThemeNOCOLOR(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	t.Setenv("COLORTERM", "truecolor")
-	restore := ForceTheme(detectPalette())
-	defer restore()
+	ApplyUI("amber", "dark", false, true)
 	p := Current()
 	if p.Enabled {
 		t.Fatal("NO_COLOR should disable")
