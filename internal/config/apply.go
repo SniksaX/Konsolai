@@ -53,6 +53,9 @@ func applyOverlay(c *Config, o Overlay) {
 		if o.Memory.CompactThreshold != nil {
 			c.Memory.CompactThreshold = *o.Memory.CompactThreshold
 		}
+		if o.Memory.IsolatedTimeoutMS != nil {
+			c.Memory.IsolatedTimeoutMS = *o.Memory.IsolatedTimeoutMS
+		}
 	}
 	if o.Context != nil {
 		if o.Context.ElideTrigger != nil {
@@ -233,6 +236,9 @@ func applyOverlay(c *Config, o Overlay) {
 		if o.UI.ModelRateCalls != nil {
 			c.UI.ModelRateCalls = *o.UI.ModelRateCalls
 		}
+		if o.UI.ModelSlowMS != nil {
+			c.UI.ModelSlowMS = *o.UI.ModelSlowMS
+		}
 		if o.UI.CtxWarnPct != nil {
 			c.UI.CtxWarnPct = *o.UI.CtxWarnPct
 		}
@@ -287,5 +293,28 @@ func applyOverlay(c *Config, o Overlay) {
 		if o.Router.Targets != nil {
 			c.Router.Targets = append([]string(nil), (*o.Router.Targets)...)
 		}
+	}
+	if o.Tools != nil && o.Tools.Shell != nil {
+		sh := o.Tools.Shell
+		if sh.DefaultTimeoutSec != nil {
+			c.Tools.Shell.DefaultTimeoutSec = *sh.DefaultTimeoutSec
+		}
+		if sh.MaxTimeoutSec != nil {
+			c.Tools.Shell.MaxTimeoutSec = *sh.MaxTimeoutSec
+		}
+		if sh.WaitDelayMS != nil {
+			c.Tools.Shell.WaitDelayMS = *sh.WaitDelayMS
+		}
+	}
+	if o.Store != nil {
+		if o.Store.QueryTimeoutMS != nil {
+			c.Store.QueryTimeoutMS = *o.Store.QueryTimeoutMS
+		}
+		if o.Store.MigrateTimeoutMS != nil {
+			c.Store.MigrateTimeoutMS = *o.Store.MigrateTimeoutMS
+		}
+	}
+	if o.Stats != nil && o.Stats.InsertTimeoutMS != nil {
+		c.Stats.InsertTimeoutMS = *o.Stats.InsertTimeoutMS
 	}
 }
