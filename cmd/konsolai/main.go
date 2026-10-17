@@ -210,7 +210,7 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "konsolai:", err)
 		return 1
 	}
-	ui.ApplyTheme(prof.PaletteName(), inv.Plain)
+	ui.ApplyUI(prof.PaletteName(), prof.Appearance(), inv.Plain, prof.CodeHighlightOn())
 	inv.Endpoint = prof.Endpoint
 
 	needMem := inv.Cmd == cmdUndo || inv.Cmd == cmdFacts || inv.Cmd == cmdPrune || inv.Cmd == cmdRemember || inv.Cmd == cmdForget
