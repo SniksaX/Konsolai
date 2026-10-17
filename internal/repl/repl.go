@@ -132,7 +132,7 @@ func Run(ctx context.Context, cfg Config) int {
 		info.Model = ""
 	}
 	show := env != nil && env.Profile.ShowBanner()
-	if err := banner.Startup(out, info, show, banner.IsTTY(out), p, banner.Width(out)); err != nil {
+	if err := banner.Startup(out, info, show, banner.IsTTY(origOut), p, banner.Width(origOut)); err != nil {
 		fmt.Fprintln(errw, "konsolai:", err)
 		return 1
 	}
