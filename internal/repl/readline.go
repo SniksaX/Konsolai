@@ -180,7 +180,7 @@ func (r *rlReader) historyOrMenu(up bool, cmds map[string]func()) func() {
 func (r *rlReader) SetOnClear(fn func()) { r.onClear = fn }
 
 func (r *rlReader) clearScreen() {
-	fmt.Fprint(os.Stdout, theme.ClearHome)
+	fmt.Fprint(os.Stdout, theme.ClearScroll)
 	if r.onClear != nil {
 		r.onClear()
 	}
