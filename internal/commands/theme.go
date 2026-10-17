@@ -160,7 +160,7 @@ func runThemePicker(env *Env) int {
 			if code != 0 {
 				return code
 			}
-			fmt.Fprint(env.out(), "\x1b[H\x1b[2J\x1b[3J")
+			fmt.Fprint(env.out(), theme.ClearScroll)
 			if fn := takeWelcomeRedraw(env); fn != nil {
 				fn()
 			}
