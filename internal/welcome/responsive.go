@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/siraj/konsolai/internal/banner"
+	"github.com/siraj/konsolai/internal/config"
 	"github.com/siraj/konsolai/internal/ui"
 	"github.com/siraj/konsolai/internal/ui/theme"
 )
@@ -33,7 +34,7 @@ func Render(w io.Writer, d Data, layout string, width, height int) {
 	case "minimal":
 		renderMinimal(w, d, width)
 	case "frame":
-		if width < d.Limits.norm().FrameWidth {
+		if width < ResolveLimits(d.Limits).FrameWidth {
 			renderSplit(w, d, width, height)
 			return
 		}
@@ -96,7 +97,7 @@ func wordmark(width int) []string {
 
 func wordmarkMin(width, minW int) []string {
 	if minW < 1 {
-		minW = 64
+		minW = config.Builtin().LayoutTinyWidth()
 	}
 	if width < minW {
 		return nil
