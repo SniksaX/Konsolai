@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/siraj/konsolai/internal/config"
 	"github.com/siraj/konsolai/internal/ui"
 	"github.com/siraj/konsolai/internal/ui/theme"
 )
@@ -149,7 +150,7 @@ func gitDirtyFor(cwd string, timeout time.Duration) bool {
 		return false
 	}
 	if timeout <= 0 {
-		timeout = 200 * time.Millisecond
+		timeout = config.Builtin().GitQueryTimeout()
 	}
 	dirtyMu.Lock()
 	defer dirtyMu.Unlock()
