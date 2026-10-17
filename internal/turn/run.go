@@ -191,7 +191,7 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	r.lastAssistant = answer
 	if sessionID != "" && !req.KeepOpen {
 		if s := mem.Store(); s != nil {
-			endCtx, cancel := memory.Isolated(ctx)
+			endCtx, cancel := mem.Isolated(ctx)
 			defer cancel()
 			if err := s.EndSession(endCtx, sessionID, SessionStatus(code)); err != nil {
 				mem.Fail(err)
@@ -340,12 +340,15 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 	}
 	for attempt := 0; attempt < 2; attempt++ {
 		reg := tools.NewRegistry(sg, toolOut, lister, memory.NewWebCache(mem), memory.NewFactStore(mem, r.Profile.Name, projectID, sessionID), tools.Options{
-			ReadOnlyShell: dec.Intent == intent.Lookup,
-			DocsTask:      dec.Task == intent.TaskDocs,
-			Request:       req.Text,
-			OnWebFetch:    onWeb,
-			Recall:        onRecall,
-			DisplayLines:  r.Profile.DisplayLines(),
+			ReadOnlyShell:       dec.Intent == intent.Lookup,
+			DocsTask:            dec.Task == intent.TaskDocs,
+			Request:             req.Text,
+			OnWebFetch:          onWeb,
+			Recall:              onRecall,
+			DisplayLines:        r.Profile.DisplayLines(),
+			ShellDefaultTimeout: r.Profile.ShellDefaultTimeout(),
+			ShellMaxTimeout:     r.Profile.ShellMaxTimeout(),
+			ShellWaitDelay:      r.Profile.ShellWaitDelay(),
 		})
 		cfg := agent.Config{
 			Client:         client,
