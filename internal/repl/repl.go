@@ -178,7 +178,7 @@ func Run(ctx context.Context, cfg Config) int {
 		var err error
 		rd, err = NewReadline(completer, func() string {
 			return sessionFooter(st, cfg)
-		}, st.pastes)
+		}, st.pastes, reg)
 		if err != nil {
 			fmt.Fprintln(errw, "konsolai:", err)
 			return 1
