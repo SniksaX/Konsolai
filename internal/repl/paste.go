@@ -17,9 +17,18 @@ var chipRe = regexp.MustCompile(`\[pasted #(\d+) · \d+ lines\]`)
 type PasteStore struct {
 	items []string
 	last  int
+	lines int
+	chars int
 }
 
 func NewPasteStore() *PasteStore { return &PasteStore{} }
+
+func (p *PasteStore) SetChipLimits(lines, chars int) {
+	if p == nil {
+		return
+	}
+	p.lines, p.chars = lines, chars
+}
 
 func countLines(s string) int {
 	if s == "" {
@@ -36,7 +45,17 @@ func countLines(s string) int {
 }
 
 func ShouldChip(text string) bool {
-	return len(text) >= chipMinChars || countLines(text) >= chipMinLines
+	return ShouldChipN(text, chipMinLines, chipMinChars)
+}
+
+func ShouldChipN(text string, lines, chars int) bool {
+	if lines <= 0 {
+		lines = chipMinLines
+	}
+	if chars <= 0 {
+		chars = chipMinChars
+	}
+	return len(text) >= chars || countLines(text) >= lines
 }
 
 func chipToken(n, lines int) string {
@@ -44,7 +63,7 @@ func chipToken(n, lines int) string {
 }
 
 func (p *PasteStore) MaybeChip(text string) (string, bool) {
-	if p == nil || !ShouldChip(text) {
+	if p == nil || !ShouldChipN(text, p.lines, p.chars) {
 		return text, false
 	}
 	p.items = append(p.items, text)
