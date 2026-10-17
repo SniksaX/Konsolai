@@ -200,6 +200,14 @@ func PromptOptions() string {
 }
 
 func IntentBadge(name string) string {
+	return IntentBadgeLine(name, false)
+}
+
+func IntentBadgeLine(name string, escalated bool) string {
 	p := Current()
-	return p.Accent("◆") + " " + p.Heading(name)
+	line := "  " + p.Accent("◆") + " " + p.Heading(name)
+	if escalated {
+		line += p.Muted(" · escalated")
+	}
+	return line
 }
