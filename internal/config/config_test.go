@@ -8,10 +8,23 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"go.yaml.in/yaml/v3"
 )
 
+func clearEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{
+		"KONSOLAI_PROFILE", "KONSOLAI_DATABASE_URL", "KONSOLAI_ENDPOINT",
+		"KONSOLAI_MODEL", "KONSOLAI_FAST_ENDPOINT", "KONSOLAI_FAST_MODEL",
+		"KONSOLAI_BUILD_THINKING", "KONSOLAI_EMBED_ENDPOINT", "KONSOLAI_RERANK_ENDPOINT",
+	} {
+		t.Setenv(k, "")
+	}
+}
+
 func TestLoadMissingFile(t *testing.T) {
-	f, err := Load(filepath.Join(t.TempDir(), "missing.json"))
+	f, err := Load(filepath.Join(t.TempDir(), "missing.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -20,9 +33,9 @@ func TestLoadMissingFile(t *testing.T) {
 	}
 }
 
-func TestLoadInvalidJSONMentionsPath(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"default_profile":`), 0644); err != nil {
+func TestLoadInvalidYAMLMentionsPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("default_profile: ["), 0644); err != nil {
 		t.Fatal(err)
 	}
 	_, err := Load(path)
@@ -32,8 +45,8 @@ func TestLoadInvalidJSONMentionsPath(t *testing.T) {
 }
 
 func TestLoadUnknownFieldRejected(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"extra":true}`), 0644); err != nil {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("extra: true\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	_, err := Load(path)
@@ -43,25 +56,40 @@ func TestLoadUnknownFieldRejected(t *testing.T) {
 	if !strings.Contains(err.Error(), path) {
 		t.Fatalf("want path in error, got %v", err)
 	}
+	if !strings.Contains(err.Error(), `"extra"`) || !strings.Contains(err.Error(), "line 1") {
+		t.Fatalf("want key and line, got %v", err)
+	}
 }
 
 func TestLoadUnknownProfileFieldRejected(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"profiles":{"home":{"nope":1}}}`), 0644); err != nil {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	body := "profiles:\n  home:\n    nope: 1\n"
+	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
 		t.Fatal(err)
 	}
 	_, err := Load(path)
 	if err == nil {
 		t.Fatal("expected unknown field error")
 	}
+	if !strings.Contains(err.Error(), `"profiles.home.nope"`) || !strings.Contains(err.Error(), "line 3") {
+		t.Fatalf("want nested key and line, got %v", err)
+	}
+}
+
+func TestUnknownNestedKeyLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	body := "defaults:\n  llm:\n    endpoint: http://x/v1\n    mystery: 1\n"
+	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), `"defaults.llm.mystery"`) || !strings.Contains(err.Error(), "line 4") {
+		t.Fatalf("got %v", err)
+	}
 }
 
 func TestResolveBuiltinDefault(t *testing.T) {
-	t.Setenv("KONSOLAI_PROFILE", "")
-	t.Setenv("KONSOLAI_DATABASE_URL", "")
-	t.Setenv("KONSOLAI_ENDPOINT", "")
-	t.Setenv("KONSOLAI_MODEL", "")
-	t.Setenv("KONSOLAI_BUILD_THINKING", "")
+	clearEnv(t)
 	p, err := File{}.Resolve("")
 	if err != nil {
 		t.Fatal(err)
@@ -90,11 +118,17 @@ func TestResolveBuiltinDefault(t *testing.T) {
 	if p.DefaultLanguage != "en" {
 		t.Fatalf("default_language %q", p.DefaultLanguage)
 	}
+	b := Builtin()
+	if p.LLM.MaxTokens.Build != b.LLM.MaxTokens.Build || p.Agent.MaxSteps.Lookup != 10 {
+		t.Fatalf("nested defaults %+v", p)
+	}
 }
 
 func TestResolveLanguageFields(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"profiles":{"default":{"languages":["fr","en"],"default_language":"fr"}}}`), 0644); err != nil {
+	clearEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	body := "profiles:\n  default:\n    language:\n      languages: [fr, en]\n      default: fr\n"
+	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
 		t.Fatal(err)
 	}
 	f, err := Load(path)
@@ -108,7 +142,7 @@ func TestResolveLanguageFields(t *testing.T) {
 	if p.DefaultLanguage != "fr" || len(p.Languages) != 2 || p.Languages[0] != "fr" {
 		t.Fatalf("got %+v", p)
 	}
-	p, err = File{Profiles: map[string]Profile{"default": {DefaultLanguage: "es"}}}.Resolve("default")
+	p, err = File{Profiles: map[string]Overlay{"default": {Language: &LanguageOverlay{Default: strPtr("es")}}}}.Resolve("default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,8 +176,9 @@ func TestResolveEmbedRerankEnv(t *testing.T) {
 }
 
 func TestResolveMemoryRAGFalse(t *testing.T) {
+	clearEnv(t)
 	off := false
-	p, err := File{Profiles: map[string]Profile{"default": {MemoryRAG: &off}}}.Resolve("default")
+	p, err := File{Profiles: map[string]Overlay{"default": {RAG: &RAGOverlay{Enabled: &off}}}}.Resolve("default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,14 +206,32 @@ func TestResolveUnknownProfile(t *testing.T) {
 }
 
 func TestResolvePrecedence(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	body := `{
-		"default_profile": "home",
-		"profiles": {
-			"home": {"database_url": "postgres://h/home", "endpoint": "http://home/v1", "model": "home-model", "session_idle_minutes": 10, "retention_days": 7},
-			"work": {"database_url": "postgres://w/work", "endpoint": "http://work/v1", "model": "work-model"}
-		}
-	}`
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	body := `
+default_profile: home
+defaults:
+  llm:
+    model: defaults-model
+    idle_timeout_seconds: 90
+  memory:
+    retention_days: 3
+profiles:
+  home:
+    database:
+      url: postgres://h/home
+    llm:
+      endpoint: http://home/v1
+      model: home-model
+    memory:
+      session_idle_minutes: 10
+      retention_days: 7
+  work:
+    database:
+      url: postgres://w/work
+    llm:
+      endpoint: http://work/v1
+      model: work-model
+`
 	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -188,10 +241,7 @@ func TestResolvePrecedence(t *testing.T) {
 	}
 
 	t.Run("default_profile", func(t *testing.T) {
-		t.Setenv("KONSOLAI_PROFILE", "")
-		t.Setenv("KONSOLAI_DATABASE_URL", "")
-		t.Setenv("KONSOLAI_ENDPOINT", "")
-		t.Setenv("KONSOLAI_MODEL", "")
+		clearEnv(t)
 		p, err := f.Resolve("")
 		if err != nil {
 			t.Fatal(err)
@@ -201,6 +251,9 @@ func TestResolvePrecedence(t *testing.T) {
 		}
 		if p.SessionIdleMinutes != 10 || p.RetentionDays != 7 {
 			t.Fatalf("got %+v", p)
+		}
+		if p.LLM.IdleTimeoutSeconds != 90 {
+			t.Fatalf("defaults not applied: %d", p.LLM.IdleTimeoutSeconds)
 		}
 	})
 
@@ -215,6 +268,9 @@ func TestResolvePrecedence(t *testing.T) {
 		}
 		if p.Name != "work" || p.Model != "work-model" {
 			t.Fatalf("got %+v", p)
+		}
+		if p.RetentionDays != 3 {
+			t.Fatalf("defaults retention %d", p.RetentionDays)
 		}
 	})
 
@@ -250,8 +306,198 @@ func TestResolvePrecedence(t *testing.T) {
 	})
 }
 
+func TestValidateRatiosAndElide(t *testing.T) {
+	clearEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("defaults:\n  context:\n    elide_trigger: 1.5\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.Resolve("")
+	if err == nil || !strings.Contains(err.Error(), "elide_trigger") || !strings.Contains(err.Error(), "(0,1)") {
+		t.Fatalf("got %v", err)
+	}
+
+	if err := os.WriteFile(path, []byte("defaults:\n  context:\n    elide_trigger: 0.3\n    elide_target: 0.5\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	f, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.Resolve("")
+	if err == nil || !strings.Contains(err.Error(), "elide_target") || !strings.Contains(err.Error(), "elide_trigger") {
+		t.Fatalf("got %v", err)
+	}
+
+	if err := os.WriteFile(path, []byte("defaults:\n  agent:\n    max_steps:\n      lookup: 0\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	f, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.Resolve("")
+	if err == nil || !strings.Contains(err.Error(), "max_steps.lookup") {
+		t.Fatalf("got %v", err)
+	}
+
+	if err := os.WriteFile(path, []byte("defaults:\n  llm:\n    endpoint: not-a-url\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	f, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.Resolve("")
+	if err == nil || !strings.Contains(err.Error(), "llm.endpoint") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestMigrateJSON(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	clearEnv(t)
+	cfgDir := filepath.Join(dir, "konsolai")
+	if err := os.MkdirAll(cfgDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	jsonPath := filepath.Join(cfgDir, "config.json")
+	body := `{
+		"default_profile": "home",
+		"profiles": {
+			"home": {
+				"database_url": "postgres://u:secret@localhost:5432/k",
+				"endpoint": "http://home/v1",
+				"model": "home-model",
+				"session_idle_minutes": 12,
+				"memory_rag": false
+			}
+		}
+	}`
+	if err := os.WriteFile(jsonPath, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Notice == "" || !strings.Contains(f.Notice, "migrated") {
+		t.Fatalf("notice %q", f.Notice)
+	}
+	yamlPath := DefaultPath()
+	if _, err := os.Stat(yamlPath); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(yamlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0600 {
+		t.Fatalf("mode %o", fi.Mode().Perm())
+	}
+	if _, err := os.Stat(jsonPath); !os.IsNotExist(err) {
+		t.Fatal("json should be renamed")
+	}
+	if _, err := os.Stat(jsonPath + ".bak"); err != nil {
+		t.Fatal(err)
+	}
+	p, err := f.Resolve("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Name != "home" || p.Model != "home-model" || p.Endpoint != "http://home/v1" {
+		t.Fatalf("got %+v", p)
+	}
+	if p.SessionIdleMinutes != 12 || p.RAGEnabled() {
+		t.Fatalf("got %+v rag=%v", p, p.RAGEnabled())
+	}
+	if _, err := os.Stat(yamlPath); err == nil {
+		f2, err := Load("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f2.Notice != "" {
+			t.Fatalf("second load migrated again: %q", f2.Notice)
+		}
+	}
+}
+
+func TestShowMasksDatabaseURL(t *testing.T) {
+	clearEnv(t)
+	c := Builtin()
+	c.Name = "home"
+	c.Database.URL = "postgres://user:hunter2@localhost:5432/konsolai"
+	c.syncFlat()
+	got, err := c.ShowYAML()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "hunter2") {
+		t.Fatalf("leaked password: %s", got)
+	}
+	if !strings.Contains(got, "***") || !strings.Contains(got, "profile: home") {
+		t.Fatalf("got %s", got)
+	}
+}
+
+func TestInitParsesToDefaults(t *testing.T) {
+	clearEnv(t)
+	raw := InitYAML()
+	if !strings.Contains(raw, "default_profile:") {
+		t.Fatal(raw)
+	}
+	f, err := Parse([]byte(raw), "init.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.Resolve("home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Builtin()
+	got.Name = want.Name
+	gb, err := yaml.Marshal(showViewOf(got))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wb, err := yaml.Marshal(showViewOf(want))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gb) != string(wb) {
+		t.Fatalf("init != builtin\n got:\n%s\nwant:\n%s", gb, wb)
+	}
+}
+
+func showViewOf(c Config) showView {
+	return showView{
+		LLM: c.LLM, Fast: c.Fast, Database: c.Database, Memory: c.Memory,
+		Context: c.Context, Agent: c.Agent, RAG: c.RAG, UI: c.UI,
+		Language: c.Language, Safety: c.Safety, Router: c.Router,
+	}
+}
+
+func TestWriteInitRefusesOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteInit(path, false); err == nil || !strings.Contains(err.Error(), "--force") {
+		t.Fatalf("got %v", err)
+	}
+	if err := WriteInit(path, true); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLocationOmitsURL(t *testing.T) {
-	p := Profile{DatabaseURL: "postgres://user:secret@localhost:5432/konsolai"}
+	p := Config{DatabaseURL: "postgres://user:secret@localhost:5432/konsolai"}
 	loc := p.Location()
 	if strings.Contains(loc, "secret") || strings.Contains(loc, "postgres://") {
 		t.Fatalf("leaked URL: %q", loc)
@@ -318,7 +564,7 @@ func TestDisableLineInnermost(t *testing.T) {
 func TestDefaultPathUsesXDG(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg")
 	got := DefaultPath()
-	if got != "/tmp/xdg/konsolai/config.json" {
+	if got != "/tmp/xdg/konsolai/config.yaml" {
 		t.Fatalf("got %q", got)
 	}
 }
