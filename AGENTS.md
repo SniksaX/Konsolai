@@ -100,7 +100,7 @@ Flat-mirror fields copied by `syncFlat` are skipped by that test: `DatabaseURL` 
 
 ## Current status
 
-HEAD `34c9c4f` on `dev`. `dev` is 300 commits ahead of `origin/prod` (`f7172a5`, same as local `prod`). 43 of those are not on `origin/dev`. Unmerged themes: welcome v2, turn stats, the theme picker, command-only `propose_plan`, config tunables, agent/safety/welcome file splits, and this file.
+HEAD `529d451` on `dev`. `dev` is 304 commits ahead of `origin/prod` (`f7172a5`, same as local `prod`). 47 of those are not on `origin/dev`. Unmerged themes: welcome v2, turn stats, the theme picker, command-only `propose_plan`, config tunables, agent/safety/welcome file splits, the README, and this file.
 
 - REPL welcome: `split`, `frame`, and `minimal`. Paint once after probes. Height from the wrapped TTY.
 - `turn_stats`: best-effort token and timing rows. Welcome rates use `ModelRate`.
@@ -110,6 +110,7 @@ HEAD `34c9c4f` on `dev`. `dev` is 300 commits ahead of `origin/prod` (`f7172a5`,
 - `propose_plan`: a command-only plan may omit `files` when the plan does not write or edit files.
 - Config tunables are in `Builtin` and `InitYAML`. `TestConfigKeysComplete` walks every leaf.
 - File splits: agent helpers, safety plan rules and segments, welcome paint helpers.
+- README at the repo root. Header image `docs/assets/konsolai-header.svg`. No screenshots in the tree. `TestReadmeSlashTable` locks the slash-command table to `commands.Default()`.
 
 ## Known issues and backlog
 
@@ -122,7 +123,7 @@ HEAD `34c9c4f` on `dev`. `dev` is 300 commits ahead of `origin/prod` (`f7172a5`,
 - Symbol index: not built.
 - Slash commands not built: `/doctor`, `/stats`, `/explain`, `/save`, `/pdf`.
 - Scanner-safe test fixtures.
-- README with screenshots. There is no README yet.
+- README screenshots are not in the tree: `welcome.png`, `slash-menu.png`, `theme.png`, `build.png`, `act-plan.png`, `pdf.png`.
 - Tag `v0.2.0`. `version` in `cmd/konsolai` is still `"dev"` unless ldflags stamp it.
 
 ## Lessons
