@@ -23,10 +23,15 @@ type shellTool struct {
 	out          io.Writer
 	readOnlyOnly bool
 	docsTask     bool
+	displayLines int
 }
 
 func newShell(g *safety.Guard, out io.Writer, readOnlyOnly, docsTask bool) *shellTool {
-	return &shellTool{guard: g, out: out, readOnlyOnly: readOnlyOnly, docsTask: docsTask}
+	return newShellLimit(g, out, readOnlyOnly, docsTask, 0)
+}
+
+func newShellLimit(g *safety.Guard, out io.Writer, readOnlyOnly, docsTask bool, displayLines int) *shellTool {
+	return &shellTool{guard: g, out: out, readOnlyOnly: readOnlyOnly, docsTask: docsTask, displayLines: displayLines}
 }
 
 func (t *shellTool) Spec() llm.ToolSpec {
@@ -50,11 +55,12 @@ type shellArgs struct {
 }
 
 type shellAction struct {
-	cmd     string
-	cwd     string
-	timeout time.Duration
-	out     io.Writer
-	kind    ActionKind
+	cmd          string
+	cwd          string
+	timeout      time.Duration
+	out          io.Writer
+	kind         ActionKind
+	displayLines int
 }
 
 var reCD = regexp.MustCompile(`(^|[;&|(]\s*)cd(\s|$)`)
@@ -106,7 +112,7 @@ func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 	if sec < 1 || sec > 600 {
 		return nil, fmt.Errorf("tools: run_shell: timeout_sec must be between 1 and 600")
 	}
-	return &shellAction{cmd: args.Cmd, cwd: resolved, timeout: time.Duration(sec) * time.Second, out: t.out, kind: kind}, nil
+	return &shellAction{cmd: args.Cmd, cwd: resolved, timeout: time.Duration(sec) * time.Second, out: t.out, kind: kind, displayLines: t.displayLines}, nil
 }
 
 func (a *shellAction) Summary() string { return "run: " + CommandHeadline(a.cmd) }
@@ -144,7 +150,7 @@ func (a *shellAction) Run(ctx context.Context) (Result, error) {
 	}
 
 	var cap Capture
-	lim := NewLineLimiter(a.out)
+	lim := NewLineLimiterN(a.out, a.displayLines)
 	defer lim.Close(a.out)
 	quiet := ui.NewQuiet("running", shellQuietFor)
 	defer quiet.Stop()
