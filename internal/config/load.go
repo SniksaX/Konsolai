@@ -126,10 +126,12 @@ type RAGIndexOverlay struct {
 }
 
 type UIOverlay struct {
-	DisplayLines   *int `yaml:"display_lines" json:"display_lines"`
-	PasteChipLines *int `yaml:"paste_chip_lines" json:"paste_chip_lines"`
-	PasteChipChars *int `yaml:"paste_chip_chars" json:"paste_chip_chars"`
-	OutputKeepKB   *int `yaml:"output_keep_kb" json:"output_keep_kb"`
+	DisplayLines   *int    `yaml:"display_lines" json:"display_lines"`
+	PasteChipLines *int    `yaml:"paste_chip_lines" json:"paste_chip_lines"`
+	PasteChipChars *int    `yaml:"paste_chip_chars" json:"paste_chip_chars"`
+	OutputKeepKB   *int    `yaml:"output_keep_kb" json:"output_keep_kb"`
+	Palette        *string `yaml:"palette" json:"palette"`
+	Banner         *bool   `yaml:"banner" json:"banner"`
 }
 
 type LanguageOverlay struct {
@@ -217,6 +219,7 @@ func (f File) Resolve(name string) (Config, error) {
 	applyOverlay(&c, ov)
 	applyEnv(&c)
 	normalizeLanguage(&c)
+	normalizeUI(&c)
 	c.syncFlat()
 	if err := Validate(c); err != nil {
 		return Config{}, err
@@ -276,6 +279,13 @@ func normalizeLanguage(c *Config) {
 	}
 	if c.Agent.BuildThinking == "" {
 		c.Agent.BuildThinking = "plan_step"
+	}
+}
+
+func normalizeUI(c *Config) {
+	c.UI.Palette = strings.ToLower(strings.TrimSpace(c.UI.Palette))
+	if c.UI.Palette == "" {
+		c.UI.Palette = "amber"
 	}
 }
 
@@ -391,6 +401,11 @@ func Validate(c Config) error {
 	}
 	if c.LLM.Model != "" && strings.TrimSpace(c.LLM.Model) == "" {
 		return fmt.Errorf("config: llm.model is empty")
+	}
+	switch strings.ToLower(strings.TrimSpace(c.UI.Palette)) {
+	case "", "amber", "violet":
+	default:
+		return fmt.Errorf("config: ui.palette must be amber or violet, got %q", c.UI.Palette)
 	}
 	return nil
 }
