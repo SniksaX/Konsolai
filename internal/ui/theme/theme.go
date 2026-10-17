@@ -65,101 +65,60 @@ var (
 
 type roleRGB struct{ Dark, Light RGB }
 
-var amberRoles = map[Role]roleRGB{
-	Heading:      {hexRGB(0xFFD27A), hexRGB(0x7A4300)},
-	Accent:       {hexRGB(0xFF9A1F), hexRGB(0xB35900)},
-	AccentDim:    {hexRGB(0xC77E2E), hexRGB(0x9A5A14)},
-	Meta:         {hexRGB(0xE6B566), hexRGB(0x8A5A1C)},
-	Muted:        {hexRGB(0xB08A5C), hexRGB(0x82654A)},
-	Subtle:       {hexRGB(0x8C6E4A), hexRGB(0xA28C74)},
-	BannerTop:    {hexRGB(0xFFD27A), hexRGB(0xB35900)},
-	BannerBottom: {hexRGB(0xFF9A1F), hexRGB(0x7A4300)},
-	Success:      {hexRGB(0x7BD88F), hexRGB(0x1E7B34)},
-	Error:        {hexRGB(0xFF6B6B), hexRGB(0xC62828)},
-	Warn:         {hexRGB(0xFFD166), hexRGB(0x9A6700)},
-	Link:         {hexRGB(0x6CB6FF), hexRGB(0x0B63CE)},
+// hueRoles is one theme: eight roles per appearance. Success/Error/Warn/Link
+// stay global.
+type hueRoles struct {
+	BannerTop, BannerBottom, Heading, Accent, AccentDim, Meta, Muted, Subtle roleRGB
 }
 
-// Violet at the same HSL lightness as amber; hue 270. Dark values are the
-// lightest that still clear the WCAG floors on #232627/#1E1E1E/#000000.
-var violetRoles = map[Role]roleRGB{
-	Heading:      {hexRGB(0xB266FF), hexRGB(0x3D007A)},
-	Accent:       {hexRGB(0xB06DF3), hexRGB(0x5C00B8)},
-	AccentDim:    {hexRGB(0xA16DD5), hexRGB(0x57149A)},
-	Meta:         {hexRGB(0xAB74E2), hexRGB(0x531C8A)},
-	Muted:        {hexRGB(0xA180C2), hexRGB(0x664A82)},
-	Subtle:       {hexRGB(0x8562A7), hexRGB(0x917AA8)},
-	BannerTop:    {hexRGB(0xB266FF), hexRGB(0x5C00B8)},
-	BannerBottom: {hexRGB(0xB06DF3), hexRGB(0x3D007A)},
-	Success:      {hexRGB(0x7BD88F), hexRGB(0x1E7B34)},
-	Error:        {hexRGB(0xFF6B6B), hexRGB(0xC62828)},
-	Warn:         {hexRGB(0xFFD166), hexRGB(0x9A6700)},
-	Link:         {hexRGB(0x6CB6FF), hexRGB(0x0B63CE)},
+func hue(darkTop, darkBot, darkHead, darkAcc, darkDim, darkMeta, darkMuted, darkSubtle,
+	lightTop, lightBot, lightHead, lightAcc, lightDim, lightMeta, lightMuted, lightSubtle uint32) hueRoles {
+	return hueRoles{
+		BannerTop:    roleRGB{hexRGB(darkTop), hexRGB(lightTop)},
+		BannerBottom: roleRGB{hexRGB(darkBot), hexRGB(lightBot)},
+		Heading:      roleRGB{hexRGB(darkHead), hexRGB(lightHead)},
+		Accent:       roleRGB{hexRGB(darkAcc), hexRGB(lightAcc)},
+		AccentDim:    roleRGB{hexRGB(darkDim), hexRGB(lightDim)},
+		Meta:         roleRGB{hexRGB(darkMeta), hexRGB(lightMeta)},
+		Muted:        roleRGB{hexRGB(darkMuted), hexRGB(lightMuted)},
+		Subtle:       roleRGB{hexRGB(darkSubtle), hexRGB(lightSubtle)},
+	}
 }
 
-// Ocean: teal/cyan at the same WCAG floors as amber. Light Accent/Muted are
-// darkened so they still clear 4.5:1 on #FAF7F0.
-var oceanRoles = map[Role]roleRGB{
-	Heading:      {hexRGB(0x7AF2FF), hexRGB(0x006E7A)},
-	Accent:       {hexRGB(0x1FE9FF), hexRGB(0x007D8B)},
-	AccentDim:    {hexRGB(0x2EB8C7), hexRGB(0x138693)},
-	Meta:         {hexRGB(0x66D9E6), hexRGB(0x1C7D88)},
-	Muted:        {hexRGB(0x5CA8B0), hexRGB(0x48797F)},
-	Subtle:       {hexRGB(0x4A858C), hexRGB(0x6B979C)},
-	BannerTop:    {hexRGB(0x7AF2FF), hexRGB(0x007D8B)},
-	BannerBottom: {hexRGB(0x1FE9FF), hexRGB(0x006E7A)},
-	Success:      {hexRGB(0x7BD88F), hexRGB(0x1E7B34)},
-	Error:        {hexRGB(0xFF6B6B), hexRGB(0xC62828)},
-	Warn:         {hexRGB(0xFFD166), hexRGB(0x9A6700)},
-	Link:         {hexRGB(0x6CB6FF), hexRGB(0x0B63CE)},
+var themes = map[string]hueRoles{
+	"amber": hue(
+		0xFFE29A, 0xFF8A1F, 0xFFE0A3, 0xFFA033, 0xD98A35, 0xEBC27E, 0xB8966A, 0x5C4A33,
+		0xC46A00, 0x8A3B00, 0x6E3A00, 0xAA5400, 0x9A5A14, 0x7E531C, 0x7A6148, 0xCDB89A,
+	),
+	"glacier": hue(
+		0xE0FBFF, 0x3D8BFF, 0xD6F6FF, 0x4CC9F0, 0x3FA3CC, 0x9ADCF0, 0x86A9B8, 0x34505C,
+		0x0A86B0, 0x1B4FC4, 0x0B3F5C, 0x0B78A8, 0x1B6A8F, 0x245E78, 0x55707D, 0xA9C2CD,
+	),
+	"nebula": hue(
+		0xFFD9F2, 0x8F5CFF, 0xEEDCFF, 0xB388FF, 0x9470D9, 0xD2B8F7, 0xA396BF, 0x51466B,
+		0xB2399A, 0x5B2BC7, 0x3E1F78, 0x6A3BD1, 0x6A4AAE, 0x5A3F8C, 0x6E6385, 0xC4B7DC,
+	),
+	"jade": hue(
+		0xEFFFB8, 0x1FC7A0, 0xDDFBE6, 0x3DDC97, 0x36AC7C, 0xA3E8C2, 0x8DAF9C, 0x2F5242,
+		0x4E8A00, 0x007A63, 0x0F4A33, 0x0B7A52, 0x2A7356, 0x2E6249, 0x58715F, 0xA9C7B5,
+	),
+	"rose": hue(
+		0xFFE0C7, 0xFF4F8B, 0xFFE1EA, 0xFF6FA0, 0xD65C86, 0xFFB8CB, 0xBC97A3, 0x664452,
+		0xC2410C, 0xB0145A, 0x6B1036, 0xB8215F, 0x9E3A60, 0x8A3557, 0x7D5F6B, 0xD6B4C2,
+	),
+	// Mono keeps the previous steel-blue / grey set (exempt from no-grey).
+	// Subtle L was nudged so contrast stays in 1.6–3.2 (see Phase 2 report).
+	"mono": hue(
+		0x98B6E1, 0x5E8ED0, 0x98B6E1, 0x5E8ED0, 0x6485B3, 0xA6A6A6, 0x8C8C8C, 0x5D5D5D,
+		0x28518B, 0x1B375F, 0x1B375F, 0x28518B, 0x32517C, 0x535353, 0x666666, 0x909090,
+	),
 }
 
-// Forest: green accents, same floors.
-var forestRoles = map[Role]roleRGB{
-	Heading:      {hexRGB(0x7AFFAB), hexRGB(0x007A2D)},
-	Accent:       {hexRGB(0x1FFF71), hexRGB(0x008430)},
-	AccentDim:    {hexRGB(0x2EC766), hexRGB(0x128C3F)},
-	Meta:         {hexRGB(0x66E695), hexRGB(0x1A8241)},
-	Muted:        {hexRGB(0x5CB07B), hexRGB(0x477D5B)},
-	Subtle:       {hexRGB(0x4A8C62), hexRGB(0x689A7B)},
-	BannerTop:    {hexRGB(0x7AFFAB), hexRGB(0x008430)},
-	BannerBottom: {hexRGB(0x1FFF71), hexRGB(0x007A2D)},
-	Success:      {hexRGB(0x7BD88F), hexRGB(0x1E7B34)},
-	Error:        {hexRGB(0xFF6B6B), hexRGB(0xC62828)},
-	Warn:         {hexRGB(0xFFD166), hexRGB(0x9A6700)},
-	Link:         {hexRGB(0x6CB6FF), hexRGB(0x0B63CE)},
-}
-
-// Rose: pink/red. Dark Accent/Muted are lifted so they clear 4.5:1 on #232627.
-var roseRoles = map[Role]roleRGB{
-	Heading:      {hexRGB(0xFF7A95), hexRGB(0x7A0018)},
-	Accent:       {hexRGB(0xFF4167), hexRGB(0xB30024)},
-	AccentDim:    {hexRGB(0xD85771), hexRGB(0x9A142F)},
-	Meta:         {hexRGB(0xE66680), hexRGB(0x8A1C32)},
-	Muted:        {hexRGB(0xBE7886), hexRGB(0x824A55)},
-	Subtle:       {hexRGB(0xA55767), hexRGB(0xA2747D)},
-	BannerTop:    {hexRGB(0xFF7A95), hexRGB(0xB30024)},
-	BannerBottom: {hexRGB(0xFF4167), hexRGB(0x7A0018)},
-	Success:      {hexRGB(0x7BD88F), hexRGB(0x1E7B34)},
-	Error:        {hexRGB(0xFF6B6B), hexRGB(0xC62828)},
-	Warn:         {hexRGB(0xFFD166), hexRGB(0x9A6700)},
-	Link:         {hexRGB(0x6CB6FF), hexRGB(0x0B63CE)},
-}
-
-// Mono: grayscale Meta/Muted/Subtle plus a steel-blue accent hue.
-var monoRoles = map[Role]roleRGB{
-	Heading:      {hexRGB(0x98B6E1), hexRGB(0x1B375F)},
-	Accent:       {hexRGB(0x5E8ED0), hexRGB(0x28518B)},
-	AccentDim:    {hexRGB(0x6485B3), hexRGB(0x32517C)},
-	Meta:         {hexRGB(0xA6A6A6), hexRGB(0x535353)},
-	Muted:        {hexRGB(0x8C8C8C), hexRGB(0x666666)},
-	Subtle:       {hexRGB(0x6F6F6F), hexRGB(0x8B8B8B)},
-	BannerTop:    {hexRGB(0x98B6E1), hexRGB(0x28518B)},
-	BannerBottom: {hexRGB(0x5E8ED0), hexRGB(0x1B375F)},
-	Success:      {hexRGB(0x7BD88F), hexRGB(0x1E7B34)},
-	Error:        {hexRGB(0xFF6B6B), hexRGB(0xC62828)},
-	Warn:         {hexRGB(0xFFD166), hexRGB(0x9A6700)},
-	Link:         {hexRGB(0x6CB6FF), hexRGB(0x0B63CE)},
+var sharedRoles = map[Role]roleRGB{
+	Success: {hexRGB(0x7BD88F), hexRGB(0x1E7B34)},
+	Error:   {hexRGB(0xFF6B6B), hexRGB(0xC62828)},
+	Warn:    {hexRGB(0xFFD166), hexRGB(0x9A6700)},
+	Link:    {hexRGB(0x6CB6FF), hexRGB(0x0B63CE)},
 }
 
 func Apply(c Config) {
@@ -196,15 +155,28 @@ func stdoutTTY() bool {
 	return fi.Mode()&os.ModeCharDevice != 0
 }
 
-// PaletteNames is the set of ui.palette values, amber first (default).
-var PaletteNames = []string{"amber", "violet", "ocean", "forest", "rose", "mono"}
+// PaletteNames is the set of ui.theme values, amber first (default).
+var PaletteNames = []string{"amber", "glacier", "nebula", "jade", "rose", "mono"}
+
+var themeAliases = map[string]string{
+	"amber":   "amber",
+	"glacier": "glacier",
+	"cyan":    "glacier",
+	"ocean":   "glacier",
+	"nebula":  "nebula",
+	"violet":  "nebula",
+	"jade":    "jade",
+	"green":   "jade",
+	"forest":  "jade",
+	"rose":    "rose",
+	"red":     "rose",
+	"mono":    "mono",
+}
 
 func KnownPalette(s string) (string, bool) {
 	s = strings.ToLower(strings.TrimSpace(s))
-	for _, n := range PaletteNames {
-		if n == s {
-			return n, true
-		}
+	if n, ok := themeAliases[s]; ok {
+		return n, true
 	}
 	return "", false
 }
@@ -219,20 +191,19 @@ func NormalizePalette(s string) string {
 func normalizePalette(s string) string { return NormalizePalette(s) }
 
 func paletteRoles(name string) map[Role]roleRGB {
-	switch NormalizePalette(name) {
-	case "violet":
-		return violetRoles
-	case "ocean":
-		return oceanRoles
-	case "forest":
-		return forestRoles
-	case "rose":
-		return roseRoles
-	case "mono":
-		return monoRoles
-	default:
-		return amberRoles
+	h, ok := themes[NormalizePalette(name)]
+	if !ok {
+		h = themes["amber"]
 	}
+	out := map[Role]roleRGB{
+		BannerTop: h.BannerTop, BannerBottom: h.BannerBottom,
+		Heading: h.Heading, Accent: h.Accent, AccentDim: h.AccentDim,
+		Meta: h.Meta, Muted: h.Muted, Subtle: h.Subtle,
+	}
+	for r, pair := range sharedRoles {
+		out[r] = pair
+	}
+	return out
 }
 
 func snap() snapshot {
