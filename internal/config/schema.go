@@ -50,6 +50,7 @@ var overlaySchema = m(map[string]schema{
 		"session_idle_minutes": leaf(),
 		"retention_days":       leaf(),
 		"compact_threshold":    leaf(),
+		"isolated_timeout_ms":  leaf(),
 	}),
 	"context": m(map[string]schema{
 		"elide_trigger": leaf(),
@@ -121,6 +122,7 @@ var overlaySchema = m(map[string]schema{
 		"startup_cap_ms":        leaf(),
 		"welcome_cache_seconds": leaf(),
 		"model_rate_calls":      leaf(),
+		"model_slow_ms":         leaf(),
 		"ctx_warn_pct":          leaf(),
 		"ctx_hot_pct":           leaf(),
 		"ctx_cells":             leaf(),
@@ -144,6 +146,20 @@ var overlaySchema = m(map[string]schema{
 	"router": m(map[string]schema{
 		"action_verbs": leaf(),
 		"targets":      leaf(),
+	}),
+	"tools": m(map[string]schema{
+		"shell": m(map[string]schema{
+			"default_timeout_sec": leaf(),
+			"max_timeout_sec":     leaf(),
+			"wait_delay_ms":       leaf(),
+		}),
+	}),
+	"store": m(map[string]schema{
+		"query_timeout_ms":   leaf(),
+		"migrate_timeout_ms": leaf(),
+	}),
+	"stats": m(map[string]schema{
+		"insert_timeout_ms": leaf(),
 	}),
 })
 
