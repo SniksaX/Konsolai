@@ -51,9 +51,10 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 	_ = sh.Config.Set("enable-bracketed-paste", true)
 	_ = sh.Config.Set("history-size", histCap)
 	_ = sh.Config.Set("cursor-position-probe", false)
-	// Autocomplete stays on for @ and shell-mode; slash names never produce
-	// completions (see Completer + the wrapper below).
-	_ = sh.Config.Set("autocomplete", true)
+	// Autocomplete would steal arrows via menuselect. @ and shell-mode
+	// still complete on Tab through Completer.
+	_ = sh.Config.Set("autocomplete", false)
+	_ = sh.Config.Set("keyseq-timeout", 500)
 	_ = sh.Config.Set("usage-hint-always", true)
 	_ = sh.Config.Set("completion-description-style", ui.Current().MutedSeq())
 	_ = sh.Config.Set("completion-selection-style", theme.HeadingSeq())
@@ -81,23 +82,40 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 		"konsolai-question":    r.slashQuestion,
 	})
 	bindEmacsVi := func(seq, action string) {
-		_ = sh.Config.Bind("emacs", inputrc.Unescape(seq), action, false)
-		_ = sh.Config.Bind("vi-insert", inputrc.Unescape(seq), action, false)
+		key := inputrc.Unescape(seq)
+		for _, km := range []string{"emacs", "emacs-standard", "emacs-meta", "emacs-ctlx", "vi-insert"} {
+			_ = sh.Config.Bind(km, key, action, false)
+		}
 	}
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\M-\C-m`), "insert-newline", false)
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\e\r`), "insert-newline", false)
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\e\n`), "insert-newline", false)
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\C-z`), "undo-or-expand-paste", false)
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\C-l`), "konsolai-clear", false)
+	// Default emacs binds store arrows as \M-[A (a meta rune). ConvertMeta
+	// maps those onto the same bytes as \e[A, and the meta entry sorts last,
+	// so binding only \e[A left previous-history/next-history in charge.
 	bindEmacsVi(`\e[A`, "konsolai-up")
+	bindEmacsVi(`\M-[A`, "konsolai-up")
 	bindEmacsVi(`\e[B`, "konsolai-down")
+	bindEmacsVi(`\M-[B`, "konsolai-down")
 	bindEmacsVi(`\eOA`, "konsolai-up")
+	bindEmacsVi(`\M-OA`, "konsolai-up")
 	bindEmacsVi(`\eOB`, "konsolai-down")
+	bindEmacsVi(`\M-OB`, "konsolai-down")
 	bindEmacsVi(`\e`, "konsolai-esc")
 	bindEmacsVi(`\C-i`, "konsolai-tab")
 	bindEmacsVi(`\C-m`, "konsolai-enter")
 	bindEmacsVi(`\C-j`, "konsolai-enter")
 	bindEmacsVi(`?`, "konsolai-question")
+	// Local map has only Esc, so a lone Esc matches immediately. Arrow
+	// leftovers are finished in slashEsc; main-map \e[A stays for when
+	// the local map is not active (completion).
+	if sh.Config.Binds["slash-esc"] == nil {
+		sh.Config.Binds["slash-esc"] = map[string]inputrc.Bind{}
+	}
+	sh.Config.Binds["slash-esc"][inputrc.Unescape(`\e`)] = inputrc.Bind{Action: "konsolai-esc", Macro: false}
+	sh.Keymap.SetLocal("slash-esc")
 	sh.Completer = func(line []rune, cursor int) readline.Completions {
 		s := string(line)
 		if cursor >= 0 && cursor <= len(line) {
@@ -131,6 +149,7 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 			r.menu.Sync(s)
 		}
 		r.gateAutocomplete(s)
+		r.ensureEscLocal()
 		width := theme.TermWidth()
 		menu := ""
 		if r.menu != nil && r.menu.Open() {
@@ -165,6 +184,15 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 	return r, nil
 }
 
+func (r *rlReader) ensureEscLocal() {
+	if r == nil || r.sh == nil || r.sh.Keymap == nil {
+		return
+	}
+	if r.sh.Keymap.Local() == "" {
+		r.sh.Keymap.SetLocal("slash-esc")
+	}
+}
+
 func (r *rlReader) hintFooter() string {
 	if r.menu != nil && r.menu.Open() {
 		return r.menu.HintFooter()
@@ -179,11 +207,9 @@ func (r *rlReader) gateAutocomplete(line string) {
 	if r == nil || r.sh == nil {
 		return
 	}
-	if strings.HasPrefix(line, "/") && !strings.Contains(line, " ") {
-		_ = r.sh.Config.Set("autocomplete", false)
-	} else {
-		_ = r.sh.Config.Set("autocomplete", true)
-	}
+	// As-you-type complete steals arrows via menu-select. Tab still works.
+	_ = r.sh.Config.Set("autocomplete", false)
+	_ = line
 }
 
 func (r *rlReader) syncMenu() {
@@ -195,6 +221,7 @@ func (r *rlReader) syncMenu() {
 		r.menu.Sync(line)
 	}
 	r.gateAutocomplete(line)
+	r.ensureEscLocal()
 }
 
 func (r *rlReader) applyLine(s string) {
@@ -202,8 +229,9 @@ func (r *rlReader) applyLine(s string) {
 		return
 	}
 	r.sh.History.Save()
-	r.sh.Line().Set([]rune(s)...)
-	r.sh.Cursor().Set(len([]rune(s)))
+	rs := []rune(s)
+	r.sh.Line().Set(rs...)
+	r.sh.Cursor().Set(len(rs))
 }
 
 func (r *rlReader) callWidget(name string) {
@@ -245,12 +273,51 @@ func (r *rlReader) slashUp() {
 }
 
 func (r *rlReader) slashEsc() {
+	if up, down, ok := r.pendingArrow(); ok {
+		if up {
+			r.slashUp()
+			return
+		}
+		if down {
+			r.slashDown()
+			return
+		}
+	}
 	r.syncMenu()
 	if r.menu != nil {
 		r.applyMenu(r.menu.Esc())
 		return
 	}
 	r.applyLine("")
+}
+
+// pendingArrow consumes a CSI/SS3 arrow that arrived after a lone Esc.
+func (r *rlReader) pendingArrow() (up, down, ok bool) {
+	if r == nil || r.sh == nil || r.sh.Keys == nil {
+		return false, false, false
+	}
+	k1, empty := r.sh.Keys.Pop()
+	if empty {
+		return false, false, false
+	}
+	if k1 != '[' && k1 != 'O' {
+		r.sh.Keys.Feed(false, rune(k1))
+		return false, false, false
+	}
+	k2, empty := r.sh.Keys.Pop()
+	if empty {
+		r.sh.Keys.Feed(false, rune(k1))
+		return false, false, false
+	}
+	switch k2 {
+	case 'A':
+		return true, false, true
+	case 'B':
+		return false, true, true
+	default:
+		r.sh.Keys.Feed(false, rune(k1), rune(k2))
+		return false, false, false
+	}
 }
 
 func (r *rlReader) slashTab() {
