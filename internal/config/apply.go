@@ -188,6 +188,9 @@ func applyOverlay(c *Config, o Overlay) {
 		if o.UI.Banner != nil {
 			c.UI.Banner = *o.UI.Banner
 		}
+		if o.UI.Welcome != nil {
+			c.UI.Welcome = *o.UI.Welcome
+		}
 		if o.UI.Theme != nil {
 			c.UI.Theme = *o.UI.Theme
 		}
