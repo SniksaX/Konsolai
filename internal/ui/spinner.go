@@ -6,14 +6,16 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/siraj/konsolai/internal/ui/theme"
 )
 
 var braille = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 const (
-	hideCursor = "\033[?25l"
-	showCursor = "\033[?25h"
-	clearLine  = "\r\033[K"
+	hideCursor = theme.HideCursor
+	showCursor = theme.ShowCursor
+	clearLine  = theme.ClearLine
 )
 
 type spinnerHooks struct {
