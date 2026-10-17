@@ -104,6 +104,8 @@ var overlaySchema = m(map[string]schema{
 		"paste_chip_lines": leaf(),
 		"paste_chip_chars": leaf(),
 		"output_keep_kb":   leaf(),
+		"palette":          leaf(),
+		"banner":           leaf(),
 	}),
 	"language": m(map[string]schema{
 		"languages": leaf(),
