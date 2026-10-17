@@ -135,6 +135,7 @@ type UIOverlay struct {
 	Theme          *string `yaml:"theme" json:"theme"`
 	CodeHighlight  *bool   `yaml:"code_highlight" json:"code_highlight"`
 	ClearOnStart   *bool   `yaml:"clear_on_start" json:"clear_on_start"`
+	StripEmoji     *bool   `yaml:"strip_emoji" json:"strip_emoji"`
 }
 
 type LanguageOverlay struct {
