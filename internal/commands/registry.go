@@ -14,15 +14,37 @@ import (
 	"github.com/siraj/konsolai/internal/memory"
 	"github.com/siraj/konsolai/internal/turn"
 	"github.com/siraj/konsolai/internal/ui"
+	"github.com/siraj/konsolai/internal/ui/theme"
 )
+
+type Arg struct {
+	Name     string
+	Help     string
+	Required bool
+}
 
 type Command struct {
 	Name     string
 	Aliases  []string
 	Usage    string
 	Summary  string
+	Example  string
+	Args     []Arg
 	ReplOnly bool
 	Run      func(ctx context.Context, env *Env, args []string) int
+}
+
+func (c Command) HasRequiredArgs() bool {
+	for _, a := range c.Args {
+		if a.Required {
+			return true
+		}
+	}
+	return false
+}
+
+func (c Command) TakesArgs() bool {
+	return len(c.Args) > 0
 }
 
 type Env struct {
@@ -206,12 +228,14 @@ func commandNames(c Command) string {
 	return s
 }
 
+func (c Command) DisplayNames() string { return commandNames(c) }
+
 func SlashRow(names, desc string, selected bool) string {
 	p := ui.Current()
 	if selected {
-		return p.Accent("› ") + p.Heading(names) + "  " + p.Muted(desc)
+		return p.Accent("› ") + p.Heading(names) + "  " + p.Meta(desc)
 	}
-	return "  " + names + "  " + p.Muted(desc)
+	return "  " + theme.Style(theme.Primary, names) + "  " + p.Muted(desc)
 }
 
 func runHelp(ctx context.Context, env *Env, _ []string) int {
@@ -223,34 +247,55 @@ func runHelp(ctx context.Context, env *Env, _ []string) int {
 
 func Default() *Registry {
 	return New(
-		Command{Name: "help", Usage: "help", Summary: "Show this list of commands", Run: runHelp},
-		Command{Name: "copy", Usage: "copy answer|all|code|cmd [n]", Summary: "Copy the last answer, pair, code block or command", Run: runCopy},
-		Command{Name: "history", Usage: "history [n]", Summary: "List recent sessions", Run: runHistory},
-		Command{Name: "show", Usage: "show <n>", Summary: "Reprint a session's prompts and answers", Run: runShow},
-		Command{Name: "resume", Usage: "resume <n> \"<request>\"", Summary: "Continue session n with a new request", Run: runResume},
-		Command{Name: "new", Usage: "new", Summary: "Close resumable sessions so the next request starts fresh", Run: runNew},
-		Command{Name: "exit", Aliases: []string{"quit"}, Usage: "exit", Summary: "Leave the REPL", ReplOnly: true, Run: runExit},
-		Command{Name: "clear", Usage: "clear", Summary: "Clear the screen", ReplOnly: true, Run: runClear},
-		Command{Name: "cd", Usage: "cd <dir>", Summary: "Change the working directory", ReplOnly: true, Run: runCD},
-		Command{Name: "cmd", Usage: "cmd [clear]", Summary: "Toggle shell mode", ReplOnly: true, Run: runCmd},
-		Command{Name: "yes", Usage: "yes on|off", Summary: "Auto-approve for this REPL session", ReplOnly: true, Run: runYes},
-		Command{Name: "trace", Usage: "trace on|off", Summary: "Toggle per-call traces", ReplOnly: true, Run: runTrace},
-		Command{Name: "think", Usage: "think on|off|auto", Summary: "Override thinking for this session", ReplOnly: true, Run: runThink},
-		Command{Name: "model", Usage: "model", Summary: "Show model, window and endpoint", ReplOnly: true, Run: runModel},
-		Command{Name: "compact", Usage: "compact", Summary: "Summarize earlier messages in this session", ReplOnly: true, Run: runCompact},
-		Command{Name: "undo", Usage: "undo", Summary: "Restore files changed in recent sessions", Run: runUndo},
-		Command{Name: "diff", Usage: "diff [n]", Summary: "Show file diffs from a session", Run: runDiff},
-		Command{Name: "run", Usage: "run [k]", Summary: "Run a bash/sh block from the last answer", Run: runRun},
-		Command{Name: "output", Usage: "output [n]", Summary: "Reprint the full output of a recent command", Run: runOutput},
-		Command{Name: "status", Usage: "status", Summary: "Show version, model, database and environment", Run: runStatus},
-		Command{Name: "config", Usage: "config path|show|init|validate", Summary: "Show or write the YAML config", Run: runConfig},
-		Command{Name: "theme", Usage: "theme [name]", Summary: "List palettes or apply one", Run: runTheme},
-		Command{Name: "index", Usage: "index [path]|status|clear", Summary: "Index the project for recall", Run: runIndex},
-		Command{Name: "recall", Usage: "recall \"<query>\" [--scope X]", Summary: "Search indexed memory without calling the model", Run: runRecall},
-		Command{Name: "remember", Usage: "remember [--project] \"<fact>\"", Summary: "Store a fact", Run: runRemember},
-		Command{Name: "facts", Usage: "facts", Summary: "List remembered facts", Run: runFacts},
-		Command{Name: "forget", Usage: "forget user|project <id>", Summary: "Delete a fact", Run: runForget},
-		Command{Name: "prune", Usage: "prune", Summary: "Prune old sessions now", Run: runPrune},
+		Command{Name: "help", Usage: "help", Summary: "Show this list of commands", Example: "/help", Run: runHelp},
+		Command{Name: "copy", Usage: "copy answer|all|code|cmd [n]", Summary: "Copy the last answer, pair, code block or command",
+			Args:    []Arg{{Name: "what", Help: "answer, all, code or cmd", Required: true}, {Name: "n", Help: "how many (max 5)"}},
+			Example: "/copy code", Run: runCopy},
+		Command{Name: "history", Usage: "history [n]", Summary: "List recent sessions",
+			Args: []Arg{{Name: "n", Help: "how many sessions"}}, Example: "/history 5", Run: runHistory},
+		Command{Name: "show", Usage: "show <n>", Summary: "Reprint a session's prompts and answers",
+			Args: []Arg{{Name: "n", Help: "session index", Required: true}}, Example: "/show 1", Run: runShow},
+		Command{Name: "resume", Usage: "resume <n> \"<request>\"", Summary: "Continue session n with a new request",
+			Args:    []Arg{{Name: "n", Help: "session index", Required: true}, {Name: "request", Help: "the next prompt", Required: true}},
+			Example: "/resume 1 \"continue\"", Run: runResume},
+		Command{Name: "new", Usage: "new", Summary: "Close resumable sessions so the next request starts fresh", Example: "/new", Run: runNew},
+		Command{Name: "exit", Aliases: []string{"quit"}, Usage: "exit", Summary: "Leave the REPL", Example: "/exit", ReplOnly: true, Run: runExit},
+		Command{Name: "clear", Usage: "clear", Summary: "Clear the screen", Example: "/clear", ReplOnly: true, Run: runClear},
+		Command{Name: "cd", Usage: "cd <dir>", Summary: "Change the working directory",
+			Args: []Arg{{Name: "dir", Help: "directory to enter", Required: true}}, Example: "/cd ..", ReplOnly: true, Run: runCD},
+		Command{Name: "cmd", Usage: "cmd [clear]", Summary: "Toggle shell mode",
+			Args: []Arg{{Name: "clear", Help: "clear the shell history"}}, Example: "/cmd", ReplOnly: true, Run: runCmd},
+		Command{Name: "yes", Usage: "yes on|off", Summary: "Auto-approve for this REPL session",
+			Args: []Arg{{Name: "mode", Help: "on or off", Required: true}}, Example: "/yes on", ReplOnly: true, Run: runYes},
+		Command{Name: "trace", Usage: "trace on|off", Summary: "Toggle per-call traces",
+			Args: []Arg{{Name: "mode", Help: "on or off", Required: true}}, Example: "/trace on", ReplOnly: true, Run: runTrace},
+		Command{Name: "think", Usage: "think on|off|auto", Summary: "Override thinking for this session",
+			Args: []Arg{{Name: "mode", Help: "on, off or auto", Required: true}}, Example: "/think auto", ReplOnly: true, Run: runThink},
+		Command{Name: "model", Usage: "model", Summary: "Show model, window and endpoint", Example: "/model", ReplOnly: true, Run: runModel},
+		Command{Name: "compact", Usage: "compact", Summary: "Summarize earlier messages in this session", Example: "/compact", ReplOnly: true, Run: runCompact},
+		Command{Name: "undo", Usage: "undo", Summary: "Restore files changed in recent sessions", Example: "/undo", Run: runUndo},
+		Command{Name: "diff", Usage: "diff [n]", Summary: "Show file diffs from a session",
+			Args: []Arg{{Name: "n", Help: "session index"}}, Example: "/diff", Run: runDiff},
+		Command{Name: "run", Usage: "run [k]", Summary: "Run a bash/sh block from the last answer",
+			Args: []Arg{{Name: "k", Help: "block index"}}, Example: "/run", Run: runRun},
+		Command{Name: "output", Usage: "output [n]", Summary: "Reprint the full output of a recent command",
+			Args: []Arg{{Name: "n", Help: "how many lines"}}, Example: "/output", Run: runOutput},
+		Command{Name: "status", Usage: "status", Summary: "Show version, model, database and environment", Example: "/status", Run: runStatus},
+		Command{Name: "config", Usage: "config path|show|init|validate", Summary: "Show or write the YAML config",
+			Args: []Arg{{Name: "action", Help: "path, show, init or validate", Required: true}}, Example: "/config validate", Run: runConfig},
+		Command{Name: "theme", Usage: "theme [name]", Summary: "List palettes or apply one",
+			Args: []Arg{{Name: "name", Help: "theme name"}}, Example: "/theme glacier", Run: runTheme},
+		Command{Name: "index", Usage: "index [path]|status|clear", Summary: "Index the project for recall",
+			Args: []Arg{{Name: "action", Help: "path, status or clear"}}, Example: "/index status", Run: runIndex},
+		Command{Name: "recall", Usage: "recall \"<query>\" [--scope X]", Summary: "Search indexed memory without calling the model",
+			Args: []Arg{{Name: "query", Help: "search text", Required: true}}, Example: "/recall \"auth\"", Run: runRecall},
+		Command{Name: "remember", Usage: "remember [--project] \"<fact>\"", Summary: "Store a fact",
+			Args: []Arg{{Name: "fact", Help: "the fact to store", Required: true}}, Example: "/remember \"use gofmt\"", Run: runRemember},
+		Command{Name: "facts", Usage: "facts", Summary: "List remembered facts", Example: "/facts", Run: runFacts},
+		Command{Name: "forget", Usage: "forget user|project <id>", Summary: "Delete a fact",
+			Args:    []Arg{{Name: "scope", Help: "user or project", Required: true}, {Name: "id", Help: "fact id", Required: true}},
+			Example: "/forget user 3", Run: runForget},
+		Command{Name: "prune", Usage: "prune", Summary: "Prune old sessions now", Example: "/prune", Run: runPrune},
 	)
 }
 
