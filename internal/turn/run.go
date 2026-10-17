@@ -1,6 +1,7 @@
 package turn
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -34,6 +35,7 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 			return Result{ExitCode: 1}
 		}
 	}
+	r.escalated = false
 	text := req.Text
 	if extra := strings.TrimRight(req.Stdin, "\n"); extra != "" {
 		if strings.TrimSpace(text) == "" {
@@ -92,7 +94,10 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	routeClient := r.routerClient(ctx)
 	dec, continued := r.continueDecision(req.Text)
 	if !continued {
-		dec = DecideIntent(ctx, routeClient, req.Intent, req.Text, req.New, routerCands, inRepo)
+		dec = DecideIntentFloor(ctx, routeClient, req.Intent, req.Text, req.New, routerCands, inRepo, r.Profile.Router.ActionVerbs, r.Profile.Router.Targets)
+	} else if dec.Reason == "continue-promise" && r.lastUser != "" {
+		req.Text = r.lastUser
+		r.lastPromise = false
 	} else {
 		req.Text = strings.TrimSpace(req.Text) + "\n\n" + continueNote
 	}
@@ -123,7 +128,7 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	sessionID, history := picked.ID, picked.Messages
 	win := client.ContextWindow()
 	r.LastWindow = win
-	if ShouldCompact(r.LastPromptTokens, win) && len(history) > compactKeep {
+	if ShouldCompactRatio(r.LastPromptTokens, win, r.Profile.CompactThreshold()) && len(history) > compactKeep {
 		before := client.EstimatePromptTokens(history, nil)
 		sum, upto, cerr := CompactMessages(ctx, client, history)
 		if cerr == nil && sum != "" {
@@ -258,7 +263,23 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		if thinkMode == ThinkNever {
 			think = false
 		}
-		return r.runAnswer(ctx, client, answerClient, snap, history, rec, req.Text, prompt, think, req, dec, routerTime)
+		code, answer, ptok, used, esc := r.runAnswer(ctx, client, answerClient, snap, history, rec, req.Text, prompt, think, req, dec, routerTime)
+		if esc != "" && !r.escalated {
+			r.escalated = true
+			r.lastPromise = true
+			r.lastUser = req.Text
+			r.lastEscalate = esc
+			fmt.Fprintln(r.out(), ui.Current().Muted("· escalated to "+string(esc)))
+			dec.Intent = esc
+			dec.Effort = intent.EffortHigh
+		} else {
+			r.lastPromise = intent.IsPromise(answer)
+			if r.lastPromise {
+				r.lastUser = req.Text
+				r.lastEscalate = intent.EscalateIntent(req.Text, r.Profile.Router.ActionVerbs, r.Profile.Router.Targets)
+			}
+			return code, answer, ptok, used
+		}
 	}
 
 	root := repo.Root(cwd)
@@ -268,6 +289,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		fmt.Fprintln(r.errw(), "konsolai:", err)
 		return 1, "", 0, true
 	}
+	sg.SetExtraDeny(r.Profile.Safety.ExtraReadDeny, r.Profile.Safety.ExtraCommandDeny)
 	home, _ := os.UserHomeDir()
 	extras := safety.NamedRoots(req.Text, home)
 	if len(extras) > 0 {
@@ -289,7 +311,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		if r.Embed == nil || mem.Store() == nil {
 			return nil, nil
 		}
-		return rag.Search(ctx, mem.Store(), r.Embed, r.Embed, r.Profile.Name, projectID, query, scope, k)
+		return rag.SearchTune(ctx, mem.Store(), r.Embed, r.Embed, r.Profile.Name, projectID, query, scope, k, rag.TuneFrom(r.Profile))
 	}
 	reg := tools.NewRegistry(sg, toolOut, lister, memory.NewWebCache(mem), memory.NewFactStore(mem, r.Profile.Name, projectID, sessionID), tools.Options{
 		ReadOnlyShell: dec.Intent == intent.Lookup,
@@ -297,6 +319,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		Request:       req.Text,
 		OnWebFetch:    onWeb,
 		Recall:        onRecall,
+		DisplayLines:  r.Profile.DisplayLines(),
 	})
 	cfg := agent.Config{
 		Client:         client,
@@ -337,15 +360,15 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 	case intent.Lookup:
 		cfg.Tools = reg.Named("list_dir", "read_file", "outline", "search", "find_files", "web_fetch", "recall", "run_shell", "finish")
 		cfg.Prompt = agent.LookupPrompt + "\n" + lang + sub
-		cfg.MaxSteps = 10
-		cfg.ExploreBudget = agent.ExploreBudgetFor("lookup", string(dec.Task))
+		cfg.MaxSteps = r.Profile.MaxStepsFor("lookup")
+		cfg.ExploreBudget = r.Profile.ExploreBudgetFor("lookup", string(dec.Task))
 		cfg.ExploreNote = agent.ExploreNoteLookup
 	case intent.Build:
 		cfg.Prompt = agent.CodePrompt + "\n" + lang + "\n" + agent.ScopeRule + sub
 		cfg.Temperature = 0.3
-		cfg.MaxSteps = 60
+		cfg.MaxSteps = r.Profile.MaxStepsFor("build")
 		cfg.RequirePlan = true
-		cfg.ExploreBudget = agent.ExploreBudgetFor("build", string(dec.Task))
+		cfg.ExploreBudget = r.Profile.ExploreBudgetFor("build", string(dec.Task))
 		cfg.ExploreNote = agent.ExploreNoteBuild
 		sys = codeContext(ctx, snap, root) + facts
 	default:
@@ -353,10 +376,13 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		if dec.EffectiveEffort() == intent.EffortHigh {
 			cfg.RequirePlan = true
 		}
-		cfg.MaxSteps = 15
-		cfg.ExploreBudget = agent.ExploreBudgetFor("act", string(dec.Task))
+		cfg.MaxSteps = r.Profile.MaxStepsFor("act")
+		cfg.ExploreBudget = r.Profile.ExploreBudgetFor("act", string(dec.Task))
 		cfg.ExploreNote = agent.ExploreNoteLookup
 	}
+	cfg.TokenCap = r.Profile.TokenCap(string(dec.Intent))
+	cfg.ElideTrigger = r.Profile.ElideTrigger()
+	cfg.ElideTarget = r.Profile.ElideTarget()
 
 	err = agent.Run(ctx, cfg, sys, req.Text)
 	if dec.Intent == intent.Build {
@@ -395,10 +421,17 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 const fastWindowFillPct = 60
 
 func FastWindowTooFull(est, window int) bool {
+	return FastWindowTooFullRatio(est, window, 0)
+}
+
+func FastWindowTooFullRatio(est, window int, ratio float64) bool {
 	if window <= 0 {
 		window = 8192
 	}
-	return est > window*fastWindowFillPct/100
+	if ratio <= 0 || ratio >= 1 {
+		ratio = float64(fastWindowFillPct) / 100
+	}
+	return float64(est) > float64(window)*ratio
 }
 
 func (r *Runner) fastPromptTooLarge(ctx context.Context, fc *llm.Client, snap sysctx.Snapshot, history []llm.Message, query, extra string) bool {
@@ -408,10 +441,10 @@ func (r *Runner) fastPromptTooLarge(ctx context.Context, fc *llm.Client, snap sy
 	msgs := []llm.Message{sys}
 	msgs = append(msgs, SanitizeAnswerHistory(history)...)
 	msgs = append(msgs, user)
-	return FastWindowTooFull(fc.EstimatePromptTokens(msgs, nil), fc.ContextWindow())
+	return FastWindowTooFullRatio(fc.EstimatePromptTokens(msgs, nil), fc.ContextWindow(), r.Profile.FastGuardRatio())
 }
 
-func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap sysctx.Snapshot, history []llm.Message, rec agent.Recorder, query, extra string, think bool, req Request, dec intent.Decision, routerTime time.Duration) (int, string, int, bool) {
+func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap sysctx.Snapshot, history []llm.Message, rec agent.Recorder, query, extra string, think bool, req Request, dec intent.Decision, routerTime time.Duration) (int, string, int, bool, intent.Intent) {
 	if rec == nil {
 		rec = agent.NopRecorder{}
 	}
@@ -424,19 +457,45 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 
 	usedMain := client == main
 	t0 := time.Now()
-	out, usage, streamErr := StreamAnswer(ctx, client, msgs, think, req.Plain, r.out(), r.errw())
+	var buf bytes.Buffer
+	out, usage, streamErr := StreamAnswer(ctx, client, msgs, think, req.Plain, &buf, r.errw())
 	if streamErr != nil && !usedMain {
 		if req.Trace {
 			fmt.Fprintln(r.errw(), "fast model failed; retrying on main")
 		}
 		client = main
 		usedMain = true
-		out, usage, streamErr = StreamAnswer(ctx, client, msgs, think, req.Plain, r.out(), r.errw())
+		buf.Reset()
+		out, usage, streamErr = StreamAnswer(ctx, client, msgs, think, req.Plain, &buf, r.errw())
 	}
 	if streamErr == nil && strings.TrimSpace(out) == "" {
-		out, usage, streamErr = StreamAnswer(ctx, client, []llm.Message{system, user}, think, req.Plain, r.out(), r.errw())
+		buf.Reset()
+		out, usage, streamErr = StreamAnswer(ctx, client, []llm.Message{system, user}, think, req.Plain, &buf, r.errw())
 	}
 	modelTime := time.Since(t0)
+	ptok := 0
+	if usedMain {
+		ptok = usage.PromptTokens
+	}
+	if streamErr != nil {
+		if errors.Is(streamErr, context.Canceled) {
+			return 130, out, ptok, usedMain, ""
+		}
+		if errors.Is(streamErr, agent.ErrContextOverflow) {
+			fmt.Fprintln(r.errw(), streamErr.Error())
+			return 1, out, ptok, usedMain, ""
+		}
+		fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.Endpoint, streamErr, req.Trace))
+		return 1, out, ptok, usedMain, ""
+	}
+	if strings.TrimSpace(out) == "" {
+		fmt.Fprintln(r.errw(), "konsolai: the model returned no answer")
+		return 1, out, ptok, usedMain, ""
+	}
+	if !r.escalated && intent.IsPromise(out) {
+		return 0, out, ptok, usedMain, intent.EscalateIntent(query, r.Profile.Router.ActionVerbs, r.Profile.Router.Targets)
+	}
+	_, _ = io.Copy(r.out(), &buf)
 	_ = rec.Message(ctx, llm.Message{Role: llm.RoleAssistant, Content: out})
 	st := agent.Stats{
 		Steps:            1,
@@ -450,27 +509,7 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 		agent.PrintTrace(r.errw(), 1, think, modelTime, usage.PromptTokens, usage.CompletionTokens, main.ContextWindow(), nil)
 	}
 	agent.PrintSummary(r.errw(), string(dec.Intent), st)
-
-	ptok := 0
-	if usedMain {
-		ptok = usage.PromptTokens
-	}
-	if streamErr != nil {
-		if errors.Is(streamErr, context.Canceled) {
-			return 130, out, ptok, usedMain
-		}
-		if errors.Is(streamErr, agent.ErrContextOverflow) {
-			fmt.Fprintln(r.errw(), streamErr.Error())
-			return 1, out, ptok, usedMain
-		}
-		fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.Endpoint, streamErr, req.Trace))
-		return 1, out, ptok, usedMain
-	}
-	if strings.TrimSpace(out) == "" {
-		fmt.Fprintln(r.errw(), "konsolai: the model returned no answer")
-		return 1, out, ptok, usedMain
-	}
-	return 0, out, ptok, usedMain
+	return 0, out, ptok, usedMain, ""
 }
 
 func SanitizeAnswerHistory(hist []llm.Message) []llm.Message {
@@ -592,7 +631,7 @@ func (r *Runner) attachSessionMemory(ctx context.Context, mem *memory.Guard, pro
 	if !st.RAGAvailable(ctx) {
 		return 0, text
 	}
-	hits, err := rag.Search(ctx, st, r.Embed, r.Embed, r.Profile.Name, projectID, text, "sessions", 4)
+	hits, err := rag.SearchTune(ctx, st, r.Embed, r.Embed, r.Profile.Name, projectID, text, "sessions", 4, rag.TuneFrom(r.Profile))
 	if err != nil || len(hits) == 0 {
 		return 0, text
 	}
