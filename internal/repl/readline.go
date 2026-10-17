@@ -3,21 +3,28 @@ package repl
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/reeflective/readline"
 	"github.com/reeflective/readline/inputrc"
 	"github.com/siraj/konsolai/internal/ui"
+	"github.com/siraj/konsolai/internal/ui/theme"
+	"golang.org/x/term"
 )
 
 type rlReader struct {
-	sh       *readline.Shell
-	prompt   string
-	footer   func() string
-	pastes   *PasteStore
-	lastChip string
-	shellOn  bool
+	sh          *readline.Shell
+	prompt      string
+	innerPrompt string
+	footer      func() string
+	onClear     func()
+	pastes      *PasteStore
+	lastChip    string
+	shellOn     bool
+	framed      bool
 }
 
 type gatedHistory struct {
@@ -53,17 +60,20 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 	r := &rlReader{sh: sh, footer: footer, pastes: pastes}
 	sh.History.Add("repl", &gatedHistory{inner: loadFileHistory(HistoryPath()), active: &r.shellOn, want: false})
 	sh.History.Add("shell", &gatedHistory{inner: loadFileHistory(ShellHistoryPath()), active: &r.shellOn, want: true})
+	r.framed = term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stdin.Fd()))
 	sh.Keymap.Register(map[string]func(){
 		"insert-newline": func() {
 			sh.Line().Insert(sh.Cursor().Pos(), '\n')
 			sh.Cursor().Inc()
 		},
 		"undo-or-expand-paste": r.undoOrExpand,
+		"konsolai-clear":       r.clearScreen,
 	})
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\M-\C-m`), "insert-newline", false)
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\e\r`), "insert-newline", false)
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\e\n`), "insert-newline", false)
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\C-z`), "undo-or-expand-paste", false)
+	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\C-l`), "konsolai-clear", false)
 	if completer != nil {
 		sh.Completer = completer
 	}
@@ -82,16 +92,35 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 	}
 	sh.Prompt.Primary(func() string { return r.prompt })
 	sh.Hint.SetProvider(func(line []rune, cursor int) []rune {
-		if r.footer == nil {
-			return nil
+		if !r.framed {
+			if r.footer == nil {
+				return nil
+			}
+			s := r.footer()
+			if s == "" {
+				return nil
+			}
+			return []rune(s)
 		}
-		s := r.footer()
-		if s == "" {
-			return nil
+		width := theme.TermWidth()
+		rule := frameRule(width)
+		foot := ""
+		if r.footer != nil {
+			foot = r.footer()
 		}
-		return []rune(s)
+		if foot == "" {
+			return []rune(rule)
+		}
+		return []rune(rule + "\n" + foot)
 	})
 	return r, nil
+}
+
+func frameRule(width int) string {
+	if width < 1 {
+		width = 80
+	}
+	return theme.Style(theme.Subtle, strings.Repeat("─", width))
 }
 
 func (r *rlReader) undoOrExpand() {
@@ -115,8 +144,34 @@ func (r *rlReader) undoOrExpand() {
 	r.sh.History.Undo()
 }
 
+func (r *rlReader) SetOnClear(fn func()) { r.onClear = fn }
+
+func (r *rlReader) clearScreen() {
+	fmt.Fprint(os.Stdout, theme.ClearHome)
+	if r.onClear != nil {
+		r.onClear()
+	}
+}
+
+func (r *rlReader) EraseFrame(w io.Writer, line string) {
+	if r == nil || !r.framed {
+		return
+	}
+	width := theme.TermWidth()
+	inLines := theme.VisualLines(r.innerPrompt+line, width)
+	// Cursor sits on the line after input (readline printed a newline).
+	// Hint (bottom rule + footer) is below and is cleared with ClearBelow.
+	up := 1 + inLines + 1
+	fmt.Fprint(w, theme.CursorUp(up)+theme.ClearBelow)
+}
+
 func (r *rlReader) ReadLine(_ context.Context, prompt string) (string, error) {
-	r.prompt = prompt
+	r.innerPrompt = prompt
+	if r.framed {
+		r.prompt = frameRule(theme.TermWidth()) + "\n" + prompt
+	} else {
+		r.prompt = prompt
+	}
 	line, err := r.sh.Readline()
 	if err != nil {
 		if errors.Is(err, readline.ErrInterrupt) {
