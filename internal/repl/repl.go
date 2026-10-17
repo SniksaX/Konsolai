@@ -574,7 +574,10 @@ func probeBackground(ctx context.Context, prof config.Profile, errw io.Writer, s
 		}
 		cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
-		s, err := store.Open(cctx, prof.DatabaseURL)
+		s, err := store.OpenWith(cctx, prof.DatabaseURL, store.OpenOptions{
+			QueryTimeout:   prof.StoreQueryTimeout(),
+			MigrateTimeout: prof.StoreMigrateTimeout(),
+		})
 		if err != nil {
 			addWarn(st, p.Warn("database unreachable"))
 			return
