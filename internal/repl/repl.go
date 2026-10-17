@@ -177,6 +177,10 @@ func Run(ctx context.Context, cfg Config) int {
 			return 1
 		}
 	}
+	if kr, ok := rd.(interface{ ReadKey() (byte, error) }); ok {
+		ui.SetKeyReader(kr.ReadKey)
+		defer ui.SetKeyReader(nil)
+	}
 	if clr, ok := rd.(interface{ SetOnClear(func()) }); ok {
 		clr.SetOnClear(func() {
 			fmt.Fprintln(out, banner.Compact(info, ui.Current()))
@@ -224,7 +228,9 @@ func Run(ctx context.Context, cfg Config) int {
 		shell := st.shell
 		st.mu.Unlock()
 		prompt := inputPrompt(shell)
+		ui.HoldPrompt(true)
 		line, err := rd.ReadLine(ctx, prompt)
+		ui.HoldPrompt(false)
 		if err != nil {
 			if err == ErrEOF {
 				if shell {
