@@ -11,6 +11,7 @@ import (
 
 	"github.com/siraj/konsolai/internal/banner"
 	"github.com/siraj/konsolai/internal/commands"
+	"github.com/siraj/konsolai/internal/config"
 	"github.com/siraj/konsolai/internal/memory"
 	"github.com/siraj/konsolai/internal/store"
 	"github.com/siraj/konsolai/internal/ui"
@@ -19,12 +20,11 @@ import (
 	"golang.org/x/term"
 )
 
-const (
-	welcomeGatherLimit  = 400 * time.Millisecond
-	welcomeReadyLimit   = 500 * time.Millisecond
-	welcomeFreshFor     = 60 * time.Second
-	fallbackPlaceholder = "ask anything"
-)
+const fallbackPlaceholder = "ask anything"
+
+func builtinGatherLimit() time.Duration { return config.Builtin().ProbeDeadline() }
+func builtinReadyLimit() time.Duration  { return config.Builtin().StartupCap() }
+func builtinFreshFor() time.Duration    { return config.Builtin().WelcomeCacheFor() }
 
 // gatherData is welcome.Gather. Tests replace it to prove a stale refresh
 // does not block the redraw.
@@ -127,18 +127,19 @@ func termFile(w io.Writer) *os.File {
 }
 
 // awaitStartup waits until the banner draw has finished and welcome data is
-// ready. Data is abandoned at 400ms. The whole wait stops at 500ms so a
-// stuck banner or an uncancellable DNS lookup cannot hold the prompt.
+// ready. Data is abandoned at the gather budget. The whole wait stops at the
+// startup cap so a stuck banner or an uncancellable DNS lookup cannot hold
+// the prompt.
 func awaitStartup(data <-chan welcome.Data, bannerDone <-chan struct{}) (welcome.Data, bool) {
-	return awaitStartupLimits(data, bannerDone, welcomeGatherLimit, welcomeReadyLimit)
+	return awaitStartupLimits(data, bannerDone, builtinGatherLimit(), builtinReadyLimit())
 }
 
 func awaitStartupLimits(data <-chan welcome.Data, bannerDone <-chan struct{}, gather, ready time.Duration) (welcome.Data, bool) {
 	if gather <= 0 {
-		gather = welcomeGatherLimit
+		gather = builtinGatherLimit()
 	}
 	if ready <= 0 {
-		ready = welcomeReadyLimit
+		ready = builtinReadyLimit()
 	}
 	total := time.NewTimer(ready)
 	defer total.Stop()
@@ -217,14 +218,14 @@ func (s *welcomeState) gatherFor() time.Duration {
 	if s != nil && s.gatherLimit > 0 {
 		return s.gatherLimit
 	}
-	return welcomeGatherLimit
+	return builtinGatherLimit()
 }
 
 func (s *welcomeState) cacheFor() time.Duration {
 	if s != nil && s.freshFor > 0 {
 		return s.freshFor
 	}
-	return welcomeFreshFor
+	return builtinFreshFor()
 }
 
 func storeOf(mem *memory.Guard) *store.Store {
@@ -292,9 +293,9 @@ func mergeWelcome(d welcome.Data, info banner.Info) welcome.Data {
 
 func openWelcome(ctx context.Context, w io.Writer, env *commands.Env, info banner.Info, tty, wordmark bool) (*welcomeState, error) {
 	layout := "split"
-	gatherFor := welcomeGatherLimit
-	readyFor := welcomeReadyLimit
-	freshFor := welcomeFreshFor
+	gatherFor := builtinGatherLimit()
+	readyFor := builtinReadyLimit()
+	freshFor := builtinFreshFor()
 	if env != nil {
 		layout = env.Profile.WelcomeLayout()
 		gatherFor = env.Profile.ProbeDeadline()
@@ -369,7 +370,8 @@ func paintWelcome(w io.Writer, snap welcomeSnap) {
 }
 
 // redraw paints the full welcome from the cached startup data. A cache older
-// than 60s refreshes in the background and does not delay this paint.
+// than the welcome cache window refreshes in the background and does not
+// delay this paint.
 func (s *welcomeState) redraw(w io.Writer) {
 	if s == nil {
 		return
