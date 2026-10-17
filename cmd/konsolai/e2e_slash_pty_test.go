@@ -38,8 +38,8 @@ func TestE2ESlashMenuFilterTab(t *testing.T) {
 	s.waitPromptLine("› /copy", 3*time.Second)
 	s.send("\t")
 	s.waitPromptLine("› /copy", 3*time.Second)
-	if !strings.Contains(s.promptLine(), "› /copy") {
-		t.Fatalf("tab complete:\n%s", s.plainScreen())
+	if p := s.promptLine(); !strings.HasPrefix(p, "› /copy") {
+		t.Fatalf("tab complete prompt %q\n%s", p, s.plainScreen())
 	}
 	t.Log("PASS 2 filter /co, ↓ first match, tab complete")
 }
@@ -111,7 +111,7 @@ func TestE2ESlashMenuEnterCDKeepsEditing(t *testing.T) {
 	s.send("\r")
 	s.waitPromptLine("› /cd", 3*time.Second)
 	time.Sleep(200 * time.Millisecond)
-	if strings.Contains(s.plain(), "unknown") || strings.Contains(s.plainScreen(), "version") {
+	if strings.Contains(s.plain(), "unknown") || strings.Contains(s.plain(), "usage:") || strings.Contains(s.plainScreen(), "version") {
 		t.Fatalf("cd was submitted:\n%s", s.plain())
 	}
 	if !strings.Contains(s.promptLine(), "› /cd") {
