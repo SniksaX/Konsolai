@@ -191,6 +191,12 @@ func applyOverlay(c *Config, o Overlay) {
 		if o.UI.Theme != nil {
 			c.UI.Theme = *o.UI.Theme
 		}
+		if o.UI.Appearance != nil {
+			c.UI.Appearance = *o.UI.Appearance
+		}
+		if o.UI.CursorColor != nil {
+			c.UI.CursorColor = *o.UI.CursorColor
+		}
 		if o.UI.CodeHighlight != nil {
 			c.UI.CodeHighlight = *o.UI.CodeHighlight
 		}
