@@ -244,6 +244,7 @@ func Default() *Registry {
 		Command{Name: "output", Usage: "output [n]", Summary: "Reprint the full output of a recent command", Run: runOutput},
 		Command{Name: "status", Usage: "status", Summary: "Show version, model, database and environment", Run: runStatus},
 		Command{Name: "config", Usage: "config path|show|init|validate", Summary: "Show or write the YAML config", Run: runConfig},
+		Command{Name: "theme", Usage: "theme [name]", Summary: "List palettes or apply one", Run: runTheme},
 		Command{Name: "index", Usage: "index [path]|status|clear", Summary: "Index the project for recall", Run: runIndex},
 		Command{Name: "recall", Usage: "recall \"<query>\" [--scope X]", Summary: "Search indexed memory without calling the model", Run: runRecall},
 		Command{Name: "remember", Usage: "remember [--project] \"<fact>\"", Summary: "Store a fact", Run: runRemember},
