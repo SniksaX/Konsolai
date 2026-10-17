@@ -1,8 +1,11 @@
 package rag
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"net"
 	"strings"
 	"sync"
 	"testing"
@@ -178,5 +181,31 @@ func TestFlushCapDropsPending(t *testing.T) {
 	dropped := ing.Flush(context.Background(), 50*time.Millisecond)
 	if dropped < 1 {
 		t.Fatalf("want drops, got %d inserted=%d", dropped, len(st.inserted()))
+	}
+}
+
+type refuseEmbed struct{}
+
+func (refuseEmbed) Embed(context.Context, []string) ([][]float32, error) {
+	return nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
+}
+
+func TestIngestPausesWhenUnreachable(t *testing.T) {
+	st := &memStore{avail: true}
+	var notice bytes.Buffer
+	ing := New(st, refuseEmbed{}, "home")
+	ing.SetNotice(&notice)
+	ing.EnqueueTurn(nil, "hello world", "ans", "sid", "t", 1)
+	_ = ing.Flush(context.Background(), time.Second)
+	if !ing.Paused() {
+		t.Fatal("want paused")
+	}
+	if !strings.Contains(notice.String(), "memory ingest paused (embed endpoint unreachable)") {
+		t.Fatalf("notice %q", notice.String())
+	}
+	ing.EnqueueTurn(nil, "another", "", "sid", "t", 2)
+	_ = ing.Flush(context.Background(), time.Second)
+	if len(st.inserted()) != 0 {
+		t.Fatalf("turns waited or ingested: %+v", st.inserted())
 	}
 }
