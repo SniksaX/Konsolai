@@ -66,6 +66,9 @@ func applyOverlay(c *Config, o Overlay) {
 		if o.Agent.BuildThinking != nil {
 			c.Agent.BuildThinking = *o.Agent.BuildThinking
 		}
+		if o.Agent.IdenticalRejects != nil {
+			c.Agent.IdenticalRejects = *o.Agent.IdenticalRejects
+		}
 		if o.Agent.MaxSteps != nil {
 			if o.Agent.MaxSteps.Lookup != nil {
 				c.Agent.MaxSteps.Lookup = *o.Agent.MaxSteps.Lookup
@@ -208,6 +211,57 @@ func applyOverlay(c *Config, o Overlay) {
 		}
 		if o.UI.StripEmoji != nil {
 			c.UI.StripEmoji = *o.UI.StripEmoji
+		}
+		if o.UI.ProbeDeadlineMS != nil {
+			c.UI.ProbeDeadlineMS = *o.UI.ProbeDeadlineMS
+		}
+		if o.UI.ProbeTimeoutMS != nil {
+			c.UI.ProbeTimeoutMS = *o.UI.ProbeTimeoutMS
+		}
+		if o.UI.GitQueryMS != nil {
+			c.UI.GitQueryMS = *o.UI.GitQueryMS
+		}
+		if o.UI.MemoryQueryMS != nil {
+			c.UI.MemoryQueryMS = *o.UI.MemoryQueryMS
+		}
+		if o.UI.StartupCapMS != nil {
+			c.UI.StartupCapMS = *o.UI.StartupCapMS
+		}
+		if o.UI.WelcomeCacheSeconds != nil {
+			c.UI.WelcomeCacheSeconds = *o.UI.WelcomeCacheSeconds
+		}
+		if o.UI.ModelRateCalls != nil {
+			c.UI.ModelRateCalls = *o.UI.ModelRateCalls
+		}
+		if o.UI.CtxWarnPct != nil {
+			c.UI.CtxWarnPct = *o.UI.CtxWarnPct
+		}
+		if o.UI.CtxHotPct != nil {
+			c.UI.CtxHotPct = *o.UI.CtxHotPct
+		}
+		if o.UI.CtxCells != nil {
+			c.UI.CtxCells = *o.UI.CtxCells
+		}
+		if o.UI.CtxNarrowCols != nil {
+			c.UI.CtxNarrowCols = *o.UI.CtxNarrowCols
+		}
+		if o.UI.Layout != nil {
+			l := o.UI.Layout
+			if l.TinyHeight != nil {
+				c.UI.Layout.TinyHeight = *l.TinyHeight
+			}
+			if l.RecentHeight != nil {
+				c.UI.Layout.RecentHeight = *l.RecentHeight
+			}
+			if l.TinyWidth != nil {
+				c.UI.Layout.TinyWidth = *l.TinyWidth
+			}
+			if l.NarrowWidth != nil {
+				c.UI.Layout.NarrowWidth = *l.NarrowWidth
+			}
+			if l.FrameWidth != nil {
+				c.UI.Layout.FrameWidth = *l.FrameWidth
+			}
 		}
 	}
 	if o.Language != nil {
