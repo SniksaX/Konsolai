@@ -34,7 +34,7 @@ const searchFilter = `
 		AND (source <> 'code' OR ($2::bigint IS NOT NULL AND project_id = $2))`
 
 func (s *Store) SearchVector(ctx context.Context, profile string, projectID *int64, scope string, vec []float32, limit int) ([]SearchHit, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	if limit < 1 {
 		limit = 30
@@ -54,7 +54,7 @@ func (s *Store) SearchVector(ctx context.Context, profile string, projectID *int
 }
 
 func (s *Store) SearchText(ctx context.Context, profile string, projectID *int64, scope, query string, limit int) ([]SearchHit, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	if limit < 1 {
 		limit = 30
