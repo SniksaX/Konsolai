@@ -13,20 +13,22 @@ import (
 	"github.com/siraj/konsolai/internal/repo"
 	"github.com/siraj/konsolai/internal/safety"
 	"github.com/siraj/konsolai/internal/ui"
+	"github.com/siraj/konsolai/internal/ui/theme"
 )
 
 type RunFunc func(ctx context.Context, cwd, line string, stdin *os.File, stdout io.Writer) (exit int, dur time.Duration, capture string, err error)
 
 type Session struct {
-	Cwd    string
-	OldPwd string
-	Guard  *safety.Guard
-	Hist   History
-	Stdin  *os.File
-	Stdout io.Writer
-	Stderr io.Writer
-	Run    RunFunc
-	Exec   ExecFunc
+	Cwd     string
+	OldPwd  string
+	Guard   *safety.Guard
+	Hist    History
+	Stdin   *os.File
+	Stdout  io.Writer
+	Stderr  io.Writer
+	Run     RunFunc
+	Exec    ExecFunc
+	OnClear func()
 }
 
 func New(cwd string) *Session {
@@ -80,6 +82,12 @@ func (s *Session) Handle(ctx context.Context, line string) (toAI bool, err error
 		return false, nil
 	case builtin && name == "exit":
 		return true, nil
+	case builtin && (name == "clear" || name == "reset"):
+		fmt.Fprint(s.out(), theme.ClearScroll)
+		if s.OnClear != nil {
+			s.OnClear()
+		}
+		return false, nil
 	}
 	run := s.Run
 	if run == nil {
@@ -162,6 +170,10 @@ func parseBuiltin(line string) (name, arg string, ok bool) {
 	case "exit":
 		if len(fields) == 1 {
 			return "exit", "", true
+		}
+	case "clear", "reset":
+		if len(fields) == 1 {
+			return fields[0], "", true
 		}
 	}
 	return "", "", false
