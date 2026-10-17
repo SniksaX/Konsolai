@@ -197,6 +197,7 @@ func welcomeInput(env *commands.Env, info banner.Info) welcome.Input {
 	in.GitTimeout = env.Profile.GitQueryTimeout()
 	in.MemoryTimeout = env.Profile.MemoryQueryTimeout()
 	in.RateWindow = env.Profile.ModelRateWindow()
+	in.ModelSlow = env.Profile.ModelSlow()
 	return in
 }
 
