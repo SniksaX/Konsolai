@@ -167,6 +167,7 @@ type UI struct {
 	Theme          string `yaml:"theme"`
 	CodeHighlight  bool   `yaml:"code_highlight"`
 	ClearOnStart   bool   `yaml:"clear_on_start"`
+	StripEmoji     bool   `yaml:"strip_emoji"`
 }
 
 type Language struct {
@@ -231,7 +232,7 @@ func Builtin() Config {
 		UI: UI{
 			DisplayLines: 60, PasteChipLines: 11, PasteChipChars: 1000, OutputKeepKB: 256,
 			Palette: "amber", Banner: true, Theme: "auto",
-			CodeHighlight: true, ClearOnStart: true,
+			CodeHighlight: true, ClearOnStart: true, StripEmoji: true,
 		},
 		Language: Language{Languages: []string{"en", "fr"}, Default: "en"},
 		Safety:   Safety{ExtraReadDeny: []string{}, ExtraCommandDeny: []string{}},
@@ -416,6 +417,10 @@ func (c Config) CodeHighlightOn() bool {
 
 func (c Config) ClearOnStart() bool {
 	return c.UI.ClearOnStart
+}
+
+func (c Config) StripEmojiOn() bool {
+	return c.UI.StripEmoji
 }
 
 func nonzero(n, fallback int) int {
