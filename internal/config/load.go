@@ -132,6 +132,7 @@ type UIOverlay struct {
 	OutputKeepKB   *int    `yaml:"output_keep_kb" json:"output_keep_kb"`
 	Palette        *string `yaml:"palette" json:"palette"`
 	Banner         *bool   `yaml:"banner" json:"banner"`
+	Welcome        *string `yaml:"welcome" json:"welcome"`
 	Theme          *string `yaml:"theme" json:"theme"`
 	Appearance     *string `yaml:"appearance" json:"appearance"`
 	CursorColor    *bool   `yaml:"cursor_color" json:"cursor_color"`
