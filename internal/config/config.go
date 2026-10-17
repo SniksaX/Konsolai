@@ -164,6 +164,9 @@ type UI struct {
 	OutputKeepKB   int    `yaml:"output_keep_kb"`
 	Palette        string `yaml:"palette"`
 	Banner         bool   `yaml:"banner"`
+	Theme          string `yaml:"theme"`
+	CodeHighlight  bool   `yaml:"code_highlight"`
+	ClearOnStart   bool   `yaml:"clear_on_start"`
 }
 
 type Language struct {
@@ -227,7 +230,8 @@ func Builtin() Config {
 		},
 		UI: UI{
 			DisplayLines: 60, PasteChipLines: 11, PasteChipChars: 1000, OutputKeepKB: 256,
-			Palette: "amber", Banner: true,
+			Palette: "amber", Banner: true, Theme: "auto",
+			CodeHighlight: true, ClearOnStart: true,
 		},
 		Language: Language{Languages: []string{"en", "fr"}, Default: "en"},
 		Safety:   Safety{ExtraReadDeny: []string{}, ExtraCommandDeny: []string{}},
@@ -395,6 +399,23 @@ func (c Config) PaletteName() string {
 
 func (c Config) ShowBanner() bool {
 	return c.UI.Banner
+}
+
+func (c Config) Appearance() string {
+	switch strings.ToLower(strings.TrimSpace(c.UI.Theme)) {
+	case "light", "dark":
+		return strings.ToLower(strings.TrimSpace(c.UI.Theme))
+	default:
+		return "auto"
+	}
+}
+
+func (c Config) CodeHighlightOn() bool {
+	return c.UI.CodeHighlight
+}
+
+func (c Config) ClearOnStart() bool {
+	return c.UI.ClearOnStart
 }
 
 func nonzero(n, fallback int) int {
