@@ -161,6 +161,11 @@ func SessionStatus(code int) string {
 }
 
 func DecideIntent(ctx context.Context, client *llm.Client, forceIntent, request string, newSession bool, cands []intent.Candidate, inRepo bool) intent.Decision {
+	return DecideIntentFloor(ctx, client, forceIntent, request, newSession, cands, inRepo, nil, nil)
+}
+
+func DecideIntentFloor(ctx context.Context, client *llm.Client, forceIntent, request string, newSession bool, cands []intent.Candidate, inRepo bool, verbs, targets []string) intent.Decision {
+	floor, hasFloor := intent.ActionFloor(request, verbs, targets)
 	if forceIntent != "" {
 		n := 0
 		if !newSession && len(cands) > 0 {
@@ -172,6 +177,9 @@ func DecideIntent(ctx context.Context, client *llm.Client, forceIntent, request 
 		}
 	}
 	d, _ := intent.Classify(ctx, client, request, cands, inRepo)
+	if hasFloor {
+		d = intent.RaiseTo(d, floor)
+	}
 	return d
 }
 
