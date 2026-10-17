@@ -10,6 +10,7 @@ import (
 
 	"github.com/reeflective/readline"
 	"github.com/reeflective/readline/inputrc"
+	"github.com/siraj/konsolai/internal/commands"
 	"github.com/siraj/konsolai/internal/ui"
 	"github.com/siraj/konsolai/internal/ui/theme"
 	"golang.org/x/term"
@@ -22,6 +23,7 @@ type rlReader struct {
 	footer      func() string
 	onClear     func()
 	pastes      *PasteStore
+	menu        *slashMenu
 	lastChip    string
 	shellOn     bool
 	framed      bool
@@ -44,27 +46,26 @@ func (g *gatedHistory) GetLine(pos int) (string, error) { return g.inner.GetLine
 func (g *gatedHistory) Len() int                        { return g.inner.Len() }
 func (g *gatedHistory) Dump() interface{}               { return g.inner.Dump() }
 
-func NewReadline(completer func(line []rune, cursor int) readline.Completions, footer func() string, pastes *PasteStore) (LineReader, error) {
+func NewReadline(completer func(line []rune, cursor int) readline.Completions, footer func() string, pastes *PasteStore, reg *commands.Registry) (LineReader, error) {
 	sh := readline.NewShell()
 	_ = sh.Config.Set("enable-bracketed-paste", true)
 	_ = sh.Config.Set("history-size", histCap)
 	_ = sh.Config.Set("cursor-position-probe", false)
+	// Autocomplete stays on for @ and shell-mode; slash names never produce
+	// completions (see Completer + the wrapper below).
 	_ = sh.Config.Set("autocomplete", true)
 	_ = sh.Config.Set("usage-hint-always", true)
 	_ = sh.Config.Set("completion-description-style", ui.Current().MutedSeq())
-	// Selection always gets a 256-color bg 255 from the library; we only
-	// control the foreground SGR (truecolor Heading when the terminal allows).
 	_ = sh.Config.Set("completion-selection-style", theme.HeadingSeq())
 	// Leave the live prompt as the only scrollback copy. RefreshTransient
 	// reprints prompt+line after accept and misses the footer/hint row, so
 	// enabling it produced a second "› line" in a real TTY.
 	_ = sh.Config.Set("prompt-transient", false)
 	_ = sh.Config.Set("transient-prompt", false)
-	r := &rlReader{sh: sh, footer: footer, pastes: pastes}
+	r := &rlReader{sh: sh, footer: footer, pastes: pastes, menu: newSlashMenu(reg)}
 	sh.History.Add("repl", &gatedHistory{inner: loadFileHistory(HistoryPath()), active: &r.shellOn, want: false})
 	sh.History.Add("shell", &gatedHistory{inner: loadFileHistory(ShellHistoryPath()), active: &r.shellOn, want: true})
 	r.framed = term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stdin.Fd()))
-	cmds := sh.Keymap.Commands()
 	sh.Keymap.Register(map[string]func(){
 		"insert-newline": func() {
 			sh.Line().Insert(sh.Cursor().Pos(), '\n')
@@ -72,20 +73,43 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 		},
 		"undo-or-expand-paste": r.undoOrExpand,
 		"konsolai-clear":       r.clearScreen,
-		"konsolai-up":          r.historyOrMenu(true, cmds),
-		"konsolai-down":        r.historyOrMenu(false, cmds),
+		"konsolai-up":          r.slashUp,
+		"konsolai-down":        r.slashDown,
+		"konsolai-esc":         r.slashEsc,
+		"konsolai-tab":         r.slashTab,
+		"konsolai-enter":       r.slashEnter,
+		"konsolai-question":    r.slashQuestion,
 	})
+	bindEmacsVi := func(seq, action string) {
+		_ = sh.Config.Bind("emacs", inputrc.Unescape(seq), action, false)
+		_ = sh.Config.Bind("vi-insert", inputrc.Unescape(seq), action, false)
+	}
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\M-\C-m`), "insert-newline", false)
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\e\r`), "insert-newline", false)
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\e\n`), "insert-newline", false)
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\C-z`), "undo-or-expand-paste", false)
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\C-l`), "konsolai-clear", false)
-	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\e[A`), "konsolai-up", false)
-	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\e[B`), "konsolai-down", false)
-	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\eOA`), "konsolai-up", false)
-	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\eOB`), "konsolai-down", false)
-	if completer != nil {
-		sh.Completer = completer
+	bindEmacsVi(`\e[A`, "konsolai-up")
+	bindEmacsVi(`\e[B`, "konsolai-down")
+	bindEmacsVi(`\eOA`, "konsolai-up")
+	bindEmacsVi(`\eOB`, "konsolai-down")
+	bindEmacsVi(`\e`, "konsolai-esc")
+	bindEmacsVi(`\C-i`, "konsolai-tab")
+	bindEmacsVi(`\C-m`, "konsolai-enter")
+	bindEmacsVi(`\C-j`, "konsolai-enter")
+	bindEmacsVi(`?`, "konsolai-question")
+	sh.Completer = func(line []rune, cursor int) readline.Completions {
+		s := string(line)
+		if cursor >= 0 && cursor <= len(line) {
+			s = string(line[:cursor])
+		}
+		if strings.HasPrefix(s, "/") && !strings.Contains(s, " ") {
+			return readline.Completions{}
+		}
+		if completer != nil {
+			return completer(line, cursor)
+		}
+		return readline.Completions{}
 	}
 	sh.PasteTransformer = func(text string) string {
 		if r.pastes == nil {
@@ -102,28 +126,167 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 	}
 	sh.Prompt.Primary(func() string { return r.prompt })
 	sh.Hint.SetProvider(func(line []rune, cursor int) []rune {
-		if !r.framed {
-			if r.footer == nil {
-				return nil
-			}
-			s := r.footer()
-			if s == "" {
-				return nil
-			}
-			return []rune(s)
+		s := string(line)
+		if r.menu != nil {
+			r.menu.Sync(s)
 		}
+		r.gateAutocomplete(s)
 		width := theme.TermWidth()
+		menu := ""
+		if r.menu != nil && r.menu.Open() {
+			menu = r.menu.Render(width)
+		}
+		foot := r.hintFooter()
+		if !r.framed {
+			switch {
+			case menu != "" && foot != "":
+				return []rune(menu + "\n" + foot)
+			case menu != "":
+				return []rune(menu)
+			case foot != "":
+				return []rune(foot)
+			default:
+				return nil
+			}
+		}
 		rule := frameRule(width)
-		foot := ""
-		if r.footer != nil {
-			foot = r.footer()
+		var b strings.Builder
+		if menu != "" {
+			b.WriteString(menu)
+			b.WriteByte('\n')
 		}
-		if foot == "" {
-			return []rune(rule)
+		b.WriteString(rule)
+		if foot != "" {
+			b.WriteByte('\n')
+			b.WriteString(foot)
 		}
-		return []rune(rule + "\n" + foot)
+		return []rune(b.String())
 	})
 	return r, nil
+}
+
+func (r *rlReader) hintFooter() string {
+	if r.menu != nil && r.menu.Open() {
+		return r.menu.HintFooter()
+	}
+	if r.footer != nil {
+		return r.footer()
+	}
+	return ""
+}
+
+func (r *rlReader) gateAutocomplete(line string) {
+	if r == nil || r.sh == nil {
+		return
+	}
+	if strings.HasPrefix(line, "/") && !strings.Contains(line, " ") {
+		_ = r.sh.Config.Set("autocomplete", false)
+	} else {
+		_ = r.sh.Config.Set("autocomplete", true)
+	}
+}
+
+func (r *rlReader) syncMenu() {
+	if r == nil || r.sh == nil || r.sh.Line() == nil {
+		return
+	}
+	line := string(*r.sh.Line())
+	if r.menu != nil {
+		r.menu.Sync(line)
+	}
+	r.gateAutocomplete(line)
+}
+
+func (r *rlReader) applyLine(s string) {
+	if r == nil || r.sh == nil || r.sh.Line() == nil {
+		return
+	}
+	r.sh.History.Save()
+	r.sh.Line().Set([]rune(s)...)
+	r.sh.Cursor().Set(len([]rune(s)))
+}
+
+func (r *rlReader) callWidget(name string) {
+	if r == nil || r.sh == nil {
+		return
+	}
+	if fn := r.sh.Keymap.Commands()[name]; fn != nil {
+		fn()
+	}
+}
+
+func (r *rlReader) applyMenu(res menuResult) {
+	switch res.Action {
+	case actionLine:
+		r.applyLine(res.Line)
+	case actionSubmit:
+		r.callWidget("accept-line")
+	case actionClear:
+		r.applyLine("")
+	}
+}
+
+func (r *rlReader) slashDown() {
+	r.syncMenu()
+	if r.menu != nil && r.menu.Open() {
+		r.applyMenu(r.menu.Down())
+		return
+	}
+	r.callWidget("next-history")
+}
+
+func (r *rlReader) slashUp() {
+	r.syncMenu()
+	if r.menu != nil && r.menu.Open() {
+		r.applyMenu(r.menu.Up())
+		return
+	}
+	r.callWidget("previous-history")
+}
+
+func (r *rlReader) slashEsc() {
+	r.syncMenu()
+	if r.menu != nil {
+		r.applyMenu(r.menu.Esc())
+		return
+	}
+	r.applyLine("")
+}
+
+func (r *rlReader) slashTab() {
+	r.syncMenu()
+	if r.menu != nil && r.menu.Open() {
+		res := r.menu.Tab()
+		if res.Action != actionPass {
+			r.applyMenu(res)
+			return
+		}
+	}
+	r.callWidget("complete")
+}
+
+func (r *rlReader) slashEnter() {
+	r.syncMenu()
+	if r.menu != nil && r.menu.Open() {
+		res := r.menu.Enter()
+		if res.Action != actionPass {
+			r.applyMenu(res)
+			return
+		}
+	}
+	r.callWidget("accept-line")
+}
+
+func (r *rlReader) slashQuestion() {
+	r.syncMenu()
+	if r.menu != nil && r.menu.Open() {
+		res := r.menu.Question()
+		if res.Action != actionPass {
+			r.applyMenu(res)
+			return
+		}
+	}
+	r.callWidget("self-insert")
 }
 
 func frameRule(width int) string {
@@ -152,32 +315,6 @@ func (r *rlReader) undoOrExpand() {
 		return
 	}
 	r.sh.History.Undo()
-}
-
-func (r *rlReader) historyOrMenu(up bool, cmds map[string]func()) func() {
-	return func() {
-		line := ""
-		if r.sh != nil && r.sh.Line() != nil {
-			line = string(*r.sh.Line())
-		}
-		if strings.HasPrefix(line, "/") {
-			name := "menu-complete"
-			if up {
-				name = "menu-complete-backward"
-			}
-			if fn := cmds[name]; fn != nil {
-				fn()
-				return
-			}
-		}
-		name := "next-history"
-		if up {
-			name = "previous-history"
-		}
-		if fn := cmds[name]; fn != nil {
-			fn()
-		}
-	}
 }
 
 func (r *rlReader) SetOnClear(fn func()) { r.onClear = fn }
