@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/reeflective/readline"
 	"github.com/reeflective/readline/inputrc"
@@ -27,6 +28,8 @@ type rlReader struct {
 	lastChip    string
 	shellOn     bool
 	framed      bool
+	placeholder string
+	phMu        sync.Mutex
 }
 
 type gatedHistory struct {
@@ -75,11 +78,17 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 		"undo-or-expand-paste": r.undoOrExpand,
 		"konsolai-clear":       r.clearScreen,
 		"konsolai-up":          r.slashUp,
-		"konsolai-down":        r.slashDown,
-		"konsolai-esc":         r.slashEsc,
-		"konsolai-tab":         r.slashTab,
-		"konsolai-enter":       r.slashEnter,
-		"konsolai-question":    r.slashQuestion,
+		// Stock forward-char and vi-forward-char call acceptInlineSuggestion,
+		// which would submit the placeholder. End-of-line does not accept in
+		// v1.3.0; the override keeps that and stays off the suggestion.
+		"forward-char":      r.forwardNoAccept,
+		"vi-forward-char":   r.viForwardNoAccept,
+		"end-of-line":       r.endNoAccept,
+		"konsolai-down":     r.slashDown,
+		"konsolai-esc":      r.slashEsc,
+		"konsolai-tab":      r.slashTab,
+		"konsolai-enter":    r.slashEnter,
+		"konsolai-question": r.slashQuestion,
 	})
 	bindEmacsVi := func(seq, action string) {
 		key := inputrc.Unescape(seq)
@@ -143,7 +152,11 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 		return chip
 	}
 	sh.Prompt.Primary(func() string { return r.prompt })
+	sh.SyntaxHighlighter = func(line []rune) string {
+		return echoBody(string(line))
+	}
 	sh.Hint.SetProvider(func(line []rune, cursor int) []rune {
+		r.syncPlaceholder(line)
 		s := string(line)
 		if r.menu != nil {
 			r.menu.Sync(s)
@@ -182,6 +195,92 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 		return []rune(b.String())
 	})
 	return r, nil
+}
+
+func (r *rlReader) SetPlaceholder(s string) {
+	if strings.TrimSpace(s) == "" {
+		s = "ask anything"
+	}
+	r.phMu.Lock()
+	r.placeholder = s
+	r.phMu.Unlock()
+}
+
+func (r *rlReader) currentPlaceholder() string {
+	if r == nil {
+		return ""
+	}
+	r.phMu.Lock()
+	defer r.phMu.Unlock()
+	return r.placeholder
+}
+
+func (r *rlReader) syncPlaceholder(line []rune) {
+	if r == nil || r.sh == nil {
+		return
+	}
+	ph := r.currentPlaceholder()
+	hide := r.shellOn || len(line) != 0 || ph == "" || (r.menu != nil && r.menu.Open())
+	if hide {
+		if r.sh.GetInlineSuggestion() != "" {
+			r.sh.ClearInlineSuggestion()
+		}
+		return
+	}
+	if r.sh.GetInlineSuggestion() != ph {
+		r.sh.SetInlineSuggestion(ph)
+	}
+}
+
+func (r *rlReader) forwardNoAccept() {
+	if r == nil || r.sh == nil || r.sh.Cursor() == nil {
+		return
+	}
+	r.sh.History.SkipSave()
+	vii := 1
+	if r.sh.Iterations != nil {
+		vii = r.sh.Iterations.Get()
+	}
+	for i := 1; i <= vii; i++ {
+		r.sh.Cursor().Inc()
+	}
+}
+
+func (r *rlReader) endNoAccept() {
+	if r == nil || r.sh == nil || r.sh.Cursor() == nil {
+		return
+	}
+	r.sh.History.SkipSave()
+	r.sh.Cursor().EndOfLineAppend()
+}
+
+func (r *rlReader) viForwardNoAccept() {
+	if r == nil || r.sh == nil || r.sh.Cursor() == nil || r.sh.Line() == nil {
+		return
+	}
+	name := ""
+	if r.sh.Keymap != nil {
+		name = fmt.Sprint(r.sh.Keymap.Main())
+	}
+	if name == "vi-insert" {
+		return
+	}
+	r.sh.History.SkipSave()
+	line := r.sh.Line()
+	cur := r.sh.Cursor()
+	if cur.Pos() >= line.Len()-1 {
+		return
+	}
+	vii := 1
+	if r.sh.Iterations != nil {
+		vii = r.sh.Iterations.Get()
+	}
+	for i := 1; i <= vii; i++ {
+		if cur.Pos()+1 < line.Len() && (*line)[cur.Pos()+1] == '\n' {
+			break
+		}
+		cur.Inc()
+	}
 }
 
 func (r *rlReader) ensureEscLocal() {
@@ -418,10 +517,10 @@ func (r *rlReader) ReadKey() (byte, error) {
 	}
 	for {
 		if key, empty := r.sh.Keys.Pop(); !empty {
-			if key == 0 || key == '\r' || key == '\n' {
+			if key == 0 {
 				continue
 			}
-			return key, nil
+			return byte(key), nil
 		}
 		break
 	}
@@ -432,20 +531,17 @@ func (r *rlReader) ReadKey() (byte, error) {
 			defer func() { _ = term.Restore(fd, st) }()
 		}
 	}
-	for {
-		key, abort := r.sh.Keys.ReadKey()
-		if key == 0 && abort {
-			if r.sh.Keys.IsEOF() {
-				return 0, io.EOF
-			}
-			return 0x1b, nil
+	// One byte per call. Escape tails stay in the kernel buffer so the theme
+	// picker can poll for them; a PTY rejects SetReadDeadline.
+	var buf [1]byte
+	n, err := os.Stdin.Read(buf[:])
+	if n == 0 {
+		if err != nil {
+			return 0, err
 		}
-		b := byte(key)
-		if b == 0 || b == '\r' || b == '\n' {
-			continue
-		}
-		return b, nil
+		return 0, io.EOF
 	}
+	return buf[0], nil
 }
 
 func (r *rlReader) ReadLine(_ context.Context, prompt string) (string, error) {
