@@ -81,18 +81,21 @@ func (r *Renderer) Flush() error {
 }
 
 func (r *Renderer) line(s string) error {
-	if r.plain {
-		return r.writeCollapsed(s, s+"\n")
-	}
 	if r.inFence {
 		if isCloseFence(strings.TrimRight(s, "\r"), r.fenceChar, r.fenceN) {
 			body := r.fenceBody.String()
 			r.fenceBody.Reset()
 			r.inFence = false
+			if r.plain {
+				return r.writeCollapsed(s, s+"\n")
+			}
 			return r.emitFence(r.fenceLang, body)
 		}
 		r.fenceBody.WriteString(s)
 		r.fenceBody.WriteByte('\n')
+		if r.plain {
+			return r.writeCollapsed(s, s+"\n")
+		}
 		return nil
 	}
 	if char, n, lang, ok := parseOpenFence(strings.TrimRight(s, "\r")); ok {
@@ -104,7 +107,16 @@ func (r *Renderer) line(s string) error {
 		r.fenceN = n
 		r.fenceLang = lang
 		r.lastBlank = false
+		if r.plain {
+			return r.writeCollapsed(s, s+"\n")
+		}
 		return nil
+	}
+	if StripEmojiOn() {
+		s = StripEmoji(s)
+	}
+	if r.plain {
+		return r.writeCollapsed(s, s+"\n")
 	}
 	if reTable.MatchString(s) {
 		r.table = append(r.table, s)
