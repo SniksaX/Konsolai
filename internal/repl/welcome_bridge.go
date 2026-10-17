@@ -67,10 +67,13 @@ func termBox(w io.Writer) (width, height int) {
 			height = n
 		}
 	}
-	f, ok := w.(*os.File)
-	if !ok {
+	f := termFile(w)
+	if f == nil {
 		if width < 1 {
 			width = 80
+		}
+		if height < 1 {
+			height = 24
 		}
 		return width, height
 	}
@@ -94,6 +97,30 @@ func termBox(w io.Writer) (width, height int) {
 		height = 24
 	}
 	return width, height
+}
+
+// termFile finds the terminal behind the REPL writers. paintWelcome is given
+// the newline-tracking wrapper around stdout, which is not itself an *os.File.
+func termFile(w io.Writer) *os.File {
+	for i := 0; i < 8 && w != nil; i++ {
+		switch v := w.(type) {
+		case *os.File:
+			return v
+		case *nlWriter:
+			w = v.w
+		default:
+			u, ok := w.(interface{ Unwrap() io.Writer })
+			if !ok {
+				return nil
+			}
+			next := u.Unwrap()
+			if next == w {
+				return nil
+			}
+			w = next
+		}
+	}
+	return nil
 }
 
 // awaitStartup waits until the banner draw has finished and welcome data is
