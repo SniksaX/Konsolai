@@ -61,6 +61,7 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 	sh.History.Add("repl", &gatedHistory{inner: loadFileHistory(HistoryPath()), active: &r.shellOn, want: false})
 	sh.History.Add("shell", &gatedHistory{inner: loadFileHistory(ShellHistoryPath()), active: &r.shellOn, want: true})
 	r.framed = term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stdin.Fd()))
+	cmds := sh.Keymap.Commands()
 	sh.Keymap.Register(map[string]func(){
 		"insert-newline": func() {
 			sh.Line().Insert(sh.Cursor().Pos(), '\n')
@@ -68,12 +69,18 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 		},
 		"undo-or-expand-paste": r.undoOrExpand,
 		"konsolai-clear":       r.clearScreen,
+		"konsolai-up":          r.historyOrMenu(true, cmds),
+		"konsolai-down":        r.historyOrMenu(false, cmds),
 	})
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\M-\C-m`), "insert-newline", false)
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\e\r`), "insert-newline", false)
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\e\n`), "insert-newline", false)
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\C-z`), "undo-or-expand-paste", false)
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\C-l`), "konsolai-clear", false)
+	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\e[A`), "konsolai-up", false)
+	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\e[B`), "konsolai-down", false)
+	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\eOA`), "konsolai-up", false)
+	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\eOB`), "konsolai-down", false)
 	if completer != nil {
 		sh.Completer = completer
 	}
@@ -142,6 +149,32 @@ func (r *rlReader) undoOrExpand() {
 		return
 	}
 	r.sh.History.Undo()
+}
+
+func (r *rlReader) historyOrMenu(up bool, cmds map[string]func()) func() {
+	return func() {
+		line := ""
+		if r.sh != nil && r.sh.Line() != nil {
+			line = string(*r.sh.Line())
+		}
+		if strings.HasPrefix(line, "/") {
+			name := "menu-complete"
+			if up {
+				name = "menu-complete-backward"
+			}
+			if fn := cmds[name]; fn != nil {
+				fn()
+				return
+			}
+		}
+		name := "next-history"
+		if up {
+			name = "previous-history"
+		}
+		if fn := cmds[name]; fn != nil {
+			fn()
+		}
+	}
 }
 
 func (r *rlReader) SetOnClear(fn func()) { r.onClear = fn }
