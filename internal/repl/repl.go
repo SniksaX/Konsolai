@@ -412,7 +412,7 @@ func echoBody(text string) string {
 	if text == "" || !theme.Enabled() {
 		return text
 	}
-	return "\x1b[1;39m" + text + "\x1b[0m"
+	return theme.InputEcho(text)
 }
 
 func sessionFooter(st *session, cfg Config) string {
