@@ -8,7 +8,8 @@ import (
 )
 
 func renderFrame(w io.Writer, d Data, width, height int) {
-	if height < 22 || width < 120 {
+	lim := d.Limits.norm()
+	if height < lim.TinyHeight || width < lim.FrameWidth {
 		renderSplit(w, d, width, height)
 		return
 	}
@@ -16,12 +17,13 @@ func renderFrame(w io.Writer, d Data, width, height int) {
 }
 
 func frameLines(pal ui.Palette, d Data, width, height int) []string {
+	lim := d.Limits.norm()
 	right, paint := healthLabel(d)
 	rightFn := func(s string) string { return paint(pal, s) }
 	top := pal.Subtle("╭") + titleBar(pal, width-2, frameTitle(d), right, rightFn) + pal.Subtle("╮")
 
 	lines := []string{"", top, frameRow(pal, width, "")}
-	for _, row := range frameBanner(pal, width) {
+	for _, row := range frameBanner(pal, width, lim.TinyWidth) {
 		lines = append(lines, frameRow(pal, width, row))
 	}
 	lines = append(lines,
@@ -31,7 +33,7 @@ func frameLines(pal ui.Palette, d Data, width, height int) []string {
 
 	c1, c2, c3 := frameCols(width)
 	recentHead := " " + pal.AccentDim("RECENT")
-	if height < 30 {
+	if height < lim.RecentHeight {
 		recentHead = ""
 	}
 	header := fitWidth(" "+pal.AccentDim("MODELS"), c1) +
@@ -42,7 +44,7 @@ func frameLines(pal ui.Palette, d Data, width, height int) []string {
 	models := modelRows(pal, c1, d.Models)
 	session := sessionLines(pal, c2, d.Session)
 	var recent []string
-	if height >= 30 {
+	if height >= lim.RecentHeight {
 		recent = insetRecent(pal, c3, d.Recent)
 	}
 	n := len(models)
@@ -103,8 +105,8 @@ func frameRow(pal ui.Palette, width int, content string) string {
 	return pal.Subtle("│") + fitWidth(content, inner) + pal.Subtle("│")
 }
 
-func frameBanner(pal ui.Palette, width int) []string {
-	wm := wordmark(width)
+func frameBanner(pal ui.Palette, width, minW int) []string {
+	wm := wordmarkMin(width, minW)
 	for len(wm) < 4 {
 		wm = append(wm, "")
 	}
