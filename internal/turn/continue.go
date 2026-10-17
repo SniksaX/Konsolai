@@ -10,7 +10,7 @@ const continueNote = "The previous attempt stopped before finishing; continue fr
 
 func isContinue(s string) bool {
 	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "continue", "go on", "keep going", "vas-y", "continue stp", "poursuis":
+	case "continue", "go on", "keep going", "vas-y", "continue stp", "poursuis", "go ahead", "ok do it", "fais-le":
 		return true
 	default:
 		return false
@@ -22,7 +22,16 @@ func incompleteTurn(code int) bool {
 }
 
 func (r *Runner) continueDecision(text string) (intent.Decision, bool) {
-	if r == nil || !isContinue(text) || !incompleteTurn(r.lastCode) || r.lastIntent == "" {
+	if r == nil {
+		return intent.Decision{}, false
+	}
+	if intent.IsPromiseContinue(text) && r.lastPromise && r.lastUser != "" && r.lastEscalate != "" {
+		return intent.Decision{
+			Intent: r.lastEscalate, Language: r.lastLang, Reason: "continue-promise",
+			Effort: intent.EffortHigh, Task: r.lastTask,
+		}, true
+	}
+	if !isContinue(text) || !incompleteTurn(r.lastCode) || r.lastIntent == "" {
 		return intent.Decision{}, false
 	}
 	return intent.Decision{
