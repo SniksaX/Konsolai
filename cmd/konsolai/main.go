@@ -224,7 +224,10 @@ func run() int {
 		}
 	} else {
 		clear := ui.StartAfter("loading memory", 300*time.Millisecond)
-		opened, err := store.Open(ctx, prof.DatabaseURL)
+		opened, err := store.OpenWith(ctx, prof.DatabaseURL, store.OpenOptions{
+			QueryTimeout:   prof.StoreQueryTimeout(),
+			MigrateTimeout: prof.StoreMigrateTimeout(),
+		})
 		clear()
 		if err != nil {
 			if needMem {
@@ -240,6 +243,7 @@ func run() int {
 	mem := memory.NewGuard(st, func(err error) {
 		fmt.Fprintln(os.Stderr, ui.Dim(config.DisableLine(prof.DatabaseURL, err)))
 	})
+	mem.SetIsolatedTimeout(prof.IsolatedTimeout())
 	if s := mem.Store(); s != nil {
 		if err := s.PruneIfDue(ctx, prof.RetentionDays); err != nil {
 			mem.Fail(err)
