@@ -34,6 +34,9 @@ func Completer(reg *commands.Registry, cwdFn func() string) func(line []rune, cu
 		}
 		s := string(line[:cursor])
 		if strings.HasPrefix(s, "/") {
+			if !strings.Contains(s, " ") {
+				return readline.Completions{}
+			}
 			return completeSlash(reg, s)
 		}
 		start := lastTokenStart(s)
