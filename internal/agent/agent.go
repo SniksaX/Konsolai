@@ -939,11 +939,15 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	approvedAll := false
 	printedBlock := false
 	consecFail := 0
+	skipSummary := false
 	var st Stats
 	st.RouterTime = cfg.RouterTime
 	defer func() {
 		if cfg.Stats != nil {
 			*cfg.Stats = st
+		}
+		if skipSummary {
+			return
 		}
 		if cfg.Intent != "" || cfg.Err != nil {
 			intent := cfg.Intent
@@ -1190,6 +1194,10 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			}
 			action, err := tool.Prepare(call.Function.Arguments)
 			if err != nil {
+				if errors.Is(err, tools.ErrLookupMutating) {
+					skipSummary = true
+					return err
+				}
 				printReject(cfg.Out, call.Function.Name, call.Function.Arguments, err.Error())
 				content := "error: " + err.Error()
 				failKey := call.Function.Name + call.Function.Arguments + "prep"
