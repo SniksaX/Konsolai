@@ -22,7 +22,7 @@
 
 ## Layout
 - cmd/konsolai (entrypoint)
-- internal/config (XDG config.json profiles)
+- internal/config (XDG config.yaml profiles)
 - internal/redact (secrets before persist)
 - internal/store (Postgres via pgxpool; best-effort, 2s timeouts)
 - internal/memory (adapters; agent/tools/ui never import pgx)
@@ -52,7 +52,7 @@
 - answer: stream, no tools. lookup: read-only tools, ExploreBudget 6, MaxSteps 10.
  act: all tools, no plan, ExploreBudget 6, MaxSteps 15.
  build: plan gate, ExploreBudget 12, MaxSteps 60, thinking, temp 0.3.
-- Memory: $XDG_CONFIG_HOME/konsolai/config.json (default ~/.config/konsolai/config.json).
+- Memory: $XDG_CONFIG_HOME/konsolai/config.yaml (default ~/.config/konsolai/config.yaml).
  --profile beats KONSOLAI_PROFILE beats default_profile beats built-in "default".
  KONSOLAI_DATABASE_URL / KONSOLAI_ENDPOINT / KONSOLAI_MODEL override profile fields.
  Resume the latest active|finished session (one family; mode ignored)
