@@ -1,0 +1,20 @@
+
+  ▀▄     █  ▄▀ ▄▀▀▀▄ █▄  █ ▄▀▀▀▀ ▄▀▀▀▄ █     ▄▀▀▀▄ ▀▀█▀▀ █████      ╭─ fatboy ──────────────────────────────────────────────────── 0/4 up ─╮
+    ▀▄   █▄▀   █   █ █ ▀▄█ ▀▄▄▄  █   █ █     █▄▄▄█   █   █████      │ ○ qwen38.nvfp4  main    :11436 unreachable                           │
+   ▄▀    █ ▀▄  █   █ █   █     █ █   █ █     █   █   █   █████      │ ○ qwen38-fast   fast    :11437 unreachable                           │
+  ▀      ▀   ▀  ▀▀▀  ▀   ▀ ▀▀▀▀   ▀▀▀  ▀▀▀▀▀ ▀   ▀ ▀▀▀▀▀ ▀▀▀▀▀      │ ○ nomic-embed   embed   :8081 unreachable                            │
+         your terminal agent, on your own models                    │ ○ bge-reranker  rerank  :8082 unreachable                            │
+                                                                    ╰──────────────────────────────────────────────────────────────────────╯
+
+  ╭─ session                                                       ─╮
+  │ dir      ~/proj                                                 │
+  │ branch   dev*                                                   │
+  │ changed  3                                                      │
+  │ ahead    1                                                      │
+  │ behind   2                                                      │
+  │ build    v0.1.0  ab12cd3                                        │
+  │ memory   412 facts · 2 sessions                                 │
+  ╰─────────────────────────────────────────────────────────────────╯
+
+    / commands   ! shell   @ files   ? help                                                           tip /undo reverts the last file change
+
