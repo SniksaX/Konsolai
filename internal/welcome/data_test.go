@@ -14,6 +14,29 @@ import (
 	"github.com/siraj/konsolai/internal/store"
 )
 
+func TestGatherHonorsProbeDeadline(t *testing.T) {
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(2 * time.Second)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer slow.Close()
+
+	start := time.Now()
+	_, err := Gather(context.Background(), Input{
+		Endpoint:    slow.URL + "/v1",
+		Model:       "qwen",
+		ProbeBudget: 80 * time.Millisecond,
+		CWD:         t.TempDir(),
+	})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed >= 300*time.Millisecond {
+		t.Fatalf("probe deadline not honored: %s", elapsed)
+	}
+}
+
 func TestGatherProbesDeadlineAndOffline(t *testing.T) {
 	var gotPath string
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
