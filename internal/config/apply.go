@@ -197,6 +197,9 @@ func applyOverlay(c *Config, o Overlay) {
 		if o.UI.ClearOnStart != nil {
 			c.UI.ClearOnStart = *o.UI.ClearOnStart
 		}
+		if o.UI.StripEmoji != nil {
+			c.UI.StripEmoji = *o.UI.StripEmoji
+		}
 	}
 	if o.Language != nil {
 		if o.Language.Languages != nil {
