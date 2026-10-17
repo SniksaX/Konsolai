@@ -198,17 +198,25 @@ func editDist(a, b string) int {
 	return prev[len(rb)]
 }
 
-func runHelp(ctx context.Context, env *Env, _ []string) int {
-	cmds := Default().All()
-	width := 0
-	for _, c := range cmds {
-		u := "/" + c.Usage
-		if len(u) > width {
-			width = len(u)
-		}
+func commandNames(c Command) string {
+	s := "/" + c.Name
+	for _, a := range c.Aliases {
+		s += ", /" + a
 	}
-	for _, c := range cmds {
-		fmt.Fprintf(env.out(), "%-*s  %s\n", width, "/"+c.Usage, c.Summary)
+	return s
+}
+
+func SlashRow(names, desc string, selected bool) string {
+	p := ui.Current()
+	if selected {
+		return p.Accent("› ") + p.Heading(names) + "  " + p.Muted(desc)
+	}
+	return "  " + names + "  " + p.Muted(desc)
+}
+
+func runHelp(ctx context.Context, env *Env, _ []string) int {
+	for _, c := range Default().All() {
+		fmt.Fprintln(env.out(), SlashRow(commandNames(c), c.Summary, false))
 	}
 	return 0
 }
@@ -221,8 +229,7 @@ func Default() *Registry {
 		Command{Name: "show", Usage: "show <n>", Summary: "Reprint a session's prompts and answers", Run: runShow},
 		Command{Name: "resume", Usage: "resume <n> \"<request>\"", Summary: "Continue session n with a new request", Run: runResume},
 		Command{Name: "new", Usage: "new", Summary: "Close resumable sessions so the next request starts fresh", Run: runNew},
-		Command{Name: "exit", Usage: "exit", Summary: "Leave the REPL", ReplOnly: true, Run: runExit},
-		Command{Name: "quit", Usage: "quit", Summary: "Leave the REPL", ReplOnly: true, Run: runExit},
+		Command{Name: "exit", Aliases: []string{"quit"}, Usage: "exit", Summary: "Leave the REPL", ReplOnly: true, Run: runExit},
 		Command{Name: "clear", Usage: "clear", Summary: "Clear the screen", ReplOnly: true, Run: runClear},
 		Command{Name: "cd", Usage: "cd <dir>", Summary: "Change the working directory", ReplOnly: true, Run: runCD},
 		Command{Name: "cmd", Usage: "cmd [clear]", Summary: "Toggle shell mode", ReplOnly: true, Run: runCmd},
