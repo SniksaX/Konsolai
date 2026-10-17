@@ -8,25 +8,76 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/siraj/konsolai/internal/repo"
 	"github.com/siraj/konsolai/internal/ui"
 )
 
 func gitBranch(cwd string) string {
-	root := repo.Root(cwd)
-	b, err := os.ReadFile(filepath.Join(root, ".git", "HEAD"))
-	if err != nil {
+	head := readGitHEAD(cwd)
+	if head == "" {
 		return ""
 	}
-	s := strings.TrimSpace(string(b))
 	const pref = "ref: refs/heads/"
-	if strings.HasPrefix(s, pref) {
-		return strings.TrimPrefix(s, pref)
+	if strings.HasPrefix(head, pref) {
+		return strings.TrimPrefix(head, pref)
 	}
-	if len(s) > 7 {
-		return s[:7]
+	if len(head) > 7 {
+		return head[:7]
 	}
-	return s
+	return head
+}
+
+func readGitHEAD(cwd string) string {
+	dir := cwd
+	if dir == "" {
+		return ""
+	}
+	for {
+		gitPath := filepath.Join(dir, ".git")
+		fi, err := os.Lstat(gitPath)
+		if err == nil {
+			headPath := filepath.Join(gitPath, "HEAD")
+			if !fi.IsDir() {
+				b, err := os.ReadFile(gitPath)
+				if err != nil {
+					return ""
+				}
+				gitdir := parseGitdir(string(b), dir)
+				if gitdir == "" {
+					return ""
+				}
+				headPath = filepath.Join(gitdir, "HEAD")
+			}
+			b, err := os.ReadFile(headPath)
+			if err != nil {
+				return ""
+			}
+			return strings.TrimSpace(string(b))
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
+func parseGitdir(contents, base string) string {
+	for _, line := range strings.Split(contents, "\n") {
+		line = strings.TrimSpace(line)
+		const p = "gitdir:"
+		if !strings.HasPrefix(strings.ToLower(line), p) {
+			continue
+		}
+		dir := strings.TrimSpace(line[len(p):])
+		if dir == "" {
+			return ""
+		}
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(base, dir)
+		}
+		return filepath.Clean(dir)
+	}
+	return ""
 }
 
 func shortPath(cwd string) string {
