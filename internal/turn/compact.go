@@ -21,7 +21,17 @@ func ShouldCompact(promptTokens, window int) bool {
 	if window < 1 || promptTokens < 1 {
 		return false
 	}
-	return float64(promptTokens) > 0.7*float64(window)
+	return ShouldCompactRatio(promptTokens, window, 0)
+}
+
+func ShouldCompactRatio(promptTokens, window int, threshold float64) bool {
+	if window < 1 || promptTokens < 1 {
+		return false
+	}
+	if threshold <= 0 || threshold >= 1 {
+		threshold = 0.7
+	}
+	return float64(promptTokens) > threshold*float64(window)
 }
 
 func HistoryWithSummary(msgs []llm.Message, summary string, after int) []llm.Message {
