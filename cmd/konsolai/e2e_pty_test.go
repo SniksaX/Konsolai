@@ -129,6 +129,7 @@ func startE2E(t *testing.T, endpoint, cwd string) *e2eSess {
 	cmd.Dir = cwd
 	cmd.Env = append(os.Environ(),
 		"XDG_CONFIG_HOME="+xdg,
+		"INPUTRC=/dev/null",
 		"TERM=xterm-256color",
 		"NO_COLOR=1",
 		"COLUMNS=80",
