@@ -44,8 +44,11 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 	_ = sh.Config.Set("autocomplete", true)
 	_ = sh.Config.Set("usage-hint-always", true)
 	_ = sh.Config.Set("completion-description-style", "\x1b[38;5;245m")
-	_ = sh.Config.Set("prompt-transient", true)
-	_ = sh.Config.Set("transient-prompt", true)
+	// Leave the live prompt as the only scrollback copy. RefreshTransient
+	// reprints prompt+line after accept and misses the footer/hint row, so
+	// enabling it produced a second "› line" in a real TTY.
+	_ = sh.Config.Set("prompt-transient", false)
+	_ = sh.Config.Set("transient-prompt", false)
 	r := &rlReader{sh: sh, footer: footer, pastes: pastes}
 	sh.History.Add("repl", &gatedHistory{inner: loadFileHistory(HistoryPath()), active: &r.shellOn, want: false})
 	sh.History.Add("shell", &gatedHistory{inner: loadFileHistory(ShellHistoryPath()), active: &r.shellOn, want: true})
@@ -77,8 +80,6 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 		return chip
 	}
 	sh.Prompt.Primary(func() string { return r.prompt })
-	// Transient is the only copy of the submitted line that stays in scrollback.
-	sh.Prompt.Transient(func() string { return r.prompt })
 	sh.Hint.SetProvider(func(line []rune, cursor int) []rune {
 		if r.footer == nil {
 			return nil
