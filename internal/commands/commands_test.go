@@ -591,3 +591,19 @@ func TestConfigValidateMissingIsOK(t *testing.T) {
 		t.Fatalf("got %q", out.String())
 	}
 }
+
+func TestRunClearWipesScrollback(t *testing.T) {
+	env, out, _ := testEnv(t)
+	env.InRepl = true
+	called := false
+	env.OnClear = func() { called = true }
+	if code := runClear(context.Background(), env, nil); code != 0 {
+		t.Fatalf("code %d", code)
+	}
+	if !strings.Contains(out.String(), "\x1b[3J") || !strings.Contains(out.String(), "\x1b[H\x1b[2J") {
+		t.Fatalf("missing wipe %q", out.String())
+	}
+	if !called {
+		t.Fatal("OnClear not called")
+	}
+}
