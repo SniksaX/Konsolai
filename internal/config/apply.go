@@ -182,6 +182,12 @@ func applyOverlay(c *Config, o Overlay) {
 		if o.UI.OutputKeepKB != nil {
 			c.UI.OutputKeepKB = *o.UI.OutputKeepKB
 		}
+		if o.UI.Palette != nil {
+			c.UI.Palette = *o.UI.Palette
+		}
+		if o.UI.Banner != nil {
+			c.UI.Banner = *o.UI.Banner
+		}
 	}
 	if o.Language != nil {
 		if o.Language.Languages != nil {
