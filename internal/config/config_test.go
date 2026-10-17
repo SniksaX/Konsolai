@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -591,6 +592,105 @@ func TestDefaultPathUsesXDG(t *testing.T) {
 	got := DefaultPath()
 	if got != "/tmp/xdg/konsolai/config.yaml" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestTunablesOmitAndOverride(t *testing.T) {
+	clearEnv(t)
+	p, err := File{}.Resolve("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.MaxStepsFor("act") != 15 || p.ProbeDeadline() != 400*time.Millisecond || p.WelcomeLayout() != "split" {
+		t.Fatalf("builtin steps=%d probe=%s welcome=%s", p.MaxStepsFor("act"), p.ProbeDeadline(), p.WelcomeLayout())
+	}
+	if p.IdenticalRejectLimit() != 2 || p.ProbeTimeout() != 300*time.Millisecond ||
+		p.GitQueryTimeout() != 200*time.Millisecond || p.MemoryQueryTimeout() != 200*time.Millisecond ||
+		p.StartupCap() != 500*time.Millisecond || p.WelcomeCacheFor() != 60*time.Second ||
+		p.ModelRateWindow() != 20 || p.CtxWarnPct() != 60 || p.CtxHotPct() != 85 ||
+		p.CtxCells() != 8 || p.CtxNarrowCols() != 90 ||
+		p.LayoutTinyHeight() != 22 || p.LayoutRecentHeight() != 30 ||
+		p.LayoutTinyWidth() != 64 || p.LayoutNarrowWidth() != 110 || p.LayoutFrameWidth() != 120 {
+		t.Fatalf("builtin tunables %+v", p.UI)
+	}
+
+	omit := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(omit, []byte("default_profile: home\nprofiles:\n  home: {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := Load(omit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err = f.Resolve("home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.MaxStepsFor("act") != 15 || p.ProbeDeadline() != 400*time.Millisecond || p.WelcomeLayout() != "split" || p.IdenticalRejectLimit() != 2 {
+		t.Fatalf("omitted steps=%d probe=%s welcome=%s rejects=%d", p.MaxStepsFor("act"), p.ProbeDeadline(), p.WelcomeLayout(), p.IdenticalRejectLimit())
+	}
+
+	path := filepath.Join(t.TempDir(), "override.yaml")
+	body := `defaults:
+  agent:
+    max_steps:
+      act: 7
+    identical_rejects: 4
+  ui:
+    welcome: minimal
+    probe_deadline_ms: 250
+    layout:
+      tiny_height: 18
+`
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err = f.Resolve("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.MaxStepsFor("act") != 7 {
+		t.Fatalf("step cap %d", p.MaxStepsFor("act"))
+	}
+	if p.ProbeDeadline() != 250*time.Millisecond {
+		t.Fatalf("probe %s", p.ProbeDeadline())
+	}
+	if p.WelcomeLayout() != "minimal" {
+		t.Fatalf("welcome %s", p.WelcomeLayout())
+	}
+	if p.IdenticalRejectLimit() != 4 || p.LayoutTinyHeight() != 18 || p.LayoutFrameWidth() != 120 {
+		t.Fatalf("partial override rejects=%d tiny=%d frame=%d", p.IdenticalRejectLimit(), p.LayoutTinyHeight(), p.LayoutFrameWidth())
+	}
+
+	raw := InitYAML()
+	for _, key := range []string{
+		"probe_deadline_ms: 400",
+		"probe_timeout_ms: 300",
+		"git_query_ms: 200",
+		"memory_query_ms: 200",
+		"startup_cap_ms: 500",
+		"welcome_cache_seconds: 60",
+		"model_rate_calls: 20",
+		"identical_rejects: 2",
+		"ctx_warn_pct: 60",
+		"ctx_hot_pct: 85",
+		"ctx_cells: 8",
+		"ctx_narrow_cols: 90",
+		"tiny_height: 22",
+		"recent_height: 30",
+		"tiny_width: 64",
+		"narrow_width: 110",
+		"frame_width: 120",
+		"welcome: split",
+		"act: 15",
+	} {
+		if !strings.Contains(raw, key) {
+			t.Fatalf("init missing %s", key)
+		}
 	}
 }
 
