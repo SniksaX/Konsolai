@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/siraj/konsolai/internal/ui"
+	"github.com/siraj/konsolai/internal/ui/theme"
 	"golang.org/x/term"
 )
 
@@ -16,6 +17,8 @@ type Info struct {
 	Version string
 	Model   string
 	Dir     string
+	Branch  string
+	Host    string
 }
 
 const (
@@ -23,7 +26,6 @@ const (
 	glyphW  = 5
 	indent  = "  "
 	wordmrk = "KONSOLAI"
-	hint    = "/ for commands   ! for shell   @ for files"
 )
 
 var font = map[rune][glyphH]string{
@@ -38,11 +40,14 @@ var font = map[rune][glyphH]string{
 	'#': {"11111", "11111", "11111", "11111", "11111", "11111", "11111"},
 }
 
-const mutedLine = "konsolai %s · %s · /help for commands"
+const (
+	mutedLine = "konsolai %s · %s · /help for commands"
+	minMark   = 64
+)
 
-// Startup writes the pixel splash when enabled on a TTY, otherwise the one-line banner.
-func Startup(w io.Writer, info Info, enabled, tty bool, pal ui.Palette, width int) error {
-	if !enabled || !tty {
+// Startup writes the splash on a TTY. wordmark is ui.banner; off still draws the card.
+func Startup(w io.Writer, info Info, wordmark, tty bool, pal ui.Palette, width int) error {
+	if !tty {
 		model := info.Model
 		if model == "" {
 			model = "-"
@@ -50,7 +55,7 @@ func Startup(w io.Writer, info Info, enabled, tty bool, pal ui.Palette, width in
 		_, err := fmt.Fprintln(w, pal.Muted(fmt.Sprintf(mutedLine, info.Version, model)))
 		return err
 	}
-	return Render(w, info, pal, width)
+	return Render(w, info, pal, width, wordmark)
 }
 
 // RenderTTY sizes the splash from the file's terminal and the active theme.
@@ -62,7 +67,7 @@ func RenderTTY(f *os.File, info Info) error {
 	if w, _, err := term.GetSize(int(f.Fd())); err == nil && w > 0 {
 		width = w
 	}
-	return Render(f, info, ui.Current(), width)
+	return Render(f, info, ui.Current(), width, true)
 }
 
 func IsTTY(w io.Writer) bool {
@@ -71,16 +76,11 @@ func IsTTY(w io.Writer) bool {
 }
 
 func Width(w io.Writer) int {
-	if f, ok := w.(*os.File); ok {
-		if n, _, err := term.GetSize(int(f.Fd())); err == nil && n > 0 {
-			return n
-		}
-	}
-	return 80
+	return theme.TermWidth()
 }
 
-// Render writes the wordmark using the theme palette. Color-off skips SGR.
-func Render(w io.Writer, info Info, pal ui.Palette, width int) error {
+// Render writes the wordmark (optional) and the info card.
+func Render(w io.Writer, info Info, pal ui.Palette, width int, wordmark bool) error {
 	if width <= 0 {
 		width = 80
 	}
@@ -89,9 +89,18 @@ func Render(w io.Writer, info Info, pal ui.Palette, width int) error {
 	prompt := pixelLines(">")
 	word := pixelLines(wordmrk + "#")
 	full := len(indent) + glyphW + 2 + runeLen(word[0])
+	cardW := full
+	if width < minMark {
+		cardW = width - 4
+		if cardW < 24 {
+			cardW = 24
+		}
+	} else if cardW > width-4 {
+		cardW = width - 4
+	}
 
 	b.WriteByte('\n')
-	if width >= full {
+	if wordmark && width >= minMark {
 		for i := range word {
 			b.WriteString(indent)
 			b.WriteString(pal.PaintRGB(roles.AccentDim, prompt[i]))
@@ -99,14 +108,13 @@ func Render(w io.Writer, info Info, pal ui.Palette, width int) error {
 			b.WriteString(pal.PaintRGB(lerp(roles.BannerTop, roles.BannerBottom, i, len(word)), word[i]))
 			b.WriteByte('\n')
 		}
-	} else {
-		b.WriteString(indent + pal.PaintRGB(roles.AccentDim, "> ") + pal.PaintRGB(roles.BannerBottom, "konsolai") + "\n")
+		b.WriteByte('\n')
+	} else if wordmark || width < minMark {
+		b.WriteString(indent + pal.Accent("›") + " " + pal.Heading("konsolai") + "\n\n")
 	}
 
-	if meta := joinNonEmpty(info.Version, info.Model, info.Dir); meta != "" {
-		b.WriteString("\n" + indent + pal.PaintRGB(roles.Meta, meta) + "\n")
-	}
-	b.WriteString(indent + pal.PaintRGB(roles.Muted, hint) + "\n\n")
+	b.WriteString(card(info, pal, cardW))
+	b.WriteString(hintLine(pal, width) + "\n\n")
 
 	_, err := io.WriteString(w, b.String())
 	return err
@@ -163,16 +171,6 @@ func lerp(a, b ui.RGB, i, n int) ui.RGB {
 	}
 	t := func(x, y uint8) uint8 { return uint8(int(x) + (int(y)-int(x))*i/(n-1)) }
 	return ui.RGB{R: t(a.R, b.R), G: t(a.G, b.G), B: t(a.B, b.B)}
-}
-
-func joinNonEmpty(parts ...string) string {
-	kept := parts[:0:0]
-	for _, p := range parts {
-		if p != "" {
-			kept = append(kept, p)
-		}
-	}
-	return strings.Join(kept, "   ")
 }
 
 func runeLen(s string) int { return len([]rune(s)) }
