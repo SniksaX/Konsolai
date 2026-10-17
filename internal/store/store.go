@@ -883,10 +883,6 @@ func (s *Store) withTimeout(ctx context.Context) (context.Context, context.Cance
 	return context.WithTimeout(ctx, d)
 }
 
-func withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(ctx, config.Builtin().StoreQueryTimeout())
-}
-
 func sha256Hex(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
