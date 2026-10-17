@@ -59,7 +59,11 @@ func runRun(ctx context.Context, env *Env, args []string) int {
 	if !env.Plain {
 		outw = ui.NewGutter(outw)
 	}
-	reg := tools.NewRegistry(g, outw, nil, nil, nil)
+	reg := tools.NewRegistry(g, outw, nil, nil, nil, tools.Options{
+		ShellDefaultTimeout: env.Profile.ShellDefaultTimeout(),
+		ShellMaxTimeout:     env.Profile.ShellMaxTimeout(),
+		ShellWaitDelay:      env.Profile.ShellWaitDelay(),
+	})
 	tool, ok := reg.Get("run_shell")
 	if !ok {
 		return 1
