@@ -157,21 +157,25 @@ func (r *rlReader) EraseFrame(w io.Writer, line string) {
 	if r == nil || !r.framed {
 		return
 	}
+	// Hints, menu and footer are already cleared by readline at accept.
+	// Only the top rule (printed by us) and the wrapped input remain.
 	width := theme.TermWidth()
 	inLines := theme.VisualLines(r.innerPrompt+line, width)
-	// Cursor sits on the line after input (readline printed a newline).
-	// Hint (bottom rule + footer) is below and is cleared with ClearBelow.
-	up := 1 + inLines + 1
+	up := 1 + inLines
 	fmt.Fprint(w, theme.CursorUp(up)+theme.ClearBelow)
+}
+
+func (r *rlReader) printTopRule() {
+	if r == nil || !r.framed {
+		return
+	}
+	fmt.Fprintln(os.Stdout, frameRule(theme.TermWidth()))
 }
 
 func (r *rlReader) ReadLine(_ context.Context, prompt string) (string, error) {
 	r.innerPrompt = prompt
-	if r.framed {
-		r.prompt = frameRule(theme.TermWidth()) + "\n" + prompt
-	} else {
-		r.prompt = prompt
-	}
+	r.prompt = prompt
+	r.printTopRule()
 	line, err := r.sh.Readline()
 	if err != nil {
 		if errors.Is(err, readline.ErrInterrupt) {
