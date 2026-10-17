@@ -61,6 +61,8 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 		fmt.Fprintln(r.errw(), "konsolai:", err)
 		return Result{ExitCode: 1}
 	}
+	r.beginStats(req.Intent)
+	defer r.endStats()
 	client := r.client()
 	if _, err := client.ResolveModel(ctx); err != nil {
 		fmt.Fprintln(r.errw(), "konsolai:", err)
@@ -106,6 +108,7 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	}
 	understand()
 	routerTime := time.Since(routedAt)
+	r.setStatIntent(string(dec.Intent))
 	if thinkMode == ThinkAlways {
 		dec.Effort = intent.EffortHigh
 	}
@@ -129,6 +132,7 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 		picked.Messages = LoadCompacted(ctx, mem, picked.ID, r.Profile.Name, cwd)
 	}
 	sessionID, history := picked.ID, picked.Messages
+	r.setStatSession(sessionID)
 	win := client.ContextWindow()
 	r.LastWindow = win
 	if ShouldCompactRatio(r.LastPromptTokens, win, r.Profile.CompactThreshold()) && len(history) > compactKeep {
@@ -164,6 +168,7 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	if sessionID == "" && len(history) == 0 {
 		sessionID = CreateSession(ctx, mem, r.Profile, projectID, cwd, string(dec.Intent), req.Text)
 	}
+	r.setStatSession(sessionID)
 	rec := memory.NewRecorder(mem, sessionID, cwd)
 	tap := &sessionTap{inner: rec, msgs: append([]llm.Message(nil), history...)}
 	if len(tap.msgs) > 20 {
