@@ -37,12 +37,15 @@ type welcomeSnap struct {
 	wordmark bool
 	at       time.Time
 	in       welcome.Input
+	limits   welcome.Limits
 }
 
 type welcomeState struct {
 	mu            sync.Mutex
 	snap          welcomeSnap
 	onPlaceholder func(string)
+	gatherLimit   time.Duration
+	freshFor      time.Duration
 }
 
 func (s *welcomeState) snapshot() welcomeSnap {
@@ -127,9 +130,19 @@ func termFile(w io.Writer) *os.File {
 // ready. Data is abandoned at 400ms. The whole wait stops at 500ms so a
 // stuck banner or an uncancellable DNS lookup cannot hold the prompt.
 func awaitStartup(data <-chan welcome.Data, bannerDone <-chan struct{}) (welcome.Data, bool) {
-	total := time.NewTimer(welcomeReadyLimit)
+	return awaitStartupLimits(data, bannerDone, welcomeGatherLimit, welcomeReadyLimit)
+}
+
+func awaitStartupLimits(data <-chan welcome.Data, bannerDone <-chan struct{}, gather, ready time.Duration) (welcome.Data, bool) {
+	if gather <= 0 {
+		gather = welcomeGatherLimit
+	}
+	if ready <= 0 {
+		ready = welcomeReadyLimit
+	}
+	total := time.NewTimer(ready)
 	defer total.Stop()
-	dataTimer := time.NewTimer(welcomeGatherLimit)
+	dataTimer := time.NewTimer(gather)
 	defer dataTimer.Stop()
 
 	var view welcome.Data
@@ -178,7 +191,40 @@ func welcomeInput(env *commands.Env, info banner.Info) welcome.Input {
 		in.CWD = info.Dir
 	}
 	in.Store = storeOf(env.Mem)
+	in.ProbeBudget = env.Profile.ProbeDeadline()
+	in.ProbeTimeout = env.Profile.ProbeTimeout()
+	in.GitTimeout = env.Profile.GitQueryTimeout()
+	in.MemoryTimeout = env.Profile.MemoryQueryTimeout()
+	in.RateWindow = env.Profile.ModelRateWindow()
 	return in
+}
+
+func welcomeLimits(env *commands.Env) welcome.Limits {
+	if env == nil {
+		return welcome.Limits{}
+	}
+	p := env.Profile
+	return welcome.Limits{
+		TinyHeight:   p.LayoutTinyHeight(),
+		RecentHeight: p.LayoutRecentHeight(),
+		TinyWidth:    p.LayoutTinyWidth(),
+		NarrowWidth:  p.LayoutNarrowWidth(),
+		FrameWidth:   p.LayoutFrameWidth(),
+	}
+}
+
+func (s *welcomeState) gatherFor() time.Duration {
+	if s != nil && s.gatherLimit > 0 {
+		return s.gatherLimit
+	}
+	return welcomeGatherLimit
+}
+
+func (s *welcomeState) cacheFor() time.Duration {
+	if s != nil && s.freshFor > 0 {
+		return s.freshFor
+	}
+	return welcomeFreshFor
 }
 
 func storeOf(mem *memory.Guard) *store.Store {
@@ -246,14 +292,28 @@ func mergeWelcome(d welcome.Data, info banner.Info) welcome.Data {
 
 func openWelcome(ctx context.Context, w io.Writer, env *commands.Env, info banner.Info, tty, wordmark bool) (*welcomeState, error) {
 	layout := "split"
+	gatherFor := welcomeGatherLimit
+	readyFor := welcomeReadyLimit
+	freshFor := welcomeFreshFor
 	if env != nil {
 		layout = env.Profile.WelcomeLayout()
+		gatherFor = env.Profile.ProbeDeadline()
+		readyFor = env.Profile.StartupCap()
+		freshFor = env.Profile.WelcomeCacheFor()
+	}
+	limits := welcomeLimits(env)
+	if limits.TinyWidth > 0 {
+		info.MinWidth = limits.TinyWidth
 	}
 	in := welcomeInput(env, info)
-	st := &welcomeState{snap: welcomeSnap{
-		info: info, layout: layout, wordmark: wordmark, in: in,
-		data: degradedWelcome(info),
-	}}
+	st := &welcomeState{
+		gatherLimit: gatherFor,
+		freshFor:    freshFor,
+		snap: welcomeSnap{
+			info: info, layout: layout, wordmark: wordmark, in: in,
+			data: degradedWelcome(info), limits: limits,
+		},
+	}
 	if !tty {
 		if err := banner.Startup(w, info, wordmark, false, ui.Current(), theme.TermWidth()); err != nil {
 			return nil, err
@@ -262,7 +322,7 @@ func openWelcome(ctx context.Context, w io.Writer, env *commands.Env, info banne
 		return st, nil
 	}
 
-	gctx, cancel := context.WithTimeout(ctx, welcomeGatherLimit)
+	gctx, cancel := context.WithTimeout(ctx, st.gatherFor())
 	dataCh := make(chan welcome.Data, 1)
 	go func() {
 		defer cancel()
@@ -278,7 +338,7 @@ func openWelcome(ctx context.Context, w io.Writer, env *commands.Env, info banne
 		defer close(bannerDone)
 		berr = banner.Startup(w, info, wordmark, true, ui.Current(), theme.TermWidth())
 	}()
-	view, ok := awaitStartup(dataCh, bannerDone)
+	view, ok := awaitStartupLimits(dataCh, bannerDone, st.gatherFor(), readyFor)
 	select {
 	case <-bannerDone:
 		if berr != nil {
@@ -303,7 +363,9 @@ func openWelcome(ctx context.Context, w io.Writer, env *commands.Env, info banne
 
 func paintWelcome(w io.Writer, snap welcomeSnap) {
 	width, height := termBox(w)
-	welcome.Render(w, snap.data, snap.layout, width, height)
+	d := snap.data
+	d.Limits = snap.limits
+	welcome.Render(w, d, snap.layout, width, height)
 }
 
 // redraw paints the full welcome from the cached startup data. A cache older
@@ -316,7 +378,7 @@ func (s *welcomeState) redraw(w io.Writer) {
 		w = os.Stdout
 	}
 	snap := s.snapshot()
-	if !snap.at.IsZero() && time.Since(snap.at) > welcomeFreshFor {
+	if !snap.at.IsZero() && time.Since(snap.at) > s.cacheFor() {
 		go s.refresh()
 	}
 	paintWelcome(w, snap)
@@ -327,7 +389,7 @@ func (s *welcomeState) refresh() {
 	in := s.snap.in
 	info := s.snap.info
 	s.mu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), welcomeGatherLimit)
+	ctx, cancel := context.WithTimeout(context.Background(), s.gatherFor())
 	defer cancel()
 	d, err := gatherData(ctx, in)
 	if err != nil {
