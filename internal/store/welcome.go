@@ -40,7 +40,7 @@ func (s *Store) WelcomeMemory(ctx context.Context, profile string, projectID *in
 	if s == nil || s.pool == nil {
 		return 0, 0, fmt.Errorf("store: welcome memory: no pool")
 	}
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	err = s.pool.QueryRow(ctx, `
 		SELECT
@@ -66,7 +66,7 @@ func (s *Store) WelcomeRecent(ctx context.Context, profile, cwd string, limit in
 	if limit < 1 {
 		limit = 4
 	}
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 
 	err = s.pool.QueryRow(ctx, `
