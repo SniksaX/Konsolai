@@ -144,7 +144,8 @@ func Run(ctx context.Context, cfg Config) int {
 		fmt.Fprint(out, theme.ClearHome)
 	}
 	show := env == nil || env.Profile.ShowBanner()
-	if err := banner.Startup(out, info, show, tty, p, banner.Width(origOut)); err != nil {
+	welcome, err := openWelcome(ctx, out, env, info, tty, show)
+	if err != nil {
 		fmt.Fprintln(errw, "konsolai:", err)
 		return 1
 	}
@@ -184,6 +185,7 @@ func Run(ctx context.Context, cfg Config) int {
 			return 1
 		}
 	}
+	bindWelcome(env, welcome, rd)
 	if kr, ok := rd.(interface{ ReadKey() (byte, error) }); ok {
 		ui.SetKeyReader(kr.ReadKey)
 		defer ui.SetKeyReader(nil)
@@ -401,7 +403,16 @@ func echoInput(w io.Writer, text string) {
 		limit = 8
 	}
 	text = theme.Truncate(text, limit)
-	fmt.Fprintln(w, "  "+theme.Style(theme.Accent, "›")+" "+theme.Bold(text))
+	fmt.Fprintln(w, "  "+theme.Style(theme.Accent, "›")+" "+echoBody(text))
+}
+
+// echoBody is the submitted line: primary (default foreground, never Accent
+// or Link) plus bold. 39 keeps a surrounding accent color from sticking.
+func echoBody(text string) string {
+	if text == "" || !theme.Enabled() {
+		return text
+	}
+	return "\x1b[1;39m" + text + "\x1b[0m"
 }
 
 func sessionFooter(st *session, cfg Config) string {
