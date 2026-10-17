@@ -911,6 +911,8 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	specs := cfg.Tools.Specs()
 	seenFail := make(map[string]struct{})
 	seenRead := make(map[string]struct{})
+	prepRejectKey := ""
+	prepRejects := 0
 	var readSpans []readSpan
 	planApproved := cfg.ResumePlan
 	planFiles := cfg.PlanFiles
@@ -1180,6 +1182,8 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			tool, ok := cfg.Tools.Get(call.Function.Name)
 			args := json.RawMessage(call.Function.Arguments)
 			if !ok {
+				prepRejectKey = ""
+				prepRejects = 0
 				reason := "unknown tool " + call.Function.Name
 				printReject(cfg.Out, call.Function.Name, call.Function.Arguments, reason)
 				tm := llm.Message{
@@ -1200,7 +1204,13 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				}
 				printReject(cfg.Out, call.Function.Name, call.Function.Arguments, err.Error())
 				content := "error: " + err.Error()
-				failKey := call.Function.Name + call.Function.Arguments + "prep"
+				failKey := call.Function.Name + "\x00" + call.Function.Arguments
+				if failKey == prepRejectKey {
+					prepRejects++
+				} else {
+					prepRejectKey = failKey
+					prepRejects = 1
+				}
 				if _, dup := seenFail[failKey]; dup {
 					content += "\n\nnote: this exact call already failed with identical output. Do not retry it; inspect files or change approach."
 				} else {
@@ -1214,8 +1224,17 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				msgs = append(msgs, tm)
 				_ = rec.Message(ctx, tm)
 				_ = rec.Action(ctx, ActionRecord{Tool: call.Function.Name, Args: args, Decision: "invalid", IsError: true, Output: tm.Content})
+				if prepRejects >= 2 {
+					if cfg.Out != nil {
+						ui.BeforeOutput()
+						fmt.Fprintln(cfg.Out, err.Error())
+					}
+					return nil
+				}
 				continue
 			}
+			prepRejectKey = ""
+			prepRejects = 0
 			kind := action.Kind()
 			if kind == tools.Mutating && cfg.RequirePlan && !planApproved {
 				reason := "call propose_plan first"
