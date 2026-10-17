@@ -7,6 +7,19 @@ import (
 	"github.com/siraj/konsolai/internal/ui/theme"
 )
 
+func TestIntentBadgeMargin(t *testing.T) {
+	restore := ForceTheme(Palette{})
+	defer restore()
+	got := IntentBadge("answer")
+	if !strings.HasPrefix(got, "  ◆ answer") {
+		t.Fatalf("%q", got)
+	}
+	esc := IntentBadgeLine("act", true)
+	if !strings.HasPrefix(esc, "  ◆ act") || !strings.Contains(esc, " · escalated") {
+		t.Fatalf("%q", esc)
+	}
+}
+
 func TestRejectCallUsesWarn(t *testing.T) {
 	restore := ForceTheme(Palette{Enabled: true, Truecolor: false, Scheme: "amber"})
 	defer restore()
