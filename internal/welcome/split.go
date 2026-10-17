@@ -10,13 +10,14 @@ import (
 
 func renderSplit(w io.Writer, d Data, width, height int) {
 	pal := ui.Current()
+	lim := d.Limits.norm()
 	var lines []string
 	switch {
-	case height < 22:
+	case height < lim.TinyHeight:
 		lines = tinyLines(pal, d, width, false)
-	case width < 64:
+	case width < lim.TinyWidth:
 		lines = tinyLines(pal, d, width, true)
-	case width < 110:
+	case width < lim.NarrowWidth:
 		lines = narrowLines(pal, d, width, height)
 	default:
 		lines = splitWide(pal, d, width, height)
@@ -36,11 +37,12 @@ func tinyLines(pal ui.Palette, d Data, width int, withHint bool) []string {
 }
 
 func narrowLines(pal ui.Palette, d Data, width, height int) []string {
+	lim := d.Limits.norm()
 	lines := []string{""}
-	lines = append(lines, wordmark(width)...)
+	lines = append(lines, wordmarkMin(width, lim.TinyWidth)...)
 	lines = append(lines, "")
 	lines = append(lines, statusStrip(pal, d, width))
-	if height >= 30 {
+	if height >= lim.RecentHeight {
 		lines = append(lines, "")
 		contentW := width - 2
 		if contentW < 8 {
@@ -65,7 +67,8 @@ func narrowLines(pal ui.Palette, d Data, width, height int) []string {
 }
 
 func splitWide(pal ui.Palette, d Data, width, height int) []string {
-	left := append(wordmark(width), taglineLine(pal))
+	lim := d.Limits.norm()
+	left := append(wordmarkMin(width, lim.TinyWidth), taglineLine(pal))
 	boxW := width - 68
 	if boxW < 16 {
 		boxW = 16
@@ -80,7 +83,7 @@ func splitWide(pal ui.Palette, d Data, width, height int) []string {
 	inner := bw - 2
 	sessRows := sessionLines(pal, inner, d.Session)
 	var bottom []string
-	if height >= 30 {
+	if height >= lim.RecentHeight {
 		recW := inner - 1
 		if recW < 8 {
 			recW = inner
