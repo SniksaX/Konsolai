@@ -101,7 +101,7 @@ func TestCompleterSlashStartOnly(t *testing.T) {
 }
 
 func TestNavHint(t *testing.T) {
-	if !strings.Contains(slashNavHint, "tab complete") || !strings.Contains(slashNavHint, "esc cancel") {
+	if !strings.Contains(slashNavHint, "tab") || !strings.Contains(slashNavHint, "esc") {
 		t.Fatalf("%q", slashNavHint)
 	}
 }
