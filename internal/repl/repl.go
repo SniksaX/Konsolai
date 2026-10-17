@@ -23,6 +23,7 @@ import (
 	"github.com/siraj/konsolai/internal/turn"
 	"github.com/siraj/konsolai/internal/ui"
 	"github.com/siraj/konsolai/internal/ui/theme"
+	"golang.org/x/term"
 )
 
 type Config struct {
@@ -153,6 +154,12 @@ func Run(ctx context.Context, cfg Config) int {
 	if tty {
 		if f, ok := origOut.(*os.File); ok {
 			theme.DetectOnce(f)
+		}
+		if env != nil && env.Profile.CursorColorOn() && term.IsTerminal(int(os.Stdout.Fd())) {
+			theme.SetCursorColor(true)
+			theme.ApplyCursor(origOut)
+			undoCur := theme.InstallCursorRestore(origOut)
+			defer undoCur()
 		}
 	}
 
