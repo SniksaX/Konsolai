@@ -46,7 +46,7 @@ func TestMarkdownStructureNoColor(t *testing.T) {
 }
 
 func TestMarkdownColorSGR(t *testing.T) {
-	restore := ForceTheme(Palette{Enabled: true, Truecolor: false})
+	restore := ForceTheme(Palette{Enabled: true, Truecolor: false, Scheme: "violet"})
 	defer restore()
 	var buf bytes.Buffer
 	r := NewRenderer(&buf, false)
