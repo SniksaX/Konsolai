@@ -99,6 +99,9 @@ type Config struct {
 	PlanFiles      []string
 	PlanCmds       []string
 	PlanText       string
+	TokenCap       int
+	ElideTrigger   float64
+	ElideTarget    float64
 }
 
 type Stats struct {
@@ -412,11 +415,35 @@ func MaxTokensFor(window, estimate, cap int) int {
 	return cap
 }
 
-func shouldElide(estimate, window, cap int) bool {
+func (cfg Config) tokenCap() int {
+	if cfg.TokenCap > 0 {
+		return cfg.TokenCap
+	}
+	return ProfileCap(cfg.Intent)
+}
+
+func (cfg Config) elideTrigger() float64 {
+	if cfg.ElideTrigger > 0 {
+		return cfg.ElideTrigger
+	}
+	return contextTrigger
+}
+
+func (cfg Config) elideTarget() float64 {
+	if cfg.ElideTarget > 0 {
+		return cfg.ElideTarget
+	}
+	return contextTarget
+}
+
+func shouldElide(estimate, window, cap int, trigger float64) bool {
 	if window <= 0 {
 		return false
 	}
-	if float64(estimate) > contextTrigger*float64(window) {
+	if trigger <= 0 {
+		trigger = contextTrigger
+	}
+	if float64(estimate) > trigger*float64(window) {
 		return true
 	}
 	return window-estimate-contextSafety < cap/2
@@ -783,19 +810,32 @@ func aggressiveTrim(msgs []llm.Message, userIdx int) []llm.Message {
 	return out
 }
 
-func PrepareCall(client *llm.Client, msgs []llm.Message, tools []llm.ToolSpec, intent string) (estimate, maxTokens int, elide ElideStats, err error) {
-	return prepareCall(client, msgs, tools, intent, nil, nil)
+func (cfg Config) prepCall(msgs []llm.Message, tools []llm.ToolSpec, spans *[]readSpan, seen map[string]struct{}) (estimate, maxTokens int, elide ElideStats, err error) {
+	return prepareCall(cfg.Client, msgs, tools, cfg.Intent, spans, seen, cfg.tokenCap(), cfg.elideTrigger(), cfg.elideTarget())
 }
 
-func prepareCall(client *llm.Client, msgs []llm.Message, tools []llm.ToolSpec, intent string, spans *[]readSpan, seen map[string]struct{}) (estimate, maxTokens int, elide ElideStats, err error) {
+func PrepareCall(client *llm.Client, msgs []llm.Message, tools []llm.ToolSpec, intent string) (estimate, maxTokens int, elide ElideStats, err error) {
+	return prepareCall(client, msgs, tools, intent, nil, nil, 0, 0, 0)
+}
+
+func prepareCall(client *llm.Client, msgs []llm.Message, tools []llm.ToolSpec, intent string, spans *[]readSpan, seen map[string]struct{}, overrideCap int, trigger, target float64) (estimate, maxTokens int, elide ElideStats, err error) {
 	window := client.ContextWindow()
-	cap := ProfileCap(intent)
+	cap := overrideCap
+	if cap <= 0 {
+		cap = ProfileCap(intent)
+	}
+	if trigger <= 0 {
+		trigger = contextTrigger
+	}
+	if target <= 0 {
+		target = contextTarget
+	}
 	estimate = client.EstimatePromptTokens(msgs, tools)
-	if shouldElide(estimate, window, cap) {
+	if shouldElide(estimate, window, cap, trigger) {
 		elide.Before = estimate
 		for {
 			est := client.EstimatePromptTokens(msgs, tools)
-			if float64(est) <= contextTarget*float64(window) {
+			if float64(est) <= target*float64(window) {
 				break
 			}
 			if !elideOneTool(msgs, spans, seen) {
@@ -924,7 +964,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			stepSpecs = mutatingSpecs(specs)
 			opts.ToolChoice = "required"
 		}
-		_, maxTok, elide, err := prepareCall(cfg.Client, msgs, stepSpecs, cfg.Intent, &readSpans, seenRead)
+		_, maxTok, elide, err := cfg.prepCall(msgs, stepSpecs, &readSpans, seenRead)
 		if err != nil {
 			return err
 		}
@@ -993,7 +1033,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				stepSpecs = specs
 			}
 			label = "thinking"
-			_, maxTok, elide, err = prepareCall(cfg.Client, msgs, stepSpecs, cfg.Intent, &readSpans, seenRead)
+			_, maxTok, elide, err = cfg.prepCall(msgs, stepSpecs, &readSpans, seenRead)
 			if err != nil {
 				return err
 			}
