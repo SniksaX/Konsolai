@@ -8,7 +8,7 @@ import (
 )
 
 func renderFrame(w io.Writer, d Data, width, height int) {
-	lim := d.Limits.norm()
+	lim := ResolveLimits(d.Limits)
 	if height < lim.TinyHeight || width < lim.FrameWidth {
 		renderSplit(w, d, width, height)
 		return
@@ -17,7 +17,7 @@ func renderFrame(w io.Writer, d Data, width, height int) {
 }
 
 func frameLines(pal ui.Palette, d Data, width, height int) []string {
-	lim := d.Limits.norm()
+	lim := ResolveLimits(d.Limits)
 	right, paint := healthLabel(d)
 	rightFn := func(s string) string { return paint(pal, s) }
 	top := pal.Subtle("╭") + titleBar(pal, width-2, frameTitle(d), right, rightFn) + pal.Subtle("╮")
