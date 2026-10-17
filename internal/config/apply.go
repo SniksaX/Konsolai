@@ -188,6 +188,15 @@ func applyOverlay(c *Config, o Overlay) {
 		if o.UI.Banner != nil {
 			c.UI.Banner = *o.UI.Banner
 		}
+		if o.UI.Theme != nil {
+			c.UI.Theme = *o.UI.Theme
+		}
+		if o.UI.CodeHighlight != nil {
+			c.UI.CodeHighlight = *o.UI.CodeHighlight
+		}
+		if o.UI.ClearOnStart != nil {
+			c.UI.ClearOnStart = *o.UI.ClearOnStart
+		}
 	}
 	if o.Language != nil {
 		if o.Language.Languages != nil {
