@@ -52,3 +52,20 @@ func TestContinueAfterPromise(t *testing.T) {
 		t.Fatalf("vas-y %+v", dec)
 	}
 }
+
+func TestContinueDecisionClarification(t *testing.T) {
+	r := &Runner{
+		lastIntent:    intent.Act,
+		lastLang:      "en",
+		lastEffort:    intent.EffortLow,
+		lastAssistant: "Which branch — prod or staging?",
+	}
+	dec, ok := r.continueDecision("yes first one")
+	if !ok || dec.Intent != intent.Act || dec.Reason != "clarification" {
+		t.Fatalf("%+v ok=%v", dec, ok)
+	}
+	dec, ok = r.continueDecision("le premier")
+	if !ok || dec.Intent != intent.Act {
+		t.Fatalf("le premier %+v", dec)
+	}
+}
