@@ -185,6 +185,9 @@ func Run(ctx context.Context, cfg Config) int {
 	env.OnClear = func() {
 		fmt.Fprintln(out, banner.Compact(info, ui.Current()))
 	}
+	if st.mode != nil {
+		st.mode.OnClear = env.OnClear
+	}
 	defer func() { _ = rd.Close() }()
 	setShell := func(on bool) {
 		st.mu.Lock()
