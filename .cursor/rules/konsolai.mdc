@@ -51,7 +51,7 @@
  A request and a pipe: stdin is attached as context.
 - answer: stream, no tools. lookup: read-only tools, ExploreBudget 6, MaxSteps 10.
  act: all tools, no plan, ExploreBudget 6, MaxSteps 15.
- build: plan gate, ExploreBudget 12, MaxSteps 60, thinking, temp 0.3.
+ build: plan gate, ExploreBudget 8 (build_analysis 12, build_docs 16), MaxSteps 60, thinking, temp 0.3.
 - Memory: $XDG_CONFIG_HOME/konsolai/config.yaml (default ~/.config/konsolai/config.yaml).
  --profile beats KONSOLAI_PROFILE beats default_profile beats built-in "default".
  KONSOLAI_DATABASE_URL / KONSOLAI_ENDPOINT / KONSOLAI_MODEL override profile fields.
