@@ -62,7 +62,7 @@ func TestCompleteSlashDescribed(t *testing.T) {
 			if c.Description == "" {
 				t.Fatal("help has no description")
 			}
-			if c.Style != slashStyle {
+			if c.Style != slashStyle() {
 				t.Fatalf("style %q", c.Style)
 			}
 		}
