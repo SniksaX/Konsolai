@@ -9,9 +9,11 @@ import (
 )
 
 type Guard struct {
-	root  string
-	base  string
-	extra []string
+	root          string
+	base          string
+	extra         []string
+	extraReadDeny []string
+	extraCmdDeny  []*regexp.Regexp
 }
 
 func New(root string) (*Guard, error) {
@@ -113,10 +115,61 @@ var (
 	reSystemctlPower = regexp.MustCompile("(?i)(?:^|[\n;|&])\\s*systemctl\\s+(?:poweroff|reboot|halt)\\b")
 )
 
+func (g *Guard) SetExtraDeny(readPaths, commands []string) {
+	if g == nil {
+		return
+	}
+	g.extraReadDeny = append([]string(nil), readPaths...)
+	g.extraCmdDeny = g.extraCmdDeny[:0]
+	for _, raw := range commands {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		re, err := regexp.Compile("(?i)" + regexp.QuoteMeta(raw))
+		if err != nil {
+			continue
+		}
+		g.extraCmdDeny = append(g.extraCmdDeny, re)
+	}
+}
+
+func (g *Guard) ExtraReadMatch(abs string) bool {
+	if g == nil {
+		return false
+	}
+	abs = filepath.Clean(abs)
+	for _, p := range g.extraReadDeny {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if strings.HasPrefix(p, "~") {
+			if home, err := os.UserHomeDir(); err == nil {
+				if exp, ok := expandHome(p, home); ok {
+					p = exp
+				}
+			}
+		}
+		p = filepath.Clean(p)
+		if abs == p || containsPath(p, abs) {
+			return true
+		}
+	}
+	return false
+}
+
 func (g *Guard) CheckCommand(cmd string) error {
 	for _, r := range commandRules {
 		if r.re.MatchString(cmd) {
 			return &DeniedError{Rule: r.name, Detail: cmd}
+		}
+	}
+	if g != nil {
+		for _, re := range g.extraCmdDeny {
+			if re.MatchString(cmd) {
+				return &DeniedError{Rule: "extra", Detail: cmd}
+			}
 		}
 	}
 	return nil
