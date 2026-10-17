@@ -593,3 +593,44 @@ func TestDefaultPathUsesXDG(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestWelcomeLayoutDefaultAndOverride(t *testing.T) {
+	clearEnv(t)
+	if Builtin().WelcomeLayout() != "split" {
+		t.Fatalf("builtin %q", Builtin().WelcomeLayout())
+	}
+	if (Config{}).WelcomeLayout() != "split" {
+		t.Fatal("empty should be split")
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	body := "defaults:\n  ui:\n    welcome: frame\n"
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := f.Resolve("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.WelcomeLayout() != "frame" || p.UI.Welcome != "frame" {
+		t.Fatalf("got %+v", p.UI.Welcome)
+	}
+	raw := InitYAML()
+	if !strings.Contains(raw, "welcome: split") {
+		t.Fatalf("init missing welcome:\n%s", raw)
+	}
+	p.UI.Welcome = "nope"
+	if p.WelcomeLayout() != "split" {
+		t.Fatalf("bad value %q", p.WelcomeLayout())
+	}
+	shown, err := Builtin().ShowYAML()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(shown, "welcome: split") {
+		t.Fatalf("show:\n%s", shown)
+	}
+}
