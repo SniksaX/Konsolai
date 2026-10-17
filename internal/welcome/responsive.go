@@ -33,7 +33,7 @@ func Render(w io.Writer, d Data, layout string, width, height int) {
 	case "minimal":
 		renderMinimal(w, d, width)
 	case "frame":
-		if width < 120 {
+		if width < d.Limits.norm().FrameWidth {
 			renderSplit(w, d, width, height)
 			return
 		}
@@ -91,11 +91,18 @@ func bannerInfo(d Data) banner.Info {
 }
 
 func wordmark(width int) []string {
-	if width < 64 {
+	return wordmarkMin(width, 0)
+}
+
+func wordmarkMin(width, minW int) []string {
+	if minW < 1 {
+		minW = 64
+	}
+	if width < minW {
 		return nil
 	}
 	var buf bytes.Buffer
-	_ = banner.Render(&buf, banner.Info{}, ui.Current(), max(width, 80), true)
+	_ = banner.Render(&buf, banner.Info{MinWidth: minW}, ui.Current(), max(width, 80), true)
 	var out []string
 	for _, ln := range strings.Split(buf.String(), "\n") {
 		if strings.ContainsAny(theme.StripANSI(ln), "█▀▄") {
