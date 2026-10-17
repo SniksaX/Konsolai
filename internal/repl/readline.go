@@ -52,6 +52,9 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 	_ = sh.Config.Set("autocomplete", true)
 	_ = sh.Config.Set("usage-hint-always", true)
 	_ = sh.Config.Set("completion-description-style", ui.Current().MutedSeq())
+	// Selection always gets a 256-color bg 255 from the library; we only
+	// control the foreground SGR (truecolor Heading when the terminal allows).
+	_ = sh.Config.Set("completion-selection-style", theme.HeadingSeq())
 	// Leave the live prompt as the only scrollback copy. RefreshTransient
 	// reprints prompt+line after accept and misses the footer/hint row, so
 	// enabling it produced a second "› line" in a real TTY.
