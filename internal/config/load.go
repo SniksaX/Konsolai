@@ -411,9 +411,9 @@ func Validate(c Config) error {
 		return fmt.Errorf("config: llm.model is empty")
 	}
 	switch strings.ToLower(strings.TrimSpace(c.UI.Palette)) {
-	case "", "amber", "violet":
+	case "", "amber", "violet", "ocean", "forest", "rose", "mono":
 	default:
-		return fmt.Errorf("config: ui.palette must be amber or violet, got %q", c.UI.Palette)
+		return fmt.Errorf("config: ui.palette must be amber, violet, ocean, forest, rose or mono, got %q", c.UI.Palette)
 	}
 	switch strings.ToLower(strings.TrimSpace(c.UI.Theme)) {
 	case "", "auto", "dark", "light":
