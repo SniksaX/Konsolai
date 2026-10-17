@@ -13,6 +13,7 @@ import (
 	"github.com/siraj/konsolai/internal/commands"
 	"github.com/siraj/konsolai/internal/config"
 	"github.com/siraj/konsolai/internal/turn"
+	"github.com/siraj/konsolai/internal/ui/theme"
 )
 
 type scriptReader struct {
@@ -179,12 +180,95 @@ func TestFormatFooter(t *testing.T) {
 	if !strings.Contains(s, "dev") || !strings.Contains(s, "qwen38.nvfp4") || !strings.Contains(s, "ctx 12%") {
 		t.Fatalf("left %q", s)
 	}
+	if strings.Contains(s, "▰") || strings.Contains(s, "▱") {
+		t.Fatalf("meter cells at width 80: %q", s)
+	}
 	if !strings.Contains(s, "fast") || !strings.Contains(s, "●") {
 		t.Fatalf("right %q", s)
 	}
 	sh := formatFooter(footerInfo{Cwd: dir, Model: "qwen", Routing: "main", Shell: true})
 	if !strings.Contains(sh, "shell") || strings.Contains(sh, "qwen") {
 		t.Fatalf("shell footer %q", sh)
+	}
+}
+
+func TestContextMeter(t *testing.T) {
+	if theme.DisplayWidth("▰") != 1 || theme.DisplayWidth("▱") != 1 {
+		t.Fatalf("glyph width %d %d", theme.DisplayWidth("▰"), theme.DisplayWidth("▱"))
+	}
+	if ctxFilled(0) != 0 || ctxFilled(6) != 0 || ctxFilled(7) != 1 || ctxFilled(12) != 1 {
+		t.Fatalf("low %d %d %d %d", ctxFilled(0), ctxFilled(6), ctxFilled(7), ctxFilled(12))
+	}
+	if ctxFilled(60) != 5 || ctxFilled(85) != 7 || ctxFilled(99) != 8 || ctxFilled(100) != 8 {
+		t.Fatalf("high %d %d %d %d", ctxFilled(60), ctxFilled(85), ctxFilled(99), ctxFilled(100))
+	}
+	dir := t.TempDir()
+	t.Setenv("COLUMNS", "120")
+	s := formatFooter(footerInfo{Cwd: dir, Model: "m", Routing: "main", CtxPct: 12, ShowCtx: true})
+	if strings.Count(s, "▰") != 1 || strings.Count(s, "▱") != 7 || !strings.Contains(s, "12%") {
+		t.Fatalf("12%% meter %q", s)
+	}
+	hot := formatFooter(footerInfo{Cwd: dir, Model: "m", Routing: "main", CtxPct: 85, ShowCtx: true})
+	if strings.Count(hot, "▰") != 7 || strings.Count(hot, "▱") != 1 || !strings.Contains(hot, "85%") {
+		t.Fatalf("85%% meter %q", hot)
+	}
+	restore := theme.Force(true, true, "glacier", theme.Dark)
+	defer restore()
+	colored := ctxMeter(12, 120)
+	if !strings.Contains(colored, "38;2;76;201;240") || !strings.Contains(colored, "▰") {
+		t.Fatalf("accent cells %q", colored)
+	}
+	warn := ctxMeter(60, 120)
+	if !strings.Contains(warn, "38;2;255;209;102") {
+		t.Fatalf("warn cells %q", warn)
+	}
+	bad := ctxMeter(85, 120)
+	if !strings.Contains(bad, "38;2;255;107;107") {
+		t.Fatalf("error cells %q", bad)
+	}
+	narrow := ctxMeter(12, 80)
+	if strings.Contains(narrow, "▰") || !strings.Contains(narrow, "ctx 12%") {
+		t.Fatalf("narrow %q", narrow)
+	}
+}
+
+func TestEchoPrimaryBoldNotLink(t *testing.T) {
+	restore := theme.Force(true, true, "glacier", theme.Dark)
+	defer restore()
+	var b bytes.Buffer
+	echoInput(&b, "/theme")
+	s := b.String()
+	mark := "\x1b[1;39m/theme\x1b[0m"
+	idx := strings.Index(s, mark)
+	if idx < 0 {
+		t.Fatalf("body %q", s)
+	}
+	if !strings.Contains(s[:idx], "38;2;76;201;240") {
+		t.Fatalf("chevron should be accent %q", s)
+	}
+	if strings.Contains(s[idx:], "38;2;") || strings.Contains(s[idx:], "4;") {
+		t.Fatalf("echo text colored %q", s)
+	}
+}
+
+func TestClearDrawsCompactHeader(t *testing.T) {
+	var out, errb bytes.Buffer
+	env := &commands.Env{
+		Profile: config.Profile{Name: "p", Model: "m", Endpoint: "http://127.0.0.1:9/v1"},
+		Out:     &out, Err: &errb, Cwd: t.TempDir(), Version: "vtest",
+	}
+	code := Run(context.Background(), Config{
+		Env: env, Reg: commands.Default(), Reader: &scriptReader{lines: []string{"/clear", "/exit"}},
+		Version: "vtest", Model: "m", Out: &out, Err: &errb,
+	})
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "KONSOLAI") {
+		t.Fatalf("missing compact header %q", out.String())
+	}
+	if strings.Contains(out.String(), "╭") {
+		t.Fatalf("full welcome on /clear %q", out.String())
 	}
 }
 
