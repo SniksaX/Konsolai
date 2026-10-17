@@ -32,6 +32,12 @@ func (r *Runner) continueDecision(text string) (intent.Decision, bool) {
 		}, true
 	}
 	if !isContinue(text) || !incompleteTurn(r.lastCode) || r.lastIntent == "" {
+		if intent.HoldIntent(r.lastIntent, r.lastAssistant, text) {
+			return intent.Decision{
+				Intent: r.lastIntent, Language: r.lastLang, Reason: "clarification",
+				Effort: r.lastEffort, Task: r.lastTask,
+			}, true
+		}
 		return intent.Decision{}, false
 	}
 	return intent.Decision{

@@ -2,6 +2,7 @@ package repl
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,12 +12,17 @@ import (
 	"github.com/reeflective/readline"
 	"github.com/siraj/konsolai/internal/commands"
 	"github.com/siraj/konsolai/internal/repo"
+	"github.com/siraj/konsolai/internal/ui/theme"
 )
 
 const (
-	slashNavHint = "↑/↓ navigate · tab complete · enter select · esc cancel"
-	slashStyle   = "38;5;141"
+	slashNavHint = "↑/↓ · enter · esc"
+	slashMenuCap = 8
 )
+
+func slashStyle() string {
+	return ""
+}
 
 func Completer(reg *commands.Registry, cwdFn func() string) func(line []rune, cursor int) readline.Completions {
 	return func(line []rune, cursor int) readline.Completions {
@@ -60,18 +66,44 @@ func completeSlash(reg *commands.Registry, line string) readline.Completions {
 	if len(items) == 0 {
 		return readline.Completions{}
 	}
-	vals := make([]string, 0, len(items)*3)
-	for _, it := range items {
-		vals = append(vals, it.Value, it.Desc, slashStyle)
+	more := 0
+	if len(items) > slashMenuCap {
+		more = len(items) - slashMenuCap
+		items = items[:slashMenuCap]
 	}
-	comps := readline.CompleteStyledValuesDescribed(vals...)
+	vals := make([]readline.Completion, 0, len(items)+1)
+	room := theme.TermWidth() - 8
+	if room < 12 {
+		room = 12
+	}
+	for _, it := range items {
+		disp := it.Display
+		if disp == "" {
+			disp = "  " + it.Value
+		}
+		desc := theme.Truncate(it.Desc, max(8, room-theme.DisplayWidth(disp)))
+		vals = append(vals, readline.Completion{
+			Value:       it.Value,
+			Display:     disp,
+			Description: desc,
+			Style:       slashStyle(),
+		})
+	}
+	if more > 0 {
+		vals = append(vals, readline.Completion{
+			Value:   line,
+			Display: theme.Style(theme.Muted, fmt.Sprintf("↓ %d more", more)),
+		})
+	}
+	comps := readline.CompleteRaw(vals)
 	comps.PREFIX = slashPrefix(line)
-	return comps.DisplayList().Usage(slashNavHint).NoSort()
+	return comps.DisplayList().ListSeparator("  ").Usage(slashNavHint).NoSort()
 }
 
 type slashItem struct {
-	Value string
-	Desc  string
+	Value   string
+	Display string
+	Desc    string
 }
 
 func slashItems(reg *commands.Registry, line string) []slashItem {
@@ -84,10 +116,11 @@ func slashItems(reg *commands.Registry, line string) []slashItem {
 	if !space && len(parts) <= 1 {
 		var out []slashItem
 		for _, c := range reg.All() {
-			n := "/" + c.Name
-			if strings.HasPrefix(n, line) {
-				out = append(out, slashItem{Value: n, Desc: c.Summary})
+			value, display, ok := matchCommand(c, line)
+			if !ok {
+				continue
 			}
+			out = append(out, slashItem{Value: value, Display: display, Desc: c.Summary})
 		}
 		return cap50items(out)
 	}
@@ -102,10 +135,28 @@ func slashItems(reg *commands.Registry, line string) []slashItem {
 	var out []slashItem
 	for _, o := range slashArgs(cmd) {
 		if arg == "" || strings.HasPrefix(o.Value, arg) {
+			if o.Display == "" {
+				o.Display = "  " + o.Value
+			}
 			out = append(out, o)
 		}
 	}
 	return cap50items(out)
+}
+
+func matchCommand(c commands.Command, line string) (value, display string, ok bool) {
+	names := append([]string{c.Name}, c.Aliases...)
+	shown := make([]string, 0, len(names))
+	for _, n := range names {
+		shown = append(shown, "/"+n)
+	}
+	for _, n := range names {
+		full := "/" + n
+		if strings.HasPrefix(full, line) {
+			return full, "  " + strings.Join(shown, ", "), true
+		}
+	}
+	return "", "", false
 }
 
 func slashPrefix(line string) string {

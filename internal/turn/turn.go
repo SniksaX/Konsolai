@@ -64,6 +64,7 @@ type Runner struct {
 	lastEffort       intent.Effort
 	lastTask         intent.Task
 	lastUser         string
+	lastAssistant    string
 	lastPromise      bool
 	lastEscalate     intent.Intent
 	escalated        bool

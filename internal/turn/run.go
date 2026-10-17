@@ -93,11 +93,14 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	understand := ui.Start("understanding")
 	routeClient := r.routerClient(ctx)
 	dec, continued := r.continueDecision(req.Text)
+	spoken := req.Text
 	if !continued {
 		dec = DecideIntentFloor(ctx, routeClient, req.Intent, req.Text, req.New, routerCands, inRepo, r.Profile.Router.ActionVerbs, r.Profile.Router.Targets)
 	} else if dec.Reason == "continue-promise" && r.lastUser != "" {
 		req.Text = r.lastUser
 		r.lastPromise = false
+	} else if dec.Reason == "clarification" {
+		req.Text = intent.WithPreviousExchange(req.Text, r.lastUser, r.lastAssistant)
 	} else {
 		req.Text = strings.TrimSpace(req.Text) + "\n\n" + continueNote
 	}
@@ -148,11 +151,8 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 		}
 	}
 	ui.BeforeOutput()
-	fmt.Fprintln(r.out())
-	if req.Plain {
-		fmt.Fprintln(r.out(), "· "+string(dec.Intent))
-	} else {
-		fmt.Fprintln(r.out(), ui.IntentBadge(string(dec.Intent)))
+	if dec.Intent != intent.Answer && dec.Intent != intent.Lookup {
+		r.emitBadge(req, string(dec.Intent), false)
 	}
 	if intent.LooksLikeMemory(req.Text) {
 		dec.NeedsMemory = true
@@ -169,7 +169,7 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	if len(tap.msgs) > 20 {
 		tap.msgs = tap.msgs[len(tap.msgs)-20:]
 	}
-	code, answer, ptok, usedMain := r.runProfile(ctx, client, snap, facts, history, tap, mem, sessionID, projectID, req, cwd, conf, dec, routerTime, thinkMode)
+	code, answer, ptok, usedMain := r.runProfile(ctx, client, snap, facts, history, tap, mem, sessionID, projectID, req, cwd, conf, &dec, routerTime, thinkMode)
 	if tap.answer != "" {
 		answer = tap.answer
 	}
@@ -182,6 +182,8 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	r.lastLang = dec.Language
 	r.lastEffort = dec.EffectiveEffort()
 	r.lastTask = dec.Task
+	r.lastUser = spoken
+	r.lastAssistant = answer
 	if sessionID != "" && !req.KeepOpen {
 		if s := mem.Store(); s != nil {
 			endCtx, cancel := memory.Isolated(ctx)
@@ -223,6 +225,21 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	}
 }
 
+func (r *Runner) emitBadge(req Request, name string, escalated bool) {
+	if r == nil {
+		return
+	}
+	if req.Plain {
+		suf := ""
+		if escalated {
+			suf = " · escalated"
+		}
+		fmt.Fprintln(r.out(), "· "+name+suf)
+		return
+	}
+	fmt.Fprintln(r.out(), ui.IntentBadgeLine(name, escalated))
+}
+
 func loadSessionByID(ctx context.Context, mem *memory.Guard, id string, cands []ResumeCandidate) ResumeCandidate {
 	for _, c := range cands {
 		if c.ID == id {
@@ -239,7 +256,10 @@ func loadSessionByID(ctx context.Context, mem *memory.Guard, id string, cands []
 	return ResumeCandidate{ID: id, Messages: msgs}
 }
 
-func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, mem *memory.Guard, sessionID string, projectID *int64, req Request, cwd string, confirmer agent.Confirmer, dec intent.Decision, routerTime time.Duration, thinkMode ThinkMode) (int, string, int, bool) {
+func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx.Snapshot, facts string, history []llm.Message, rec agent.Recorder, mem *memory.Guard, sessionID string, projectID *int64, req Request, cwd string, confirmer agent.Confirmer, dec *intent.Decision, routerTime time.Duration, thinkMode ThinkMode) (int, string, int, bool) {
+	if dec == nil {
+		return 1, "", 0, true
+	}
 	dec.Language = intent.ResolveLanguage(req.Text, lastUserOf(history), dec.Language, r.Profile.DefaultLanguage, r.Profile.Languages)
 	lang := agent.ReplyInstruction(dec.Language)
 	if dec.Intent == intent.Answer {
@@ -263,15 +283,15 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		if thinkMode == ThinkNever {
 			think = false
 		}
-		code, answer, ptok, used, esc := r.runAnswer(ctx, client, answerClient, snap, history, rec, req.Text, prompt, think, req, dec, routerTime)
+		code, answer, ptok, used, esc := r.runAnswer(ctx, client, answerClient, snap, history, rec, req.Text, prompt, think, req, *dec, routerTime)
 		if esc != "" && !r.escalated {
 			r.escalated = true
 			r.lastPromise = true
 			r.lastUser = req.Text
 			r.lastEscalate = esc
-			fmt.Fprintln(r.out(), ui.Current().Muted("· escalated to "+string(esc)))
 			dec.Intent = esc
 			dec.Effort = intent.EffortHigh
+			r.emitBadge(req, string(dec.Intent), true)
 		} else {
 			r.lastPromise = intent.IsPromise(answer)
 			if r.lastPromise {
@@ -313,109 +333,122 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		}
 		return rag.SearchTune(ctx, mem.Store(), r.Embed, r.Embed, r.Profile.Name, projectID, query, scope, k, rag.TuneFrom(r.Profile))
 	}
-	reg := tools.NewRegistry(sg, toolOut, lister, memory.NewWebCache(mem), memory.NewFactStore(mem, r.Profile.Name, projectID, sessionID), tools.Options{
-		ReadOnlyShell: dec.Intent == intent.Lookup,
-		DocsTask:      dec.Task == intent.TaskDocs,
-		Request:       req.Text,
-		OnWebFetch:    onWeb,
-		Recall:        onRecall,
-		DisplayLines:  r.Profile.DisplayLines(),
-	})
-	cfg := agent.Config{
-		Client:         client,
-		Tools:          reg,
-		Confirmer:      confirmer,
-		Out:            r.out(),
-		Recorder:       rec,
-		History:        history,
-		AutoApprove:    req.Yes,
-		Prompt:         agent.ActPrompt + "\n" + lang,
-		ThinkingPolicy: ThinkingFor(dec, r.Profile.BuildThinking, thinkMode),
-		Trace:          req.Trace,
-		SessionID:      sessionID,
-		Intent:         string(dec.Intent),
-		RouterTime:     routerTime,
-		Err:            r.errw(),
-		Plain:          req.Plain,
-		Task:           string(dec.Task),
-		Stats:          &agent.Stats{},
-		OnShell:        r.RememberShell,
-		Guard:          sg,
-	}
-	if files, cmds, text, ok := agent.RestoreApprovedPlan(history); ok && strings.Contains(req.Text, continueNote) {
-		cfg.ResumePlan = true
-		cfg.PlanFiles = files
-		cfg.PlanCmds = cmds
-		cfg.PlanText = text
-	}
-	sys := snap.String() + facts
-	if len(extras) > 0 {
-		sys += "\nAlso allowed this turn (named by the user): " + safety.DisplayRoots(extras, home)
-	}
-	sub := ""
-	if inSubproject(cwd, root) {
-		sub = "\n" + agent.SubprojectNote
-	}
-	switch dec.Intent {
-	case intent.Lookup:
-		cfg.Tools = reg.Named("list_dir", "read_file", "outline", "search", "find_files", "web_fetch", "recall", "run_shell", "finish")
-		cfg.Prompt = agent.LookupPrompt + "\n" + lang + sub
-		cfg.MaxSteps = r.Profile.MaxStepsFor("lookup")
-		cfg.ExploreBudget = r.Profile.ExploreBudgetFor("lookup", string(dec.Task))
-		cfg.ExploreNote = agent.ExploreNoteLookup
-	case intent.Build:
-		cfg.Prompt = agent.CodePrompt + "\n" + lang + "\n" + agent.ScopeRule + sub
-		cfg.Temperature = 0.3
-		cfg.MaxSteps = r.Profile.MaxStepsFor("build")
-		cfg.RequirePlan = true
-		cfg.ExploreBudget = r.Profile.ExploreBudgetFor("build", string(dec.Task))
-		cfg.ExploreNote = agent.ExploreNoteBuild
-		sys = codeContext(ctx, snap, root) + facts
-	default:
-		cfg.Prompt = agent.ActPrompt + "\n" + lang + "\n" + agent.ScopeRule + sub
-		if dec.EffectiveEffort() == intent.EffortHigh {
-			cfg.RequirePlan = true
+	for attempt := 0; attempt < 2; attempt++ {
+		reg := tools.NewRegistry(sg, toolOut, lister, memory.NewWebCache(mem), memory.NewFactStore(mem, r.Profile.Name, projectID, sessionID), tools.Options{
+			ReadOnlyShell: dec.Intent == intent.Lookup,
+			DocsTask:      dec.Task == intent.TaskDocs,
+			Request:       req.Text,
+			OnWebFetch:    onWeb,
+			Recall:        onRecall,
+			DisplayLines:  r.Profile.DisplayLines(),
+		})
+		cfg := agent.Config{
+			Client:         client,
+			Tools:          reg,
+			Confirmer:      confirmer,
+			Out:            r.out(),
+			Recorder:       rec,
+			History:        history,
+			AutoApprove:    req.Yes,
+			Prompt:         agent.ActPrompt + "\n" + lang,
+			ThinkingPolicy: ThinkingFor(*dec, r.Profile.BuildThinking, thinkMode),
+			Trace:          req.Trace,
+			SessionID:      sessionID,
+			Intent:         string(dec.Intent),
+			RouterTime:     routerTime,
+			Err:            r.errw(),
+			Plain:          req.Plain,
+			Task:           string(dec.Task),
+			Stats:          &agent.Stats{},
+			OnShell:        r.RememberShell,
+			Guard:          sg,
 		}
-		cfg.MaxSteps = r.Profile.MaxStepsFor("act")
-		cfg.ExploreBudget = r.Profile.ExploreBudgetFor("act", string(dec.Task))
-		cfg.ExploreNote = agent.ExploreNoteLookup
-	}
-	cfg.TokenCap = r.Profile.TokenCap(string(dec.Intent))
-	cfg.ElideTrigger = r.Profile.ElideTrigger()
-	cfg.ElideTarget = r.Profile.ElideTarget()
+		if files, cmds, text, ok := agent.RestoreApprovedPlan(history); ok && strings.Contains(req.Text, continueNote) {
+			cfg.ResumePlan = true
+			cfg.PlanFiles = files
+			cfg.PlanCmds = cmds
+			cfg.PlanText = text
+		}
+		sys := snap.String() + facts
+		if len(extras) > 0 {
+			sys += "\nAlso allowed this turn (named by the user): " + safety.DisplayRoots(extras, home)
+		}
+		sub := ""
+		if inSubproject(cwd, root) {
+			sub = "\n" + agent.SubprojectNote
+		}
+		switch dec.Intent {
+		case intent.Lookup:
+			cfg.Tools = reg.Named("list_dir", "read_file", "outline", "search", "find_files", "web_fetch", "recall", "run_shell", "finish")
+			cfg.Prompt = agent.LookupPrompt + "\n" + lang + sub
+			cfg.MaxSteps = r.Profile.MaxStepsFor("lookup")
+			cfg.ExploreBudget = r.Profile.ExploreBudgetFor("lookup", string(dec.Task))
+			cfg.ExploreNote = agent.ExploreNoteLookup
+		case intent.Build:
+			cfg.Prompt = agent.CodePrompt + "\n" + lang + "\n" + agent.ScopeRule + sub
+			cfg.Temperature = 0.3
+			cfg.MaxSteps = r.Profile.MaxStepsFor("build")
+			cfg.RequirePlan = true
+			cfg.ExploreBudget = r.Profile.ExploreBudgetFor("build", string(dec.Task))
+			cfg.ExploreNote = agent.ExploreNoteBuild
+			sys = codeContext(ctx, snap, root) + facts
+		default:
+			cfg.Prompt = agent.ActPrompt + "\n" + lang + "\n" + agent.ScopeRule + sub
+			if dec.EffectiveEffort() == intent.EffortHigh {
+				cfg.RequirePlan = true
+			}
+			cfg.MaxSteps = r.Profile.MaxStepsFor("act")
+			cfg.ExploreBudget = r.Profile.ExploreBudgetFor("act", string(dec.Task))
+			cfg.ExploreNote = agent.ExploreNoteLookup
+		}
+		cfg.TokenCap = r.Profile.TokenCap(string(dec.Intent))
+		cfg.ElideTrigger = r.Profile.ElideTrigger()
+		cfg.ElideTarget = r.Profile.ElideTarget()
 
-	err = agent.Run(ctx, cfg, sys, req.Text)
-	if dec.Intent == intent.Build {
-		printDiffStat(r.out(), root)
-	}
-	tok := 0
-	if cfg.Stats != nil {
-		tok = cfg.Stats.LastPromptTokens
-	}
-	if err == nil {
-		return 0, "", tok, true
-	}
-	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
-		return 130, "", tok, true
-	}
-	if errors.Is(err, agent.ErrAborted) {
-		fmt.Fprintln(r.errw(), "konsolai: aborted")
-		return 3, "", tok, true
-	}
-	if errors.Is(err, agent.ErrMaxSteps) {
-		fmt.Fprintf(r.errw(), "konsolai: stopped after %d steps without finishing\n", cfg.MaxSteps)
-		return 4, "", tok, true
-	}
-	if errors.Is(err, agent.ErrNoAnswer) {
-		fmt.Fprintln(r.errw(), "konsolai: the model returned no answer")
+		if dec.Intent == intent.Lookup && !r.escalated {
+			r.emitBadge(req, "lookup", false)
+		}
+
+		err = agent.Run(ctx, cfg, sys, req.Text)
+		if dec.Intent == intent.Lookup && errors.Is(err, tools.ErrLookupMutating) && !r.escalated && attempt == 0 {
+			r.escalated = true
+			dec.Intent = intent.Act
+			r.emitBadge(req, "act", true)
+			continue
+		}
+		if dec.Intent == intent.Build {
+			printDiffStat(r.out(), root)
+		}
+		tok := 0
+		if cfg.Stats != nil {
+			tok = cfg.Stats.LastPromptTokens
+		}
+		if err == nil {
+			return 0, "", tok, true
+		}
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+			return 130, "", tok, true
+		}
+		if errors.Is(err, agent.ErrAborted) {
+			fmt.Fprintln(r.errw(), "konsolai: aborted")
+			return 3, "", tok, true
+		}
+		if errors.Is(err, agent.ErrMaxSteps) {
+			fmt.Fprintf(r.errw(), "konsolai: stopped after %d steps without finishing\n", cfg.MaxSteps)
+			return 4, "", tok, true
+		}
+		if errors.Is(err, agent.ErrNoAnswer) {
+			fmt.Fprintln(r.errw(), "konsolai: the model returned no answer")
+			return 1, "", tok, true
+		}
+		if errors.Is(err, agent.ErrContextOverflow) {
+			fmt.Fprintln(r.errw(), err.Error())
+			return 1, "", tok, true
+		}
+		fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.Endpoint, err, req.Trace))
 		return 1, "", tok, true
 	}
-	if errors.Is(err, agent.ErrContextOverflow) {
-		fmt.Fprintln(r.errw(), err.Error())
-		return 1, "", tok, true
-	}
-	fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.Endpoint, err, req.Trace))
-	return 1, "", tok, true
+	return 1, "", 0, true
 }
 
 const fastWindowFillPct = 60
@@ -495,6 +528,7 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 	if !r.escalated && intent.IsPromise(out) {
 		return 0, out, ptok, usedMain, intent.EscalateIntent(query, r.Profile.Router.ActionVerbs, r.Profile.Router.Targets)
 	}
+	r.emitBadge(req, string(dec.Intent), false)
 	_, _ = io.Copy(r.out(), &buf)
 	_ = rec.Message(ctx, llm.Message{Role: llm.RoleAssistant, Content: out})
 	st := agent.Stats{
@@ -544,7 +578,11 @@ func StreamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 	var collected strings.Builder
 	live := ui.StartLive("thinking")
 	first := true
-	rend := ui.NewRenderer(outw, plain)
+	body := outw
+	if !plain {
+		body = ui.NewIndentWriter(outw, 4)
+	}
+	rend := ui.NewRenderer(body, plain)
 	if _, err := client.ResolveModel(ctx); err != nil {
 		return "", llm.Usage{}, err
 	}
@@ -564,7 +602,6 @@ func StreamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 			live.Stop()
 			ui.BeforeOutput()
 			first = false
-			_, _ = io.WriteString(outw, "\n")
 		}
 		collected.WriteString(s)
 		_, werr := rend.Write([]byte(s))
@@ -580,9 +617,6 @@ func StreamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 	}
 	_ = rend.Flush()
 	out := strings.TrimLeft(collected.String(), "\r\n")
-	if out != "" && !strings.HasSuffix(out, "\n") {
-		_, _ = io.WriteString(outw, "\n")
-	}
 	return out, usage, err
 }
 

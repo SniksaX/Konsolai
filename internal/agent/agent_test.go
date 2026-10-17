@@ -974,7 +974,7 @@ func TestFormatSummaryAndTrace(t *testing.T) {
 		CompletionTokens: 2100,
 	}
 	got := FormatSummary("build", s)
-	want := "· build · 12 steps · model 41.2s · tools 3.1s · 23.4k in / 2.1k out"
+	want := "12 steps · 44.3s (model 41.2s, tools 3.1s) · 23.4k → 2.1k tok"
 	if got != want {
 		t.Fatalf("summary %q want %q", got, want)
 	}
@@ -1029,7 +1029,7 @@ func TestRunAccumulatesStats(t *testing.T) {
 	if st.ModelTime <= 0 || st.ToolTime <= 0 {
 		t.Fatalf("times %+v", st)
 	}
-	if !strings.Contains(errW.String(), "· lookup · 2 steps") {
+	if !strings.Contains(errW.String(), "2.0k → 400 tok") {
 		t.Fatalf("summary %q", errW.String())
 	}
 	if !strings.Contains(errW.String(), "[step 1]") || !strings.Contains(errW.String(), "list_dir") {
@@ -1038,7 +1038,7 @@ func TestRunAccumulatesStats(t *testing.T) {
 	if !strings.Contains(errW.String(), "in=1.0k out=0.2k") {
 		t.Fatalf("per-call tokens %q", errW.String())
 	}
-	if !strings.Contains(errW.String(), "2.0k in / 0.4k out") {
+	if !strings.Contains(errW.String(), "2.0k → 400 tok") {
 		t.Fatalf("totals %q", errW.String())
 	}
 }
@@ -1418,6 +1418,9 @@ func TestPromptNotes(t *testing.T) {
 		}
 		if !strings.Contains(p, FenceRule) {
 			t.Fatal("prompt missing fence rule")
+		}
+		if !strings.Contains(p, EmojiRule) {
+			t.Fatal("prompt missing emoji rule")
 		}
 	}
 	for _, p := range []string{ActPrompt, CodePrompt, LookupPrompt} {

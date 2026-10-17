@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/siraj/konsolai/internal/turn"
+	"github.com/siraj/konsolai/internal/ui/theme"
 )
 
 func runCmd(ctx context.Context, env *Env, args []string) int {
@@ -34,7 +35,10 @@ func runExit(ctx context.Context, env *Env, _ []string) int {
 }
 
 func runClear(ctx context.Context, env *Env, _ []string) int {
-	fmt.Fprint(env.out(), "\033[H\033[2J")
+	fmt.Fprint(env.out(), theme.ClearScroll)
+	if env.OnClear != nil {
+		env.OnClear()
+	}
 	return 0
 }
 

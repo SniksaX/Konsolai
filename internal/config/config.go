@@ -158,10 +158,16 @@ type RAGIndex struct {
 }
 
 type UI struct {
-	DisplayLines   int `yaml:"display_lines"`
-	PasteChipLines int `yaml:"paste_chip_lines"`
-	PasteChipChars int `yaml:"paste_chip_chars"`
-	OutputKeepKB   int `yaml:"output_keep_kb"`
+	DisplayLines   int    `yaml:"display_lines"`
+	PasteChipLines int    `yaml:"paste_chip_lines"`
+	PasteChipChars int    `yaml:"paste_chip_chars"`
+	OutputKeepKB   int    `yaml:"output_keep_kb"`
+	Palette        string `yaml:"palette"`
+	Banner         bool   `yaml:"banner"`
+	Theme          string `yaml:"theme"`
+	CodeHighlight  bool   `yaml:"code_highlight"`
+	ClearOnStart   bool   `yaml:"clear_on_start"`
+	StripEmoji     bool   `yaml:"strip_emoji"`
 }
 
 type Language struct {
@@ -225,6 +231,8 @@ func Builtin() Config {
 		},
 		UI: UI{
 			DisplayLines: 60, PasteChipLines: 11, PasteChipChars: 1000, OutputKeepKB: 256,
+			Palette: "amber", Banner: true, Theme: "auto",
+			CodeHighlight: true, ClearOnStart: true, StripEmoji: true,
 		},
 		Language: Language{Languages: []string{"en", "fr"}, Default: "en"},
 		Safety:   Safety{ExtraReadDeny: []string{}, ExtraCommandDeny: []string{}},
@@ -381,6 +389,40 @@ func (c Config) PasteChipChars() int {
 
 func (c Config) OutputKeepBytes() int {
 	return nonzero(c.UI.OutputKeepKB, 256) * 1024
+}
+
+func (c Config) PaletteName() string {
+	switch strings.ToLower(strings.TrimSpace(c.UI.Palette)) {
+	case "violet", "ocean", "forest", "rose", "mono":
+		return strings.ToLower(strings.TrimSpace(c.UI.Palette))
+	default:
+		return "amber"
+	}
+}
+
+func (c Config) ShowBanner() bool {
+	return c.UI.Banner
+}
+
+func (c Config) Appearance() string {
+	switch strings.ToLower(strings.TrimSpace(c.UI.Theme)) {
+	case "light", "dark":
+		return strings.ToLower(strings.TrimSpace(c.UI.Theme))
+	default:
+		return "auto"
+	}
+}
+
+func (c Config) CodeHighlightOn() bool {
+	return c.UI.CodeHighlight
+}
+
+func (c Config) ClearOnStart() bool {
+	return c.UI.ClearOnStart
+}
+
+func (c Config) StripEmojiOn() bool {
+	return c.UI.StripEmoji
 }
 
 func nonzero(n, fallback int) int {

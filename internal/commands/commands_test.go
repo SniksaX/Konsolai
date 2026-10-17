@@ -269,6 +269,15 @@ func TestDispatchUnknownAndHelp(t *testing.T) {
 	if !strings.Contains(out.String(), "/help") || !strings.Contains(out.String(), "/status") || !strings.Contains(out.String(), "/copy") {
 		t.Fatalf("help %q", out.String())
 	}
+	if !strings.Contains(out.String(), "/exit, /quit") {
+		t.Fatalf("help aliases %q", out.String())
+	}
+	if strings.Contains(out.String(), "--") {
+		t.Fatalf("help still uses -- %q", out.String())
+	}
+	if Default().Lookup("quit") == nil || Default().Lookup("quit").Name != "exit" {
+		t.Fatal("quit should alias exit")
+	}
 }
 
 func TestSlashLines(t *testing.T) {
@@ -580,5 +589,21 @@ func TestConfigValidateMissingIsOK(t *testing.T) {
 	}
 	if strings.TrimSpace(out.String()) != "ok" {
 		t.Fatalf("got %q", out.String())
+	}
+}
+
+func TestRunClearWipesScrollback(t *testing.T) {
+	env, out, _ := testEnv(t)
+	env.InRepl = true
+	called := false
+	env.OnClear = func() { called = true }
+	if code := runClear(context.Background(), env, nil); code != 0 {
+		t.Fatalf("code %d", code)
+	}
+	if !strings.Contains(out.String(), "\x1b[3J") || !strings.Contains(out.String(), "\x1b[H\x1b[2J") {
+		t.Fatalf("missing wipe %q", out.String())
+	}
+	if !called {
+		t.Fatal("OnClear not called")
 	}
 }

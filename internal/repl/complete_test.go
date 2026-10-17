@@ -62,7 +62,13 @@ func TestCompleteSlashDescribed(t *testing.T) {
 			if c.Description == "" {
 				t.Fatal("help has no description")
 			}
-			if c.Style != slashStyle {
+			if strings.Contains(c.Description, "--") {
+				t.Fatalf("description still has --: %q", c.Description)
+			}
+			if !strings.HasPrefix(c.Display, "  /help") {
+				t.Fatalf("display %q", c.Display)
+			}
+			if c.Style != slashStyle() {
 				t.Fatalf("style %q", c.Style)
 			}
 		}
@@ -101,7 +107,51 @@ func TestCompleterSlashStartOnly(t *testing.T) {
 }
 
 func TestNavHint(t *testing.T) {
-	if !strings.Contains(slashNavHint, "tab complete") || !strings.Contains(slashNavHint, "esc cancel") {
+	if !strings.Contains(slashNavHint, "↑/↓") || !strings.Contains(slashNavHint, "esc") {
 		t.Fatalf("%q", slashNavHint)
+	}
+}
+
+func TestSlashAliasesOneRow(t *testing.T) {
+	items := slashItems(commands.Default(), "/")
+	var exit *slashItem
+	quitRows := 0
+	for i := range items {
+		if items[i].Value == "/exit" || items[i].Value == "/quit" {
+			if strings.Contains(items[i].Display, "/quit") && strings.Contains(items[i].Display, "/exit") {
+				exit = &items[i]
+			}
+		}
+		if items[i].Value == "/quit" {
+			quitRows++
+		}
+	}
+	if exit == nil {
+		t.Fatalf("exit/quit row missing in %+v", items)
+	}
+	if quitRows != 0 {
+		t.Fatalf("quit should not be its own row, got %d", quitRows)
+	}
+	qui := slashItems(commands.Default(), "/qui")
+	if len(qui) != 1 || qui[0].Value != "/quit" || !strings.Contains(qui[0].Display, "/exit, /quit") {
+		t.Fatalf("/qui %+v", qui)
+	}
+}
+
+func TestSlashMenuCap(t *testing.T) {
+	comps := completeSlash(commands.Default(), "/")
+	var n, more int
+	(&comps).EachValue(func(c readline.Completion) readline.Completion {
+		n++
+		if strings.Contains(c.Display, "more") {
+			more++
+		}
+		return c
+	})
+	if n > slashMenuCap+1 {
+		t.Fatalf("visible %d want at most %d plus more-row", n, slashMenuCap)
+	}
+	if more != 1 {
+		t.Fatalf("want one ↓ N more row, got n=%d more=%d", n, more)
 	}
 }

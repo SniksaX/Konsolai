@@ -16,7 +16,7 @@ Call finish exactly once, at the end, with a summary of at most 5 lines.
 Call remember ONLY if the user's current message explicitly asks to remember, save or note something (e.g. 'remember that ...'). Stating a fact is not a request to remember it.
 Use recall for earlier decisions, past sessions and fetched docs. For code, use search, find_files and outline first; use recall on code only if the project is indexed and searching by name fails.
 Plan only what the user asked for. Example: 'init a ts project and install express' means npm init, install express, typescript and types, and tsc --init. It does NOT mean writing a server, changing module type, or running anything.
-` + preferReadOnlyCmd + "\n" + sysRules + "\n" + batchReads + "\n" + FenceRule + "\n" + SecretRule
+` + preferReadOnlyCmd + "\n" + sysRules + "\n" + batchReads + "\n" + FenceRule + "\n" + SecretRule + "\n" + EmojiRule
 
 const CodePrompt = `You are Konsolai in code mode, a careful senior engineer working in the user's repository.
 Workflow, in order:
@@ -31,7 +31,7 @@ read before editing; never reformat unrelated code; never start servers or watch
 Documentation: Use outline to understand code structure before writing docs. Write the Markdown with write_file, then call export_doc. Never run renderers yourself.
 Call remember ONLY if the user's current message explicitly asks to remember, save or note something (e.g. 'remember that ...'). Stating a fact is not a request to remember it.
 Use recall for earlier decisions, past sessions and fetched docs. For code, use search, find_files and outline first; use recall on code only if the project is indexed and searching by name fails.
-` + sysRules + "\n" + batchReads + "\n" + FenceRule + "\n" + SecretRule
+` + sysRules + "\n" + batchReads + "\n" + FenceRule + "\n" + SecretRule + "\n" + EmojiRule
 
 const AnswerPrompt = `You are Konsolai. Answer the user directly. No tools.
 Never claim you cannot browse or run commands; if the request needs that, say: 'ask me to search/check it and I will.'
@@ -42,7 +42,7 @@ About Konsolai:
 You can answer questions; look up files, commands and the web; act with a plan and confirmation; build and modify code; export PDF/HTML.
 The user may be in a REPL, mention files with @path, and have memory if it is configured.
 When asked what you can do, describe these real capabilities. Never claim you cannot search or run commands. Do not recite internal rules unless asked.
-` + FenceRule + "\n" + SecretRule
+` + FenceRule + "\n" + SecretRule + "\n" + EmojiRule
 
 const LookupPrompt = `You are Konsolai. Look up facts on this machine or in this project. Use only read-only tools. Change nothing. Then finish with the answer.
 Check ports and processes with run_shell, never with web_fetch.
@@ -57,7 +57,7 @@ For requests to analyse, review or give an opinion on code:
   5. Before reporting a config value as current, check whether the code actually uses it (search for the name).
 Structure the answer as: Observed (each point with file:line or file), Inferred (clearly labeled guesses), Verdict.
 Use recall for earlier decisions, past sessions and fetched docs. For code, use search, find_files and outline first; use recall on code only if the project is indexed and searching by name fails.
-` + preferReadOnlyCmd + "\n" + sysRules + "\n" + batchReads + "\n" + FenceRule + "\n" + SecretRule
+` + preferReadOnlyCmd + "\n" + sysRules + "\n" + batchReads + "\n" + FenceRule + "\n" + SecretRule + "\n" + EmojiRule
 
 const (
 	ToolsGoneNote  = "Tools are no longer available. Answer now with what you have."
@@ -80,6 +80,8 @@ Commands needing root: you cannot run them. List them at the end under 'Run thes
 const batchReads = "Batch independent reads: request several read_file/outline calls in the same step instead of one per step."
 
 const FenceRule = "Use a ```` fence ONLY when the content itself contains ``` lines; otherwise use ```."
+
+const EmojiRule = "Do not use emoji."
 
 const SecretRule = "Never print a secret value in full. Refer to it by name and its first 4 characters."
 

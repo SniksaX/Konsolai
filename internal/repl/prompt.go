@@ -1,14 +1,17 @@
 package repl
 
 import (
+	"bytes"
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
-	"unsafe"
+	"sync"
+	"time"
 
 	"github.com/siraj/konsolai/internal/ui"
+	"github.com/siraj/konsolai/internal/ui/theme"
 )
 
 func gitBranch(cwd string) string {
@@ -65,17 +68,16 @@ func parseGitdir(contents, base string) string {
 	for _, line := range strings.Split(contents, "\n") {
 		line = strings.TrimSpace(line)
 		const p = "gitdir:"
-		if !strings.HasPrefix(strings.ToLower(line), p) {
-			continue
+		if strings.HasPrefix(strings.ToLower(line), p) {
+			dir := strings.TrimSpace(line[len(p):])
+			if dir == "" {
+				return ""
+			}
+			if !filepath.IsAbs(dir) {
+				dir = filepath.Join(base, dir)
+			}
+			return filepath.Clean(dir)
 		}
-		dir := strings.TrimSpace(line[len(p):])
-		if dir == "" {
-			return ""
-		}
-		if !filepath.IsAbs(dir) {
-			dir = filepath.Join(base, dir)
-		}
-		return filepath.Clean(dir)
 	}
 	return ""
 }
@@ -125,40 +127,121 @@ type footerInfo struct {
 	Shell   bool
 }
 
+var (
+	dirtyMu  sync.Mutex
+	dirtyAt  time.Time
+	dirtyOn  bool
+	dirtyCwd string
+)
+
+func gitDirty(cwd string) bool {
+	if cwd == "" {
+		return false
+	}
+	dirtyMu.Lock()
+	defer dirtyMu.Unlock()
+	if cwd == dirtyCwd && time.Since(dirtyAt) < 5*time.Second {
+		return dirtyOn
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", cwd, "status", "--porcelain")
+	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return dirtyOn
+	}
+	dirtyCwd = cwd
+	dirtyAt = time.Now()
+	dirtyOn = err == nil && len(bytes.TrimSpace(out)) > 0
+	return dirtyOn
+}
+
 func formatFooter(f footerInfo) string {
-	p := ui.Current()
-	var left []string
-	if sp := shortPath(f.Cwd); sp != "" {
-		left = append(left, sp)
+	width := theme.TermWidth()
+	if width < 20 {
+		width = 20
 	}
-	if br := gitBranch(f.Cwd); br != "" {
-		left = append(left, br)
+	sep := theme.Style(theme.Subtle, "·")
+	join := func(parts []string) string {
+		var kept []string
+		for _, p := range parts {
+			if p != "" {
+				kept = append(kept, p)
+			}
+		}
+		return strings.Join(kept, " "+sep+" ")
 	}
+
+	path := theme.Style(theme.Muted, shortPath(f.Cwd))
+	br := gitBranch(f.Cwd)
+	branch := ""
+	if br != "" {
+		if gitDirty(f.Cwd) {
+			br += "*"
+		}
+		branch = theme.Style(theme.Accent, br)
+	}
+	modelWord := shortModel(f.Model)
 	if f.Shell {
-		left = append(left, "shell")
-	} else {
-		left = append(left, shortModel(f.Model))
+		modelWord = "shell"
 	}
+	model := theme.Style(theme.Muted, modelWord)
+	ctx := ""
 	if f.ShowCtx {
-		left = append(left, "ctx "+itoa(clampPct(f.CtxPct))+"%")
+		label := "ctx " + itoa(clampPct(f.CtxPct)) + "%"
+		switch {
+		case f.CtxPct >= 85:
+			ctx = theme.Style(theme.Error, label)
+		case f.CtxPct >= 60:
+			ctx = theme.Style(theme.Warn, label)
+		default:
+			ctx = theme.Style(theme.Muted, label)
+		}
 	}
-	leftS := strings.Join(left, " · ")
 	routing := f.Routing
 	if routing == "" {
 		routing = "main"
 	}
-	rightS := "routing " + routing
-	leftPaint := p.Muted(leftS)
-	rightPaint := p.Muted(rightS)
+	right := theme.Style(theme.Muted, routing)
 	if f.Down {
-		rightPaint = p.Error("●") + " " + rightPaint
+		right = theme.Style(theme.Error, "●") + " " + right
 	}
-	width := termCols()
-	pad := width - visLen(leftPaint) - visLen(rightPaint)
-	if pad < 1 {
-		pad = 1
+
+	dropModel := width < 60
+	dropCtx := false
+	build := func() string {
+		left := join([]string{path, branch, pick(dropModel, "", model)})
+		rightS := join([]string{pick(dropCtx, "", ctx), right})
+		pad := width - 2 - theme.VisibleWidth(left) - theme.VisibleWidth(rightS)
+		if pad < 1 {
+			return ""
+		}
+		return left + strings.Repeat(" ", pad) + rightS
 	}
-	return leftPaint + strings.Repeat(" ", pad) + rightPaint
+	out := build()
+	if out == "" && !dropModel {
+		dropModel = true
+		out = build()
+	}
+	if out == "" && f.ShowCtx && !dropCtx {
+		dropCtx = true
+		out = build()
+	}
+	if out == "" {
+		left := join([]string{path, branch})
+		out = theme.TruncateChrome(left+" "+sep+" "+right, width)
+	}
+	if theme.VisibleWidth(out) > width {
+		out = theme.TruncateChrome(out, width)
+	}
+	return out
+}
+
+func pick(skip bool, empty, val string) string {
+	if skip {
+		return empty
+	}
+	return val
 }
 
 func clampPct(n int) int {
@@ -169,42 +252,6 @@ func clampPct(n int) int {
 		return 99
 	}
 	return n
-}
-
-func visLen(s string) int {
-	n := 0
-	skip := false
-	for _, r := range s {
-		if r == '\033' {
-			skip = true
-			continue
-		}
-		if skip {
-			if r == 'm' {
-				skip = false
-			}
-			continue
-		}
-		n++
-	}
-	return n
-}
-
-func termCols() int {
-	if c := os.Getenv("COLUMNS"); c != "" {
-		if n, err := strconv.Atoi(c); err == nil && n > 0 {
-			return n
-		}
-	}
-	type winsize struct {
-		Row, Col, Xpixel, Ypixel uint16
-	}
-	var ws winsize
-	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, os.Stderr.Fd(), syscall.TIOCGWINSZ, uintptr(unsafe.Pointer(&ws)))
-	if errno == 0 && ws.Col > 0 {
-		return int(ws.Col)
-	}
-	return 80
 }
 
 func itoa(n int) string {

@@ -2,16 +2,14 @@ package ui
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"regexp"
 	"strings"
-	"unicode"
 
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/formatters"
 	"github.com/alecthomas/chroma/v2/lexers"
-	"github.com/alecthomas/chroma/v2/styles"
+	"github.com/siraj/konsolai/internal/ui/theme"
 )
 
 var (
@@ -83,18 +81,21 @@ func (r *Renderer) Flush() error {
 }
 
 func (r *Renderer) line(s string) error {
-	if r.plain {
-		return r.writeCollapsed(s, s+"\n")
-	}
 	if r.inFence {
 		if isCloseFence(strings.TrimRight(s, "\r"), r.fenceChar, r.fenceN) {
 			body := r.fenceBody.String()
 			r.fenceBody.Reset()
 			r.inFence = false
+			if r.plain {
+				return r.writeCollapsed(s, s+"\n")
+			}
 			return r.emitFence(r.fenceLang, body)
 		}
 		r.fenceBody.WriteString(s)
 		r.fenceBody.WriteByte('\n')
+		if r.plain {
+			return r.writeCollapsed(s, s+"\n")
+		}
 		return nil
 	}
 	if char, n, lang, ok := parseOpenFence(strings.TrimRight(s, "\r")); ok {
@@ -106,7 +107,16 @@ func (r *Renderer) line(s string) error {
 		r.fenceN = n
 		r.fenceLang = lang
 		r.lastBlank = false
+		if r.plain {
+			return r.writeCollapsed(s, s+"\n")
+		}
 		return nil
+	}
+	if StripEmojiOn() {
+		s = StripEmoji(s)
+	}
+	if r.plain {
+		return r.writeCollapsed(s, s+"\n")
 	}
 	if reTable.MatchString(s) {
 		r.table = append(r.table, s)
@@ -226,27 +236,53 @@ func (r *Renderer) emitLine(s string) error {
 	case reHeading.MatchString(s):
 		m := reHeading.FindStringSubmatch(s)
 		text := p.Heading(inline(p, m[2]))
-		if m[1] != "#" {
-			text = p.Accent("▍ ") + text
-		}
 		_, err := io.WriteString(r.w, text+"\n")
 		return err
 	case reBullet.MatchString(s):
 		m := reBullet.FindStringSubmatch(s)
-		_, err := io.WriteString(r.w, m[1]+p.Accent("•")+" "+inline(p, m[3])+"\n")
-		return err
+		return r.writeHanging(m[1], p.AccentDim("•")+" ", m[3])
 	case reNumber.MatchString(s):
 		m := reNumber.FindStringSubmatch(s)
-		_, err := io.WriteString(r.w, m[1]+p.Accent(m[2]+m[3])+" "+inline(p, m[4])+"\n")
-		return err
+		return r.writeHanging(m[1], p.Accent(m[2]+m[3])+" ", m[4])
 	case reQuote.MatchString(s):
 		m := reQuote.FindStringSubmatch(s)
-		_, err := io.WriteString(r.w, m[1]+p.Muted("│ ")+inline(p, m[2])+"\n")
+		_, err := io.WriteString(r.w, m[1]+p.Subtle("│ ")+inline(p, m[2])+"\n")
 		return err
 	default:
+		if !r.plain {
+			wrapped := theme.Wrap(s, theme.WrapWidth())
+			var b strings.Builder
+			for i, ln := range strings.Split(wrapped, "\n") {
+				if i > 0 {
+					b.WriteByte('\n')
+				}
+				b.WriteString(inline(p, ln))
+			}
+			_, err := io.WriteString(r.w, b.String()+"\n")
+			return err
+		}
 		_, err := io.WriteString(r.w, inline(p, s)+"\n")
 		return err
 	}
+}
+
+func (r *Renderer) writeHanging(indent, marker, text string) error {
+	p := Current()
+	hang := theme.DisplayWidth(indent + theme.StripANSI(marker))
+	width := theme.WrapWidth()
+	bodyW := width - hang
+	if bodyW < 8 {
+		bodyW = 8
+	}
+	lines := strings.Split(theme.Wrap(text, bodyW), "\n")
+	var b strings.Builder
+	b.WriteString(indent + marker + inline(p, lines[0]) + "\n")
+	pad := strings.Repeat(" ", hang)
+	for _, ln := range lines[1:] {
+		b.WriteString(pad + inline(p, ln) + "\n")
+	}
+	_, err := io.WriteString(r.w, b.String())
+	return err
 }
 
 func (r *Renderer) emitFence(lang, body string) error {
@@ -256,31 +292,29 @@ func (r *Renderer) emitFence(lang, body string) error {
 	if label == "" {
 		label = "code"
 	}
-	rule := p.Muted("─ " + label + " " + strings.Repeat("─", 12))
-	if _, err := io.WriteString(r.w, rule+"\n"); err != nil {
+	head := p.Subtle("╭─") + " " + p.Muted(label)
+	if _, err := io.WriteString(r.w, head+"\n"); err != nil {
 		return err
 	}
 	code := strings.TrimRight(body, "\n")
 	highlighted := highlight(lang, code, p)
+	lines := []string{}
 	if highlighted != "" {
-		for _, line := range strings.Split(strings.TrimRight(highlighted, "\n"), "\n") {
-			if _, err := io.WriteString(r.w, "  "+line+"\n"); err != nil {
-				return err
-			}
-		}
+		lines = strings.Split(strings.TrimRight(highlighted, "\n"), "\n")
 	} else {
-		for _, line := range strings.Split(code, "\n") {
-			if _, err := io.WriteString(r.w, "  "+p.Code(line)+"\n"); err != nil {
-				return err
-			}
+		lines = strings.Split(code, "\n")
+	}
+	for _, line := range lines {
+		if _, err := io.WriteString(r.w, p.Subtle("│ ")+line+"\n"); err != nil {
+			return err
 		}
 	}
-	_, err := io.WriteString(r.w, p.Muted(strings.Repeat("─", 16))+"\n")
+	_, err := io.WriteString(r.w, p.Subtle("╰─")+"\n")
 	return err
 }
 
 func highlight(lang, code string, p Palette) string {
-	if !p.Enabled || code == "" {
+	if !p.Enabled || code == "" || !theme.CodeHighlight() {
 		return ""
 	}
 	lexer := lexers.Get(lang)
@@ -291,10 +325,7 @@ func highlight(lang, code string, p Palette) string {
 		lexer = lexers.Fallback
 	}
 	lexer = chroma.Coalesce(lexer)
-	style := styles.Get("monokai")
-	if style == nil {
-		style = styles.Fallback
-	}
+	style := theme.ChromaStyle()
 	name := "terminal256"
 	if p.Truecolor {
 		name = "terminal16m"
@@ -340,35 +371,46 @@ func (r *Renderer) flushTable() error {
 			}
 		}
 	}
+	first := true
 	for _, cells := range parsed {
 		if cells == nil {
 			var b strings.Builder
-			b.WriteString(p.Muted("│"))
+			b.WriteString(p.Subtle("│"))
 			for i, w := range widths {
 				if i > 0 {
-					b.WriteString(p.Muted("┼"))
+					b.WriteString(p.Subtle("┼"))
 				}
-				b.WriteString(p.Muted(strings.Repeat("─", w+2)))
+				b.WriteString(p.Subtle(strings.Repeat("─", w+2)))
 			}
-			b.WriteString(p.Muted("│") + "\n")
+			b.WriteString(p.Subtle("│") + "\n")
 			if _, err := io.WriteString(r.w, b.String()); err != nil {
 				return err
 			}
+			first = false
 			continue
 		}
 		var b strings.Builder
-		b.WriteString("│")
+		b.WriteString(p.Subtle("│"))
 		for i, w := range widths {
 			cell := ""
 			if i < len(cells) {
 				cell = cells[i]
 			}
-			fmt.Fprintf(&b, " %-*s │", w, cell)
+			n := w - displayLen(cell)
+			if n < 0 {
+				n = 0
+			}
+			pad := cell + strings.Repeat(" ", n)
+			if first {
+				pad = p.Heading(pad)
+			}
+			b.WriteString(" " + pad + " " + p.Subtle("│"))
 		}
 		b.WriteByte('\n')
 		if _, err := io.WriteString(r.w, b.String()); err != nil {
 			return err
 		}
+		first = false
 	}
 	return nil
 }
@@ -398,13 +440,7 @@ func isTableSep(s string) bool {
 }
 
 func displayLen(s string) int {
-	n := 0
-	for _, r := range s {
-		if !unicode.IsControl(r) {
-			n++
-		}
-	}
-	return n
+	return theme.DisplayWidth(s)
 }
 
 func inline(p Palette, s string) string {
@@ -413,7 +449,7 @@ func inline(p Palette, s string) string {
 	for i < len(s) {
 		if s[i] == '`' {
 			if j := strings.IndexByte(s[i+1:], '`'); j >= 0 {
-				b.WriteString(p.Code(s[i+1 : i+1+j]))
+				b.WriteString(p.Accent(s[i+1 : i+1+j]))
 				i += j + 2
 				continue
 			}
@@ -421,7 +457,7 @@ func inline(p Palette, s string) string {
 		if strings.HasPrefix(s[i:], "[") {
 			if text, url, n, ok := parseLink(s[i:]); ok {
 				b.WriteString(p.Link(text))
-				if url != "" {
+				if url != "" && url != text {
 					b.WriteString(" ")
 					b.WriteString(p.Muted(url))
 				}

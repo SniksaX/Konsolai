@@ -61,6 +61,27 @@ func TestReplCommandsAndExit(t *testing.T) {
 	}
 }
 
+func TestReplBannerOffUsesMutedLine(t *testing.T) {
+	var out, errb bytes.Buffer
+	prof := config.Builtin()
+	prof.UI.Banner = false
+	prof.Model = "m"
+	env := &commands.Env{Profile: prof, Out: &out, Err: &errb, Cwd: t.TempDir()}
+	code := Run(context.Background(), Config{
+		Env: env, Reg: commands.Default(), Reader: &scriptReader{lines: []string{"/exit"}},
+		Version: "v9", Model: "m", Out: &out, Err: &errb,
+	})
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "konsolai v9 · m · /help for commands") {
+		t.Fatalf("want muted line, got %q", out.String())
+	}
+	if strings.Contains(out.String(), "█") {
+		t.Fatalf("pixel banner on non-TTY: %q", out.String())
+	}
+}
+
 func TestReplInterruptEmpty(t *testing.T) {
 	var out, errb bytes.Buffer
 	env := &commands.Env{Out: &out, Err: &errb, Cwd: t.TempDir(), Profile: config.Profile{Name: "p"}}
@@ -158,7 +179,7 @@ func TestFormatFooter(t *testing.T) {
 	if !strings.Contains(s, "dev") || !strings.Contains(s, "qwen38.nvfp4") || !strings.Contains(s, "ctx 12%") {
 		t.Fatalf("left %q", s)
 	}
-	if !strings.Contains(s, "routing fast") || !strings.Contains(s, "●") {
+	if !strings.Contains(s, "fast") || !strings.Contains(s, "●") {
 		t.Fatalf("right %q", s)
 	}
 	sh := formatFooter(footerInfo{Cwd: dir, Model: "qwen", Routing: "main", Shell: true})
@@ -323,8 +344,8 @@ func TestSubmittedInputNotEchoed(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d %s", code, errb.String())
 	}
-	if strings.Contains(out.String(), unique) {
-		t.Fatalf("submitted input echoed into scrollback: %q", out.String())
+	if strings.Count(out.String(), unique) != 1 || !strings.Contains(out.String(), "  › "+unique) {
+		t.Fatalf("want one echo line, got %q", out.String())
 	}
 }
 
@@ -367,7 +388,7 @@ func TestNoEmptyPromptInScrollback(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("%d", code)
 	}
-	if strings.Contains(out.String(), "›") {
+	if strings.Contains(out.String(), "  › \n") {
 		t.Fatalf("empty prompt leaked into scrollback: %q", out.String())
 	}
 	if n != 2 {
@@ -388,8 +409,8 @@ func TestPromptRenderCount(t *testing.T) {
 	if len(rd.prompts) != 2 {
 		t.Fatalf("prompt renders %d want 2: %q", len(rd.prompts), rd.prompts)
 	}
-	if strings.Contains(out.String(), "›") {
-		t.Fatalf("prompt leaked into scrollback: %q", out.String())
+	if strings.Count(out.String(), "  › /help") != 1 || strings.Count(out.String(), "  › /exit") != 1 {
+		t.Fatalf("want one echo per accepted line: %q", out.String())
 	}
 }
 

@@ -18,6 +18,8 @@ import (
 	"github.com/siraj/konsolai/internal/ui"
 )
 
+var ErrLookupMutating = errors.New("lookup can only run read-only commands")
+
 type shellTool struct {
 	guard        *safety.Guard
 	out          io.Writer
@@ -88,7 +90,7 @@ func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 	}
 	ro := safety.IsReadOnlyCommand(args.Cmd)
 	if t.readOnlyOnly && !ro {
-		return nil, errors.New("lookup can only run read-only commands")
+		return nil, ErrLookupMutating
 	}
 	if t.docsTask && !ro && docsBlockedCmd(args.Cmd) {
 		return nil, errors.New(DocsSourceReject)

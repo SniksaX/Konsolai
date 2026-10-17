@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/reeflective/readline"
+	"github.com/siraj/konsolai/internal/banner"
 	"github.com/siraj/konsolai/internal/commands"
 	"github.com/siraj/konsolai/internal/config"
 	"github.com/siraj/konsolai/internal/repo"
@@ -21,6 +22,7 @@ import (
 	"github.com/siraj/konsolai/internal/store"
 	"github.com/siraj/konsolai/internal/turn"
 	"github.com/siraj/konsolai/internal/ui"
+	"github.com/siraj/konsolai/internal/ui/theme"
 )
 
 type Config struct {
@@ -120,15 +122,39 @@ func Run(ctx context.Context, cfg Config) int {
 
 	p := ui.Current()
 	model := cfg.Model
-	if model == "" {
+	if model == "" && env != nil {
 		model = env.Profile.Model
 	}
 	if model == "" {
 		model = "-"
 	}
-	fmt.Fprintln(out, p.Muted(fmt.Sprintf("konsolai %s · %s · /help for commands", cfg.Version, model)))
+	info := banner.Info{
+		Version: cfg.Version, Model: shortModel(model), Dir: shortPath(cwd),
+		Branch: gitBranch(cwd),
+	}
+	if env != nil {
+		info.Host = banner.HostOf(env.Profile.Endpoint)
+	}
+	if info.Model == "-" {
+		info.Model = ""
+	}
+	tty := banner.IsTTY(origOut)
+	if tty && env != nil && env.Profile.ClearOnStart() {
+		fmt.Fprint(out, theme.ClearHome)
+	}
+	show := env == nil || env.Profile.ShowBanner()
+	if err := banner.Startup(out, info, show, tty, p, banner.Width(origOut)); err != nil {
+		fmt.Fprintln(errw, "konsolai:", err)
+		return 1
+	}
 
 	go probeBackground(ctx, env.Profile, errw, st)
+
+	if tty {
+		if f, ok := origOut.(*os.File); ok {
+			theme.DetectOnce(f)
+		}
+	}
 
 	rd := cfg.Reader
 	if rd == nil {
@@ -150,6 +176,17 @@ func Run(ctx context.Context, cfg Config) int {
 			fmt.Fprintln(errw, "konsolai:", err)
 			return 1
 		}
+	}
+	if clr, ok := rd.(interface{ SetOnClear(func()) }); ok {
+		clr.SetOnClear(func() {
+			fmt.Fprintln(out, banner.Compact(info, ui.Current()))
+		})
+	}
+	env.OnClear = func() {
+		fmt.Fprintln(out, banner.Compact(info, ui.Current()))
+	}
+	if st.mode != nil {
+		st.mode.OnClear = env.OnClear
 	}
 	defer func() { _ = rd.Close() }()
 	setShell := func(on bool) {
@@ -212,7 +249,16 @@ func Run(ctx context.Context, cfg Config) int {
 			continue
 		}
 		line = st.pastes.Expand(line)
+		if fe, ok := rd.(interface{ EraseFrame(io.Writer, string) }); ok && tty {
+			fe.EraseFrame(origOut, line)
+		}
+		echoInput(out, line)
+		fmt.Fprintln(out)
 		trim := strings.TrimSpace(line)
+		if trim == "?" {
+			line = "/help"
+			trim = "/help"
+		}
 		if shell {
 			if trim == "/cmd" || trim == "exit" {
 				setShell(false)
@@ -333,7 +379,16 @@ func clearEmptyPrompt(w io.Writer) {
 	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
 		return
 	}
-	fmt.Fprint(w, "\033[1A\r\033[K")
+	fmt.Fprint(w, theme.CursorUp(1)+theme.ClearLine)
+}
+
+func echoInput(w io.Writer, text string) {
+	limit := theme.TermWidth() - 4
+	if limit < 8 {
+		limit = 8
+	}
+	text = theme.Truncate(text, limit)
+	fmt.Fprintln(w, "  "+theme.Style(theme.Accent, "›")+" "+theme.Bold(text))
 }
 
 func sessionFooter(st *session, cfg Config) string {
