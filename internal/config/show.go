@@ -21,6 +21,9 @@ type showView struct {
 	Language Language `yaml:"language"`
 	Safety   Safety   `yaml:"safety"`
 	Router   Router   `yaml:"router"`
+	Tools    Tools    `yaml:"tools"`
+	Store    Store    `yaml:"store"`
+	Stats    Stats    `yaml:"stats"`
 }
 
 func (c Config) ShowYAML() (string, error) {
@@ -28,6 +31,7 @@ func (c Config) ShowYAML() (string, error) {
 		LLM: c.LLM, Fast: c.Fast, Database: c.Database, Memory: c.Memory,
 		Context: c.Context, Agent: c.Agent, RAG: c.RAG, UI: c.UI,
 		Language: c.Language, Safety: c.Safety, Router: c.Router,
+		Tools: c.Tools, Store: c.Store, Stats: c.Stats,
 	}
 	v.Database.URL = MaskURL(v.Database.URL)
 	b, err := yaml.Marshal(v)
@@ -90,6 +94,7 @@ defaults:
     session_idle_minutes: %d   # resume a session newer than this
     retention_days: %d   # prune facts older than this
     compact_threshold: %g   # compact history past this fraction of the window
+    isolated_timeout_ms: %d   # memory calls detached from the turn
   context:
     elide_trigger: %g   # start eliding tool output above this fraction
     elide_target: %g   # elide down toward this fraction; must stay below the trigger
@@ -151,6 +156,7 @@ defaults:
     startup_cap_ms: %d   # longest wait before the prompt appears
     welcome_cache_seconds: %d   # refresh a cached welcome in the background after this
     model_rate_calls: %d   # recent calls used for tokens per second
+    model_slow_ms: %d   # welcome marks a model slow at this latency
     ctx_warn_pct: %d   # footer meter turns warn at this context percent
     ctx_hot_pct: %d   # footer meter turns hot at this context percent
     ctx_cells: %d   # cells in the footer context meter
@@ -161,6 +167,16 @@ defaults:
       tiny_width: %d   # below this width, skip the wordmark
       narrow_width: %d   # below this, stack the welcome instead of splitting it
       frame_width: %d   # frame layout needs at least this width
+  tools:
+    shell:
+      default_timeout_sec: %d   # run_shell timeout when the model omits one
+      max_timeout_sec: %d   # longest run_shell timeout
+      wait_delay_ms: %d   # how long a cancelled shell may take to exit
+  store:
+    query_timeout_ms: %d   # database query limit
+    migrate_timeout_ms: %d   # schema migration limit
+  stats:
+    insert_timeout_ms: %d   # turn stat insert limit
   language:
     languages: %s   # reply languages the router may pick
     default: %s   # language used when detection is unsure
@@ -181,7 +197,7 @@ profiles:
 		b.LLM.MaxTokens.Answer, b.LLM.MaxTokens.Lookup, b.LLM.MaxTokens.Act, b.LLM.MaxTokens.Build,
 		b.Fast.Enabled, b.Fast.Endpoint, b.Fast.Model, b.Fast.ContextGuardRatio,
 		b.Database.URL,
-		b.Memory.SessionIdleMinutes, b.Memory.RetentionDays, b.Memory.CompactThreshold,
+		b.Memory.SessionIdleMinutes, b.Memory.RetentionDays, b.Memory.CompactThreshold, b.Memory.IsolatedTimeoutMS,
 		b.Context.ElideTrigger, b.Context.ElideTarget,
 		b.Agent.MaxSteps.Lookup, b.Agent.MaxSteps.Act, b.Agent.MaxSteps.Build,
 		b.Agent.ExploreBudget.Lookup, b.Agent.ExploreBudget.LookupAnalysis,
@@ -199,10 +215,13 @@ profiles:
 		b.UI.Theme, b.UI.Appearance, b.UI.CursorColor, b.UI.Banner, b.UI.Welcome,
 		b.UI.CodeHighlight, b.UI.ClearOnStart, b.UI.StripEmoji,
 		b.UI.ProbeDeadlineMS, b.UI.ProbeTimeoutMS, b.UI.GitQueryMS, b.UI.MemoryQueryMS,
-		b.UI.StartupCapMS, b.UI.WelcomeCacheSeconds, b.UI.ModelRateCalls,
+		b.UI.StartupCapMS, b.UI.WelcomeCacheSeconds, b.UI.ModelRateCalls, b.UI.ModelSlowMS,
 		b.UI.CtxWarnPct, b.UI.CtxHotPct, b.UI.CtxCells, b.UI.CtxNarrowCols,
 		b.UI.Layout.TinyHeight, b.UI.Layout.RecentHeight, b.UI.Layout.TinyWidth,
 		b.UI.Layout.NarrowWidth, b.UI.Layout.FrameWidth,
+		b.Tools.Shell.DefaultTimeoutSec, b.Tools.Shell.MaxTimeoutSec, b.Tools.Shell.WaitDelayMS,
+		b.Store.QueryTimeoutMS, b.Store.MigrateTimeoutMS,
+		b.Stats.InsertTimeoutMS,
 		langs, b.Language.Default,
 		verbs, targets,
 		b.LLM.Endpoint,
