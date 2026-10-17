@@ -75,7 +75,6 @@ func TestEscalatePrintsOnlyFinalBadge(t *testing.T) {
 	r := testRunner(t, client, autoConfirm{})
 	r.Out = &out
 	r.Err = &out
-	r.Profile = r.Profile
 	res := r.RunTurn(context.Background(), Request{
 		Text: "what is listening", Intent: "answer", Yes: true, Cwd: t.TempDir(), New: true,
 	})
