@@ -2488,3 +2488,72 @@ func TestOnShellRemembersOutput(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 }
+
+func TestIdenticalPlanRejectStops(t *testing.T) {
+	prose := "Read-only health check of the repo: build, vet, and test status."
+	replies := make([]llm.Message, 0, 16)
+	for i := 0; i < 15; i++ {
+		replies = append(replies, assistant(call(fmt.Sprintf("p%d", i), "propose_plan", prose)))
+	}
+	replies = append(replies, assistant(call("fin", "finish", `{"summary":"should not run"}`)))
+	var out bytes.Buffer
+	_, rep, err := setupCfg(t, replies, stubConfirm{d: ui.Approve}, Config{
+		RequirePlan: true, MaxSteps: 15, Out: &out,
+	})
+	if errors.Is(err, ErrMaxSteps) {
+		t.Fatal("identical rejects ran to the step cap")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.reqs) != 2 {
+		t.Fatalf("model calls %d, want 2", len(rep.reqs))
+	}
+	s := out.String()
+	for _, want := range []string{"go build ./...", "go vet ./...", "go test ./...", "files may be omitted: yes"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("missing %q in %q", want, s)
+		}
+	}
+}
+
+func TestShellStillRequiresPlan(t *testing.T) {
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "run_shell", `{"cmd":"go build ./..."}`)),
+		{Role: llm.RoleAssistant, Content: "blocked"},
+	}, nil, Config{RequirePlan: true, MaxSteps: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := rep.lastTool()
+	if !strings.Contains(got.Content, "call propose_plan first") {
+		t.Fatalf("%q", got.Content)
+	}
+}
+
+func TestAcceptedPlanAllowsShell(t *testing.T) {
+	plan := `{"summary":"health","steps":["go build ./...","go vet ./...","go test ./..."],"commands":["go build ./...","go vet ./...","go test ./..."]}`
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "propose_plan", plan)),
+		assistant(call("2", "run_shell", `{"cmd":"go build ./..."}`)),
+		assistant(call("3", "finish", `{"summary":"built"}`)),
+	}, stubConfirm{d: ui.Approve}, Config{RequirePlan: true, MaxSteps: 6})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.reqs) < 3 {
+		t.Fatalf("reqs %d", len(rep.reqs))
+	}
+	var shell string
+	for _, m := range rep.reqs[2] {
+		if m.ToolCallID == "2" {
+			shell = m.Content
+		}
+	}
+	if shell == "" {
+		t.Fatal("shell did not run")
+	}
+	if strings.Contains(shell, "call propose_plan first") {
+		t.Fatalf("%q", shell)
+	}
+}
