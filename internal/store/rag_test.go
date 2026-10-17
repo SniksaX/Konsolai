@@ -129,3 +129,40 @@ func TestRAGUnavailableWithoutVector(t *testing.T) {
 		t.Fatalf("store should still work: %v", err)
 	}
 }
+
+func TestPersistCodeFileAfterChunks(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	if !s.RAGAvailable(ctx) {
+		t.Fatal("want rag ready")
+	}
+	pid, err := s.UpsertProject(ctx, "/tmp/persist", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertMemoryFile(ctx, pid, "orphan.go", "deadbeef"); err != nil {
+		t.Fatal(err)
+	}
+	orphans, err := s.OrphanMemoryFiles(ctx, pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orphans) != 1 || orphans[0] != "orphan.go" {
+		t.Fatalf("orphans %v", orphans)
+	}
+	ref, _ := json.Marshal(map[string]any{"path": "ok.go", "start_line": 1, "end_line": 2})
+	n, err := s.PersistCodeFile(ctx, "home", pid, "ok.go", "abc", []ChunkIn{{
+		Profile: "home", ProjectID: &pid, Source: "code", Ref: ref,
+		Content: "package p\nfunc Ok() {}", Embedding: unitVec(3),
+	}})
+	if err != nil || n != 1 {
+		t.Fatalf("persist n=%d err=%v", n, err)
+	}
+	orphans, err = s.OrphanMemoryFiles(ctx, pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orphans) != 1 || orphans[0] != "orphan.go" {
+		t.Fatalf("ok.go should not be orphan: %v", orphans)
+	}
+}
