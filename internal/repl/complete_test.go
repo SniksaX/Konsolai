@@ -93,6 +93,30 @@ func TestSlashPrefix(t *testing.T) {
 	}
 }
 
+func TestCompleterNoSlashNameMenu(t *testing.T) {
+	fn := Completer(commands.Default(), func() string { return t.TempDir() })
+	for _, line := range []string{"/", "/h", "/help"} {
+		comps := fn([]rune(line), len([]rune(line)))
+		var n int
+		(&comps).EachValue(func(c readline.Completion) readline.Completion {
+			n++
+			return c
+		})
+		if n != 0 {
+			t.Fatalf("%q should not use readline completions, got %d", line, n)
+		}
+	}
+	comps := fn([]rune("/copy "), 6)
+	var n int
+	(&comps).EachValue(func(c readline.Completion) readline.Completion {
+		n++
+		return c
+	})
+	if n == 0 {
+		t.Fatal("slash args should still complete")
+	}
+}
+
 func TestCompleterSlashStartOnly(t *testing.T) {
 	fn := Completer(commands.Default(), func() string { return t.TempDir() })
 	comps := fn([]rune("say /help"), 9)
