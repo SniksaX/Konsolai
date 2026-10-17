@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/siraj/konsolai/internal/config"
 	"github.com/siraj/konsolai/internal/llm"
 	"github.com/siraj/konsolai/internal/store"
 )
@@ -74,6 +75,13 @@ func (r *Runner) attachStats(c *llm.Client) {
 	})
 }
 
+func (r *Runner) statsInsertTimeout() time.Duration {
+	if r == nil {
+		return config.Builtin().StatsInsertTimeout()
+	}
+	return r.Profile.StatsInsertTimeout()
+}
+
 func (r *Runner) recordCall(info llm.CallInfo) {
 	defer func() { _ = recover() }()
 	if r == nil {
@@ -109,7 +117,7 @@ func (r *Runner) recordCall(info llm.CallInfo) {
 	}
 	go func() {
 		defer func() { _ = recover() }()
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), r.statsInsertTimeout())
 		defer cancel()
 		_ = st.RecordTurnStat(ctx, row)
 	}()
