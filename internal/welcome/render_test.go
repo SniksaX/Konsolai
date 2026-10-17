@@ -151,6 +151,56 @@ func TestRenderGoldens(t *testing.T) {
 	}
 }
 
+func TestWideSplitKeepsRecentBesideSession(t *testing.T) {
+	plain(t)
+	d := Data{
+		Host: "fatboy",
+		Models: []Model{
+			{Name: "qwen38.nvfp4", Role: "main", Status: StatusUp, Stat: "126ms"},
+			{Name: "fast", Role: "fast", Status: StatusUp, Stat: "105ms"},
+			{Name: "embed", Role: "embed", Status: StatusUp, Stat: "225ms"},
+			{Name: "rerank", Role: "rerank", Status: StatusDown, Stat: ":9501 unreachable"},
+		},
+		Up: 3, Total: 4,
+		Session: Session{
+			Dir:     "~/Desktop/other/Konsolai",
+			Branch:  "dev",
+			Dirty:   true,
+			Changed: 1,
+			Ahead:   232,
+			Build:   "v0.1.0  05fc4c0",
+			Memory:  "0 facts · 103 sessions",
+		},
+		Recent: []Recent{
+			{Title: "fix the welcome screen", Intent: "build", Age: "5m"},
+			{Title: "lookup theme roles", Intent: "lookup", Age: "2h"},
+			{Title: "answer a short question", Intent: "answer", Age: "1d"},
+			{Title: "wire the footer meter", Intent: "act", Age: "3w"},
+		},
+		Tip:     "!cmd runs a shell command",
+		Version: "v0.1.0",
+	}
+	for _, w := range []int{200, 160, 215} {
+		got := renderString(d, "split", w, 40)
+		if !widthOK(t, got, w) {
+			t.Fatalf("W=%d exceeds width", w)
+		}
+		if !strings.Contains(got, "3/4 up") || !strings.Contains(got, "/resume") {
+			t.Fatalf("W=%d missing host or /resume\n%s", w, got)
+		}
+		side := false
+		for _, ln := range strings.Split(got, "\n") {
+			if strings.Contains(ln, "session") && strings.Contains(ln, "recent") {
+				side = true
+				break
+			}
+		}
+		if !side {
+			t.Fatalf("W=%d session and recent are not on the same row\n%s", w, got)
+		}
+	}
+}
+
 func TestFrameBelow120MatchesSplit(t *testing.T) {
 	plain(t)
 	for _, fx := range fixtures() {
