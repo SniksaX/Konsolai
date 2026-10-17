@@ -35,7 +35,7 @@ const (
 	usageText = `usage: konsolai [--yes] [--profile NAME] [--intent answer|lookup|act|build] [--trace] [--plain] [--version] [new] ["<request>"]
        konsolai /<command> [args]`
 
-	noMemory = "memory is not configured (see ~/.config/konsolai/config.json)"
+	noMemory = "memory is not configured (see ~/.config/konsolai/config.yaml)"
 )
 
 type command int
@@ -202,6 +202,9 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "konsolai:", err)
 		return 1
 	}
+	if file.Notice != "" {
+		fmt.Fprintln(os.Stderr, ui.Current().Muted(file.Notice))
+	}
 	prof, err := file.Resolve(inv.Profile)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "konsolai:", err)
@@ -266,7 +269,10 @@ func run() int {
 			fmt.Fprintln(os.Stderr, ui.Current().Warn("rag unavailable"))
 		} else {
 			emb = embed.New(prof.EmbedEndpoint, prof.RerankEndpoint)
+			emb.SetBatch(prof.RAG.EmbedBatch)
 			ing := rag.New(st, emb, prof.Name)
+			ing.SetTune(rag.TuneFrom(prof))
+			ing.SetNotice(os.Stderr)
 			runner.Ingest = ing
 			runner.Embed = emb
 			if isRepl {
@@ -325,17 +331,18 @@ func run() int {
 
 func commandEnv(runner *turn.Runner, mem *memory.Guard, prof config.Profile, cwd string, projectID *int64, inv invocation, emb *embed.Client) *commands.Env {
 	return &commands.Env{
-		Runner:    runner,
-		Mem:       mem,
-		Profile:   prof,
-		Out:       os.Stdout,
-		Err:       os.Stderr,
-		Cwd:       cwd,
-		Yes:       inv.Yes,
-		Version:   version,
-		Plain:     inv.Plain,
-		Embed:     emb,
-		ProjectID: projectID,
+		Runner:     runner,
+		Mem:        mem,
+		Profile:    prof,
+		Out:        os.Stdout,
+		Err:        os.Stderr,
+		Cwd:        cwd,
+		Yes:        inv.Yes,
+		Version:    version,
+		Plain:      inv.Plain,
+		Embed:      emb,
+		ProjectID:  projectID,
+		ConfigPath: config.DefaultPath(),
 		Undo: func(ctx context.Context) int {
 			return runUndo(ctx, mem, projectID, cwd, inv.Yes)
 		},
