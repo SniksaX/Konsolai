@@ -1,12 +1,13 @@
 package theme
 
 const (
-	esc        = "\x1b["
-	ClearHome  = "\x1b[H\x1b[2J"
-	ClearBelow = "\x1b[0J"
-	HideCursor = "\x1b[?25l"
-	ShowCursor = "\x1b[?25h"
-	ClearLine  = "\r\x1b[K"
+	esc         = "\x1b["
+	ClearHome   = "\x1b[H\x1b[2J"
+	ClearScroll = "\x1b[H\x1b[2J\x1b[3J"
+	ClearBelow  = "\x1b[0J"
+	HideCursor  = "\x1b[?25l"
+	ShowCursor  = "\x1b[?25h"
+	ClearLine   = "\r\x1b[K"
 )
 
 func CursorUp(n int) string {
