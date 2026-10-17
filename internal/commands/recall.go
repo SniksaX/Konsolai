@@ -23,7 +23,7 @@ func runRecall(ctx context.Context, env *Env, args []string) int {
 		fmt.Fprintln(env.errw(), "rag unavailable")
 		return 1
 	}
-	hits, err := rag.Search(ctx, st, env.Embed, env.Embed, env.Profile.Name, env.ProjectID, query, scope, 6)
+	hits, err := rag.SearchTune(ctx, st, env.Embed, env.Embed, env.Profile.Name, env.ProjectID, query, scope, 6, rag.TuneFrom(env.Profile))
 	if err != nil {
 		fmt.Fprintln(env.errw(), "konsolai:", err)
 		return 1
