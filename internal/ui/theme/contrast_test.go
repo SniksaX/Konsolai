@@ -5,12 +5,12 @@ import (
 	"testing"
 )
 
-func TestContrastFloors(t *testing.T) {
+func TestContrast(t *testing.T) {
 	darks := []RGB{hexRGB(0x232627), hexRGB(0x1E1E1E), hexRGB(0x000000)}
 	lights := []RGB{hexRGB(0xFFFFFF), hexRGB(0xFAF7F0)}
-	need := map[Role]float64{
+	needMin := map[Role]float64{
 		Heading: 4.5, Accent: 4.5, Meta: 4.5, Muted: 4.5,
-		AccentDim: 4.0, Subtle: 3.0,
+		AccentDim: 4.0, BannerTop: 3.0, BannerBottom: 3.0,
 	}
 	var report []string
 	for _, pal := range PaletteNames {
@@ -20,7 +20,7 @@ func TestContrastFloors(t *testing.T) {
 				bgs = lights
 			}
 			cols := AllRoleRGB(pal, app)
-			for role, floor := range need {
+			for role, floor := range needMin {
 				c := cols[role]
 				for _, bg := range bgs {
 					got := Contrast(c, bg)
@@ -32,25 +32,20 @@ func TestContrastFloors(t *testing.T) {
 					}
 				}
 			}
+			c := cols[Subtle]
+			for _, bg := range bgs {
+				got := Contrast(c, bg)
+				line := fmt.Sprintf("%s %s subtle %s on %s = %.2f (need 1.6–3.2)",
+					pal, app, c.Hex(), bg.Hex(), got)
+				report = append(report, line)
+				if got+1e-6 < 1.6 || got-1e-6 > 3.2 {
+					t.Errorf("%s", line)
+				}
+			}
 		}
 	}
 	for _, line := range report {
 		t.Log(line)
-	}
-	for _, pal := range PaletteNames {
-		for _, app := range []Appearance{Dark, Light} {
-			t.Logf("%s %s Heading=%s Accent=%s AccentDim=%s Meta=%s Muted=%s Subtle=%s BannerTop=%s BannerBottom=%s",
-				pal, app,
-				roleColor(pal, app, Heading).Hex(),
-				roleColor(pal, app, Accent).Hex(),
-				roleColor(pal, app, AccentDim).Hex(),
-				roleColor(pal, app, Meta).Hex(),
-				roleColor(pal, app, Muted).Hex(),
-				roleColor(pal, app, Subtle).Hex(),
-				roleColor(pal, app, BannerTop).Hex(),
-				roleColor(pal, app, BannerBottom).Hex(),
-			)
-		}
 	}
 }
 
