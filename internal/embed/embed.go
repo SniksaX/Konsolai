@@ -28,6 +28,7 @@ type Client struct {
 	http      *http.Client
 	mu        sync.Mutex
 	dim       int
+	batch     int
 }
 
 type Scored struct {
@@ -48,7 +49,22 @@ func New(embedEndpoint, rerankEndpoint string) *Client {
 		embedURL:  strings.TrimRight(embedEndpoint, "/"),
 		rerankURL: strings.TrimRight(rerankEndpoint, "/"),
 		http:      newHTTP(embedTimeout),
+		batch:     embedBatch,
 	}
+}
+
+func (c *Client) SetBatch(n int) {
+	if c == nil || n < 1 {
+		return
+	}
+	c.batch = n
+}
+
+func (c *Client) batchSize() int {
+	if c == nil || c.batch < 1 {
+		return embedBatch
+	}
+	return c.batch
 }
 
 func (c *Client) Dim() int {
@@ -65,8 +81,9 @@ func (c *Client) Embed(ctx context.Context, texts []string) ([][]float32, error)
 		return nil, nil
 	}
 	out := make([][]float32, 0, len(texts))
-	for i := 0; i < len(texts); i += embedBatch {
-		end := i + embedBatch
+	step := c.batchSize()
+	for i := 0; i < len(texts); i += step {
+		end := i + step
 		if end > len(texts) {
 			end = len(texts)
 		}
