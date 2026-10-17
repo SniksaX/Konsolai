@@ -3,6 +3,7 @@ package repl
 import (
 	"bytes"
 	"context"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -188,15 +189,7 @@ func formatFooter(f footerInfo) string {
 	model := theme.Style(theme.Muted, modelWord)
 	ctx := ""
 	if f.ShowCtx {
-		label := "ctx " + itoa(clampPct(f.CtxPct)) + "%"
-		switch {
-		case f.CtxPct >= 85:
-			ctx = theme.Style(theme.Error, label)
-		case f.CtxPct >= 60:
-			ctx = theme.Style(theme.Warn, label)
-		default:
-			ctx = theme.Style(theme.Muted, label)
-		}
+		ctx = ctxMeter(f.CtxPct, width)
 	}
 	routing := f.Routing
 	if routing == "" {
@@ -242,6 +235,46 @@ func pick(skip bool, empty, val string) string {
 		return empty
 	}
 	return val
+}
+
+func ctxMeter(pct, width int) string {
+	shown := clampPct(pct)
+	if width < 90 {
+		label := "ctx " + itoa(shown) + "%"
+		switch {
+		case pct >= 85:
+			return theme.Style(theme.Error, label)
+		case pct >= 60:
+			return theme.Style(theme.Warn, label)
+		default:
+			return theme.Style(theme.Muted, label)
+		}
+	}
+	filled := ctxFilled(shown)
+	role := theme.Accent
+	switch {
+	case pct >= 85:
+		role = theme.Error
+	case pct >= 60:
+		role = theme.Warn
+	}
+	cells := theme.Style(role, strings.Repeat("▰", filled)) +
+		theme.Style(theme.Subtle, strings.Repeat("▱", 8-filled))
+	return theme.Style(theme.Muted, "ctx ") + cells + theme.Style(theme.Muted, " "+itoa(shown)+"%")
+}
+
+func ctxFilled(pct int) int {
+	if pct < 0 {
+		pct = 0
+	}
+	n := int(math.Round(float64(pct) / 12.5))
+	if n < 0 {
+		return 0
+	}
+	if n > 8 {
+		return 8
+	}
+	return n
 }
 
 func clampPct(n int) int {
