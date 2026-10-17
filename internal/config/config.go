@@ -392,10 +392,12 @@ func (c Config) OutputKeepBytes() int {
 }
 
 func (c Config) PaletteName() string {
-	if strings.EqualFold(strings.TrimSpace(c.UI.Palette), "violet") {
-		return "violet"
+	switch strings.ToLower(strings.TrimSpace(c.UI.Palette)) {
+	case "violet", "ocean", "forest", "rose", "mono":
+		return strings.ToLower(strings.TrimSpace(c.UI.Palette))
+	default:
+		return "amber"
 	}
-	return "amber"
 }
 
 func (c Config) ShowBanner() bool {
