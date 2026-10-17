@@ -358,6 +358,23 @@ func TestValidateRatiosAndElide(t *testing.T) {
 	}
 }
 
+func TestInvalidPalette(t *testing.T) {
+	c := Builtin()
+	c.UI.Palette = "neon"
+	err := Validate(c)
+	if err == nil || !strings.Contains(err.Error(), "ui.palette") {
+		t.Fatalf("got %v", err)
+	}
+	c.UI.Palette = "amber"
+	if err := Validate(c); err != nil {
+		t.Fatal(err)
+	}
+	c.UI.Palette = "violet"
+	if err := Validate(c); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestMigrateJSON(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
