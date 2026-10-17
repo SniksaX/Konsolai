@@ -11,13 +11,13 @@ import (
 	"github.com/reeflective/readline"
 	"github.com/siraj/konsolai/internal/commands"
 	"github.com/siraj/konsolai/internal/repo"
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/siraj/konsolai/internal/ui/theme"
 )
 
-const slashNavHint = "↑/↓ navigate · tab complete · enter select · esc cancel"
+const slashNavHint = "↑/↓ · tab · enter · esc"
 
 func slashStyle() string {
-	return ui.Current().AccentCode()
+	return ""
 }
 
 func Completer(reg *commands.Registry, cwdFn func() string) func(line []rune, cursor int) readline.Completions {
@@ -63,8 +63,13 @@ func completeSlash(reg *commands.Registry, line string) readline.Completions {
 		return readline.Completions{}
 	}
 	vals := make([]string, 0, len(items)*3)
+	room := theme.TermWidth() - 8
+	if room < 12 {
+		room = 12
+	}
 	for _, it := range items {
-		vals = append(vals, it.Value, it.Desc, slashStyle())
+		desc := theme.Truncate(it.Desc, max(8, room-theme.DisplayWidth(it.Value)))
+		vals = append(vals, it.Value, desc, slashStyle())
 	}
 	comps := readline.CompleteStyledValuesDescribed(vals...)
 	comps.PREFIX = slashPrefix(line)
