@@ -25,6 +25,15 @@ func SetKeyReader(fn KeyReader) {
 	keysMu.Unlock()
 }
 
+// ReadKey returns the next user key from the shared reader (REPL leftovers
+// first) or stdin /dev/tty.
+func ReadKey() (byte, error) {
+	if fn := currentKeyReader(); fn != nil {
+		return fn()
+	}
+	return readStdinKey()
+}
+
 func currentKeyReader() KeyReader {
 	keysMu.Lock()
 	fn := keysFn
