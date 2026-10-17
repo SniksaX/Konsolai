@@ -71,37 +71,38 @@ func ParseBuildThinking(s string) ThinkingPolicy {
 }
 
 type Config struct {
-	Client         *llm.Client
-	Tools          *tools.Registry
-	Confirmer      Confirmer
-	Out            io.Writer
-	MaxSteps       int
-	ThinkingPolicy ThinkingPolicy
-	RequirePlan    bool
-	Prompt         string
-	Temperature    float64
-	Recorder       Recorder
-	History        []llm.Message
-	AutoApprove    bool
-	ExploreBudget  int
-	ExploreNote    string
-	Trace          bool
-	SessionID      string
-	Intent         string
-	Task           string
-	RouterTime     time.Duration
-	Err            io.Writer
-	Stats          *Stats
-	Plain          bool
-	OnShell        func(output string)
-	Guard          *safety.Guard
-	ResumePlan     bool
-	PlanFiles      []string
-	PlanCmds       []string
-	PlanText       string
-	TokenCap       int
-	ElideTrigger   float64
-	ElideTarget    float64
+	Client           *llm.Client
+	Tools            *tools.Registry
+	Confirmer        Confirmer
+	Out              io.Writer
+	MaxSteps         int
+	ThinkingPolicy   ThinkingPolicy
+	RequirePlan      bool
+	Prompt           string
+	Temperature      float64
+	Recorder         Recorder
+	History          []llm.Message
+	AutoApprove      bool
+	ExploreBudget    int
+	ExploreNote      string
+	Trace            bool
+	SessionID        string
+	Intent           string
+	Task             string
+	RouterTime       time.Duration
+	Err              io.Writer
+	Stats            *Stats
+	Plain            bool
+	OnShell          func(output string)
+	Guard            *safety.Guard
+	ResumePlan       bool
+	PlanFiles        []string
+	PlanCmds         []string
+	PlanText         string
+	TokenCap         int
+	ElideTrigger     float64
+	ElideTarget      float64
+	IdenticalRejects int
 }
 
 type Stats struct {
@@ -1224,7 +1225,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				msgs = append(msgs, tm)
 				_ = rec.Message(ctx, tm)
 				_ = rec.Action(ctx, ActionRecord{Tool: call.Function.Name, Args: args, Decision: "invalid", IsError: true, Output: tm.Content})
-				if prepRejects >= 2 {
+				if prepRejects >= identicalRejectLimit(cfg) {
 					if cfg.Out != nil {
 						ui.BeforeOutput()
 						fmt.Fprintln(cfg.Out, err.Error())
@@ -1843,6 +1844,13 @@ func inPlan(files []string, path string) bool {
 		}
 	}
 	return false
+}
+
+func identicalRejectLimit(cfg Config) int {
+	if cfg.IdenticalRejects > 0 {
+		return cfg.IdenticalRejects
+	}
+	return 2
 }
 
 func analysisLimit(cfg Config, sourceReads int) int {
