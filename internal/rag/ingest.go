@@ -3,12 +3,16 @@ package rag
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"net"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/siraj/konsolai/internal/redact"
 	"github.com/siraj/konsolai/internal/store"
+	"github.com/siraj/konsolai/internal/ui"
 )
 
 const (
@@ -41,6 +45,9 @@ type Ingester struct {
 	stop    chan struct{}
 	mu      sync.Mutex
 	looping bool
+	tune    Tune
+	paused  bool
+	notice  io.Writer
 }
 
 func New(st ChunkStore, emb Embedder, profile string) *Ingester {
@@ -51,6 +58,24 @@ func New(st ChunkStore, emb Embedder, profile string) *Ingester {
 		items:   make(chan Item, queueSize),
 		stop:    make(chan struct{}),
 	}
+}
+
+func (i *Ingester) SetTune(t Tune) {
+	if i == nil {
+		return
+	}
+	i.tune = t
+}
+
+func (i *Ingester) SetNotice(w io.Writer) {
+	if i == nil {
+		return
+	}
+	i.notice = w
+}
+
+func (i *Ingester) Paused() bool {
+	return i != nil && i.paused
 }
 
 func (i *Ingester) Start() {
@@ -97,7 +122,7 @@ func (i *Ingester) loop() {
 }
 
 func (i *Ingester) Enqueue(item Item) {
-	if i == nil || strings.TrimSpace(item.Content) == "" {
+	if i == nil || i.paused || strings.TrimSpace(item.Content) == "" {
 		return
 	}
 	if skipSensitive(item.Ref) {
@@ -132,7 +157,8 @@ func (i *Ingester) EnqueueTurn(projectID *int64, prompt, answer, sessionID, titl
 		"title":      title,
 		"date":       time.Now().UTC().Format("2006-01-02"),
 	})
-	for _, chunk := range SplitTurn(body) {
+	turnTok, _, _ := i.tune.chunk()
+	for _, chunk := range SplitTurnN(body, turnTok) {
 		i.Enqueue(Item{Source: "turn", Profile: i.profile, ProjectID: projectID, Content: chunk, Ref: ref})
 	}
 }
@@ -166,7 +192,8 @@ func (i *Ingester) EnqueueWeb(projectID *int64, url, title, text string) {
 		"fetched_at": time.Now().UTC().Format(time.RFC3339),
 	})
 	raw := json.RawMessage(ref)
-	for _, chunk := range SplitWeb(text) {
+	_, webTok, webOv := i.tune.chunk()
+	for _, chunk := range SplitWebN(text, webTok, webOv) {
 		i.Enqueue(Item{Source: "web", Profile: i.profile, ProjectID: projectID, Content: chunk, Ref: raw})
 	}
 }
@@ -202,14 +229,20 @@ func (i *Ingester) dropPending() int {
 }
 
 func (i *Ingester) ingest(ctx context.Context, item Item) {
-	if i.store == nil || i.embed == nil {
+	if i.store == nil || i.embed == nil || i.paused {
 		return
 	}
 	if !i.store.RAGAvailable(ctx) {
 		return
 	}
 	vecs, err := i.embed.Embed(ctx, []string{item.Content})
-	if err != nil || len(vecs) == 0 {
+	if err != nil {
+		if embedUnreachable(err) {
+			i.pause()
+		}
+		return
+	}
+	if len(vecs) == 0 {
 		return
 	}
 	_, _ = i.store.InsertChunk(ctx, store.ChunkIn{
@@ -220,6 +253,38 @@ func (i *Ingester) ingest(ctx context.Context, item Item) {
 		Content:   item.Content,
 		Embedding: vecs[0],
 	})
+}
+
+func (i *Ingester) pause() {
+	i.mu.Lock()
+	if i.paused {
+		i.mu.Unlock()
+		return
+	}
+	i.paused = true
+	w := i.notice
+	i.mu.Unlock()
+	if w != nil {
+		fmt := ui.Current().Muted("memory ingest paused (embed endpoint unreachable)")
+		_, _ = io.WriteString(w, fmt+"\n")
+	}
+}
+
+func embedUnreachable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var ne net.Error
+	if errors.As(err, &ne) && !ne.Timeout() {
+		return true
+	}
+	s := strings.ToLower(err.Error())
+	for _, p := range []string{"connection refused", "no such host", "network is unreachable", "connect: connection refused"} {
+		if strings.Contains(s, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func skipSensitive(ref json.RawMessage) bool {
