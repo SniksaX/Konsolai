@@ -192,6 +192,7 @@ func (s *spinner) paint() {
 	if elapsed >= time.Second {
 		msg += " " + formatElapsed(elapsed)
 	}
+	msg = Current().Accent(msg)
 	if !s.shown {
 		fmt.Fprint(s.w, hideCursor)
 		s.shown = true
