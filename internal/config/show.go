@@ -133,7 +133,7 @@ defaults:
     paste_chip_lines: %d
     paste_chip_chars: %d
     output_keep_kb: %d
-    palette: %s   # amber | violet
+    palette: %s   # amber | violet | ocean | forest | rose | mono
     banner: %t
     theme: %s   # auto | dark | light
     code_highlight: %t
