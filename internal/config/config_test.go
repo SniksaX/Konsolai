@@ -358,26 +358,28 @@ func TestValidateRatiosAndElide(t *testing.T) {
 	}
 }
 
-func TestInvalidPalette(t *testing.T) {
+func TestInvalidTheme(t *testing.T) {
 	c := Builtin()
-	c.UI.Palette = "neon"
+	c.UI.Theme = "neon"
 	err := Validate(c)
-	if err == nil || !strings.Contains(err.Error(), "ui.palette") {
+	if err == nil || !strings.Contains(err.Error(), "ui.theme") {
 		t.Fatalf("got %v", err)
 	}
-	c.UI.Palette = "amber"
+	c.UI.Theme = "amber"
 	if err := Validate(c); err != nil {
 		t.Fatal(err)
 	}
-	c.UI.Palette = "violet"
-	if err := Validate(c); err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{"ocean", "forest", "rose", "mono"} {
-		c.UI.Palette = name
+	for _, name := range []string{"glacier", "nebula", "jade", "rose", "mono", "ocean", "violet", "forest", "cyan", "green", "red"} {
+		c.UI.Theme = name
 		if err := Validate(c); err != nil {
 			t.Fatal(err)
 		}
+	}
+	c.UI.Theme = "amber"
+	c.UI.Appearance = "sepia"
+	err = Validate(c)
+	if err == nil || !strings.Contains(err.Error(), "ui.appearance") {
+		t.Fatalf("got %v", err)
 	}
 }
 
