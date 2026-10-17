@@ -106,6 +106,9 @@ var overlaySchema = m(map[string]schema{
 		"output_keep_kb":   leaf(),
 		"palette":          leaf(),
 		"banner":           leaf(),
+		"theme":            leaf(),
+		"code_highlight":   leaf(),
+		"clear_on_start":   leaf(),
 	}),
 	"language": m(map[string]schema{
 		"languages": leaf(),
