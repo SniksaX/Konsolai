@@ -101,11 +101,35 @@ func Render(w io.Writer, info Info, pal ui.Palette, width int, wordmark bool) er
 
 	b.WriteByte('\n')
 	if wordmark && width >= minMark {
+		cols := runeLen(word[0])
+		mode := theme.Mode()
+		var grid [][]ui.RGB
+		var rows []ui.RGB
+		if mode == theme.ColorTrue {
+			grid = theme.ShaderGrid(theme.PaletteName(), theme.AppearanceName(), cols)
+		} else if mode == theme.Color256 {
+			rows = theme.ShaderRows(theme.PaletteName(), theme.AppearanceName())
+		}
 		for i := range word {
 			b.WriteString(indent)
 			b.WriteString(pal.PaintRGB(roles.AccentDim, prompt[i]))
 			b.WriteString("  ")
-			b.WriteString(pal.PaintRGB(lerp(roles.BannerTop, roles.BannerBottom, i, len(word)), word[i]))
+			switch mode {
+			case theme.ColorTrue:
+				if i < len(grid) {
+					b.WriteString(theme.PaintShaderLine(word[i], grid[i]))
+				} else {
+					b.WriteString(word[i])
+				}
+			case theme.Color256:
+				if i < len(rows) {
+					b.WriteString(pal.PaintRGB(rows[i], word[i]))
+				} else {
+					b.WriteString(word[i])
+				}
+			default:
+				b.WriteString(word[i])
+			}
 			b.WriteByte('\n')
 		}
 		b.WriteByte('\n')
@@ -163,14 +187,6 @@ func pixelLines(text string) []string {
 		out[i] = rows[i].String()
 	}
 	return out
-}
-
-func lerp(a, b ui.RGB, i, n int) ui.RGB {
-	if n <= 1 {
-		return a
-	}
-	t := func(x, y uint8) uint8 { return uint8(int(x) + (int(y)-int(x))*i/(n-1)) }
-	return ui.RGB{R: t(a.R, b.R), G: t(a.G, b.G), B: t(a.B, b.B)}
 }
 
 func runeLen(s string) int { return len([]rune(s)) }
