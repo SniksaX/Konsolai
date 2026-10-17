@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -67,6 +68,88 @@ func TestReadlineSubmittedOnceOnPTY(t *testing.T) {
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("child: %v raw=%q", err, raw)
 	}
+}
+
+func TestSlashMenuDownReplacesLineOnPTY(t *testing.T) {
+	if _, err := os.Stat("/dev/ptmx"); err != nil && os.Getenv("KONSOLAI_PTY_CHILD") == "" {
+		t.Skip("no /dev/ptmx")
+	}
+	if os.Getenv("KONSOLAI_PTY_CHILD") == "slash-down" {
+		rd, err := NewReadline(nil, func() string { return "FOOTER_MARK · branch" }, nil, commands.Default())
+		if err != nil {
+			os.Stderr.WriteString(err.Error())
+			os.Exit(1)
+		}
+		line, err := rd.ReadLine(context.Background(), "› ")
+		if err != nil && err != ErrInterrupt && err != ErrEOF {
+			os.Stderr.WriteString(err.Error())
+			os.Exit(1)
+		}
+		os.Stdout.WriteString("SUBMIT=" + line + "\n")
+		os.Exit(0)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=TestSlashMenuDownReplacesLineOnPTY")
+	logf := filepath.Join(t.TempDir(), "slash.log")
+	cmd.Env = append(os.Environ(), "KONSOLAI_PTY_CHILD=slash-down", "COLUMNS=80", "INPUTRC=/dev/null", "KONSOLAI_SLASH_LOG="+logf)
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = ptmx.Close()
+		_ = cmd.Wait()
+	}()
+	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 24, Cols: 80})
+	var mu sync.Mutex
+	var buf bytes.Buffer
+	go func() {
+		tmp := make([]byte, 4096)
+		for {
+			n, err := ptmx.Read(tmp)
+			if n > 0 {
+				mu.Lock()
+				buf.Write(tmp[:n])
+				mu.Unlock()
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	time.Sleep(150 * time.Millisecond)
+	if _, err := ptmx.Write([]byte("/")); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if _, err := ptmx.Write([]byte("\x1b[B")); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if _, err := ptmx.Write([]byte("\r")); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		plain := ansiRe.ReplaceAllString(strings.ReplaceAll(buf.String(), "\r", ""), "")
+		mu.Unlock()
+		if strings.Contains(plain, "SUBMIT=") {
+			if !strings.Contains(plain, "SUBMIT=/help") {
+				logb, _ := os.ReadFile(logf)
+				loga, _ := os.ReadFile(logf + ".after")
+				t.Fatalf("submitted %q\nlog=%q after=%q\n%s", plain, logb, loga, plain)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	mu.Lock()
+	plain := buf.String()
+	mu.Unlock()
+	t.Fatalf("timeout\n%s", ansiRe.ReplaceAllString(plain, ""))
 }
 
 func TestFrameSlashBackspaceClearsMenu(t *testing.T) {
