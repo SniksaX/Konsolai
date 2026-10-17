@@ -133,6 +133,8 @@ type UIOverlay struct {
 	Palette        *string `yaml:"palette" json:"palette"`
 	Banner         *bool   `yaml:"banner" json:"banner"`
 	Theme          *string `yaml:"theme" json:"theme"`
+	Appearance     *string `yaml:"appearance" json:"appearance"`
+	CursorColor    *bool   `yaml:"cursor_color" json:"cursor_color"`
 	CodeHighlight  *bool   `yaml:"code_highlight" json:"code_highlight"`
 	ClearOnStart   *bool   `yaml:"clear_on_start" json:"clear_on_start"`
 	StripEmoji     *bool   `yaml:"strip_emoji" json:"strip_emoji"`
@@ -177,6 +179,20 @@ func LoadNotice(path string) (File, string, error) {
 			return File{}, notice, nil
 		}
 		return File{}, notice, fmt.Errorf("config: read %s: %w", path, err)
+	}
+	migrated, err := migrateUIKeys(path, b)
+	if err != nil {
+		return File{}, notice, err
+	}
+	if migrated {
+		b, err = os.ReadFile(path)
+		if err != nil {
+			return File{}, notice, fmt.Errorf("config: read %s: %w", path, err)
+		}
+		if notice != "" {
+			notice += "; "
+		}
+		notice += "migrated ui.theme / ui.palette → ui.appearance / ui.theme"
 	}
 	f, err := Parse(b, path)
 	if err != nil {
@@ -287,14 +303,30 @@ func normalizeLanguage(c *Config) {
 }
 
 func normalizeUI(c *Config) {
-	c.UI.Palette = strings.ToLower(strings.TrimSpace(c.UI.Palette))
-	if c.UI.Palette == "" {
-		c.UI.Palette = "amber"
+	theme := strings.ToLower(strings.TrimSpace(c.UI.Theme))
+	appear := strings.ToLower(strings.TrimSpace(c.UI.Appearance))
+	palette := strings.ToLower(strings.TrimSpace(c.UI.Palette))
+	if isOldAppearance(theme) {
+		if appear == "" {
+			appear = theme
+		}
+		theme = ""
 	}
-	c.UI.Theme = strings.ToLower(strings.TrimSpace(c.UI.Theme))
-	if c.UI.Theme == "" {
-		c.UI.Theme = "auto"
+	if name, ok := ResolveTheme(theme); ok {
+		theme = name
+	} else if name, ok := ResolveTheme(palette); ok {
+		theme = name
+	} else {
+		theme = "amber"
 	}
+	switch appear {
+	case "light", "dark":
+	default:
+		appear = "auto"
+	}
+	c.UI.Theme = theme
+	c.UI.Appearance = appear
+	c.UI.Palette = ""
 }
 
 func langAllowed(code string, langs []string) bool {
@@ -410,15 +442,18 @@ func Validate(c Config) error {
 	if c.LLM.Model != "" && strings.TrimSpace(c.LLM.Model) == "" {
 		return fmt.Errorf("config: llm.model is empty")
 	}
-	switch strings.ToLower(strings.TrimSpace(c.UI.Palette)) {
-	case "", "amber", "violet", "ocean", "forest", "rose", "mono":
-	default:
-		return fmt.Errorf("config: ui.palette must be amber, violet, ocean, forest, rose or mono, got %q", c.UI.Palette)
+	if pal := strings.ToLower(strings.TrimSpace(c.UI.Palette)); pal != "" {
+		if _, ok := ResolveTheme(pal); !ok {
+			return fmt.Errorf("config: ui.palette must be a known theme or alias, got %q", c.UI.Palette)
+		}
 	}
-	switch strings.ToLower(strings.TrimSpace(c.UI.Theme)) {
+	if _, ok := ResolveTheme(c.UI.Theme); !ok && strings.TrimSpace(c.UI.Theme) != "" {
+		return fmt.Errorf("config: ui.theme must be amber, glacier, nebula, jade, rose or mono, got %q", c.UI.Theme)
+	}
+	switch strings.ToLower(strings.TrimSpace(c.UI.Appearance)) {
 	case "", "auto", "dark", "light":
 	default:
-		return fmt.Errorf("config: ui.theme must be auto, dark or light, got %q", c.UI.Theme)
+		return fmt.Errorf("config: ui.appearance must be auto, dark or light, got %q", c.UI.Appearance)
 	}
 	return nil
 }
