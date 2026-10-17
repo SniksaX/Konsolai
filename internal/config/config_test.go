@@ -373,6 +373,12 @@ func TestInvalidPalette(t *testing.T) {
 	if err := Validate(c); err != nil {
 		t.Fatal(err)
 	}
+	for _, name := range []string{"ocean", "forest", "rose", "mono"} {
+		c.UI.Palette = name
+		if err := Validate(c); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func TestMigrateJSON(t *testing.T) {
