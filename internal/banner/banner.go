@@ -14,11 +14,12 @@ import (
 
 // Info is the metadata shown under the wordmark. Empty fields are skipped.
 type Info struct {
-	Version string
-	Model   string
-	Dir     string
-	Branch  string
-	Host    string
+	Version  string
+	Model    string
+	Dir      string
+	Branch   string
+	Host     string
+	MinWidth int // wordmark floor; 0 keeps 64 columns
 }
 
 const (
@@ -88,9 +89,10 @@ func Render(w io.Writer, info Info, pal ui.Palette, width int, wordmark bool) er
 	var b strings.Builder
 	prompt := pixelLines(">")
 	word := pixelLines(wordmrk + "#")
+	markAt := info.markMin()
 	full := len(indent) + glyphW + 2 + runeLen(word[0])
 	cardW := full
-	if width < minMark {
+	if width < markAt {
 		cardW = width - 4
 		if cardW < 24 {
 			cardW = 24
@@ -100,7 +102,7 @@ func Render(w io.Writer, info Info, pal ui.Palette, width int, wordmark bool) er
 	}
 
 	b.WriteByte('\n')
-	if wordmark && width >= minMark {
+	if wordmark && width >= markAt {
 		cols := runeLen(word[0])
 		mode := theme.Mode()
 		var grid [][]ui.RGB
@@ -133,7 +135,7 @@ func Render(w io.Writer, info Info, pal ui.Palette, width int, wordmark bool) er
 			b.WriteByte('\n')
 		}
 		b.WriteByte('\n')
-	} else if wordmark || width < minMark {
+	} else if wordmark || width < markAt {
 		b.WriteString(indent + pal.Accent("›") + " " + pal.Heading("konsolai") + "\n\n")
 	}
 
@@ -142,6 +144,13 @@ func Render(w io.Writer, info Info, pal ui.Palette, width int, wordmark bool) er
 
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+func (info Info) markMin() int {
+	if info.MinWidth > 0 {
+		return info.MinWidth
+	}
+	return minMark
 }
 
 func pixelLines(text string) []string {
