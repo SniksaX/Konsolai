@@ -42,6 +42,8 @@ type IndexBackend interface {
 	ClearCodeIndex(ctx context.Context, projectID int64) error
 	ChunkCounts(ctx context.Context, profile string, projectID *int64) (map[string]int, error)
 	LastIndexedAt(ctx context.Context, projectID int64) (time.Time, bool, error)
+	OrphanMemoryFiles(ctx context.Context, projectID int64) ([]string, error)
+	PersistCodeFile(ctx context.Context, profile string, projectID int64, path, sha string, chunks []store.ChunkIn) (int, error)
 }
 
 type CodeChunk struct {
@@ -59,11 +61,27 @@ type IndexStats struct {
 	Deleted    int
 	Considered int
 	Failed     int
+	Orphans    int
 	LastError  error
 	Duration   time.Duration
 }
 
+type IndexHooks struct {
+	Progress     func(done, total int, eta time.Duration)
+	Confirm      func(files int, eta time.Duration) bool
+	Yes          bool
+	ConfirmAfter time.Duration
+}
+
 func Index(ctx context.Context, st IndexBackend, emb Embedder, profile string, projectID int64, root, filter string, progress func(done, total int)) (IndexStats, error) {
+	h := IndexHooks{}
+	if progress != nil {
+		h.Progress = func(done, total int, _ time.Duration) { progress(done, total) }
+	}
+	return IndexTune(ctx, st, emb, profile, projectID, root, filter, Tune{}, h)
+}
+
+func IndexTune(ctx context.Context, st IndexBackend, emb Embedder, profile string, projectID int64, root, filter string, tune Tune, hooks IndexHooks) (IndexStats, error) {
 	var stats IndexStats
 	start := time.Now()
 	if st == nil || emb == nil || !st.RAGAvailable(ctx) {
@@ -86,10 +104,26 @@ func Index(ctx context.Context, st IndexBackend, emb Embedder, profile string, p
 		todo = append(todo, rel)
 	}
 	stats.Considered = len(todo)
+	orphanSet := map[string]struct{}{}
+	if orphans, err := st.OrphanMemoryFiles(ctx, projectID); err == nil {
+		stats.Orphans = len(orphans)
+		for _, p := range orphans {
+			orphanSet[p] = struct{}{}
+		}
+	}
 	seen := map[string]struct{}{}
+	var perFile time.Duration
+	timed := false
+	asked := false
+	maxBytes, _, _, _, _, _ := tune.index()
+	limitMin := pickInt(tune.Index.ConfirmOverMinutes, 5)
 	for i, rel := range todo {
-		if progress != nil {
-			progress(i, len(todo))
+		if hooks.Progress != nil {
+			eta := time.Duration(0)
+			if perFile > 0 {
+				eta = perFile * time.Duration(len(todo)-i)
+			}
+			hooks.Progress(i, len(todo), eta)
 		}
 		if err := ctx.Err(); err != nil {
 			stats.Duration = time.Since(start)
@@ -101,7 +135,7 @@ func Index(ctx context.Context, st IndexBackend, emb Embedder, profile string, p
 		if err != nil || fi.IsDir() {
 			continue
 		}
-		if fi.Size() > maxIndexBytes {
+		if fi.Size() > maxBytes {
 			continue
 		}
 		body, err := os.ReadFile(abs)
@@ -114,21 +148,37 @@ func Index(ctx context.Context, st IndexBackend, emb Embedder, profile string, p
 		sum := sha256.Sum256(body)
 		sha := hex.EncodeToString(sum[:])
 		old, ok, err := st.MemoryFileSHA(ctx, projectID, rel)
-		if err == nil && ok && old == sha {
+		_, orphan := orphanSet[rel]
+		if err == nil && ok && old == sha && !orphan {
 			stats.Unchanged++
 			continue
 		}
-		chunks := ChunkFile(rel, string(body))
-		if err := st.DeleteCodeChunks(ctx, projectID, rel); err != nil {
-			stats.Failed++
-			stats.LastError = err
-			continue
-		}
+		chunks := ChunkFileTune(rel, string(body), tune)
 		texts := make([]string, len(chunks))
 		for i, c := range chunks {
 			texts[i] = c.Content
 		}
+		t0 := time.Now()
 		vecs, err := emb.Embed(ctx, texts)
+		took := time.Since(t0)
+		if !timed {
+			timed = true
+			perFile = took
+			eta := perFile * time.Duration(len(todo)-i)
+			limit := time.Duration(limitMin) * time.Minute
+			if hooks.ConfirmAfter > 0 {
+				limit = hooks.ConfirmAfter
+			}
+			if !asked && !hooks.Yes && eta > limit && hooks.Confirm != nil {
+				asked = true
+				if !hooks.Confirm(len(todo)-i, eta) {
+					stats.Duration = time.Since(start)
+					return stats, nil
+				}
+			}
+		} else if took > 0 {
+			perFile = (perFile + took) / 2
+		}
 		if err != nil {
 			stats.Failed++
 			stats.LastError = err
@@ -139,7 +189,7 @@ func Index(ctx context.Context, st IndexBackend, emb Embedder, profile string, p
 			stats.LastError = fmt.Errorf("embed: got %d vectors for %d chunks", len(vecs), len(chunks))
 			continue
 		}
-		n := 0
+		ins := make([]store.ChunkIn, len(chunks))
 		for i, c := range chunks {
 			ref, _ := json.Marshal(map[string]any{
 				"path":       c.Path,
@@ -147,29 +197,33 @@ func Index(ctx context.Context, st IndexBackend, emb Embedder, profile string, p
 				"end_line":   c.EndLine,
 				"symbol":     c.Symbol,
 			})
-			ok, err := st.InsertChunk(ctx, store.ChunkIn{
+			ins[i] = store.ChunkIn{
 				Profile:   profile,
 				ProjectID: &projectID,
 				Source:    "code",
 				Ref:       ref,
 				Content:   c.Content,
 				Embedding: vecs[i],
-			})
-			if err == nil && ok {
-				n++
 			}
 		}
-		if err := st.UpsertMemoryFile(ctx, projectID, rel, sha); err != nil {
+		n, err := st.PersistCodeFile(ctx, profile, projectID, rel, sha, ins)
+		if err != nil {
+			stats.Failed++
+			stats.LastError = err
 			continue
 		}
 		stats.Indexed++
 		stats.Chunks += n
-		if progress != nil {
-			progress(i+1, len(todo))
+		if hooks.Progress != nil {
+			eta := time.Duration(0)
+			if perFile > 0 {
+				eta = perFile * time.Duration(len(todo)-i-1)
+			}
+			hooks.Progress(i+1, len(todo), eta)
 		}
 	}
-	if progress != nil {
-		progress(len(todo), len(todo))
+	if hooks.Progress != nil {
+		hooks.Progress(len(todo), len(todo), 0)
 	}
 	if filter == "" || filter == "." {
 		existing, err := st.ListMemoryFiles(ctx, projectID)
@@ -198,20 +252,29 @@ func pathInFilter(rel, filter string) bool {
 }
 
 func ChunkFile(path, src string) []CodeChunk {
+	return ChunkFileTune(path, src, Tune{})
+}
+
+func ChunkFileTune(path, src string, tune Tune) []CodeChunk {
 	if strings.EqualFold(filepath.Ext(path), ".go") {
-		if chunks := ChunkGo(path, src); len(chunks) > 0 {
+		if chunks := ChunkGoTune(path, src, tune); len(chunks) > 0 {
 			return chunks
 		}
 	}
-	return ChunkText(path, src)
+	return ChunkTextTune(path, src, tune)
 }
 
 func ChunkGo(path, src string) []CodeChunk {
+	return ChunkGoTune(path, src, Tune{})
+}
+
+func ChunkGoTune(path, src string, tune Tune) []CodeChunk {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, src, parser.ParseComments)
 	if err != nil {
 		return ChunkText(path, src)
 	}
+	_, goSplit, goWin, goOv, _, _ := tune.index()
 	lines := strings.Split(src, "\n")
 	var out []CodeChunk
 	for _, d := range f.Decls {
@@ -226,14 +289,14 @@ func ChunkGo(path, src string) []CodeChunk {
 			}
 			end := fset.Position(x.End()).Line
 			sym := genDeclName(x)
-			out = append(out, splitDecl(path, lines, start, end, sym, goSplitLines, goWinLines, goOverlap)...)
+			out = append(out, splitDecl(path, lines, start, end, sym, goSplit, goWin, goOv)...)
 		case *ast.FuncDecl:
 			start := fset.Position(x.Pos()).Line
 			if x.Doc != nil {
 				start = fset.Position(x.Doc.Pos()).Line
 			}
 			end := fset.Position(x.End()).Line
-			out = append(out, splitDecl(path, lines, start, end, funcName(x), goSplitLines, goWinLines, goOverlap)...)
+			out = append(out, splitDecl(path, lines, start, end, funcName(x), goSplit, goWin, goOv)...)
 		}
 	}
 	return out
@@ -279,6 +342,11 @@ func genDeclName(x *ast.GenDecl) string {
 var lineDecl = regexp.MustCompile(`(?i)^\s*(export\s+)?(async\s+)?(default\s+)?((function|class|interface|type|def)\b|const\s+\w+|let\s+\w+|var\s+\w+)`)
 
 func ChunkText(path, src string) []CodeChunk {
+	return ChunkTextTune(path, src, Tune{})
+}
+
+func ChunkTextTune(path, src string, tune Tune) []CodeChunk {
+	_, _, _, _, textWin, textOv := tune.index()
 	lines := strings.Split(src, "\n")
 	var bounds []int
 	for i, line := range lines {
@@ -287,7 +355,7 @@ func ChunkText(path, src string) []CodeChunk {
 		}
 	}
 	if len(bounds) == 0 {
-		return windowChunks(path, lines, 1, len(lines), "", textWinLines, textOverlap)
+		return windowChunks(path, lines, 1, len(lines), "", textWin, textOv)
 	}
 	var out []CodeChunk
 	for i, start := range bounds {
@@ -299,7 +367,7 @@ func ChunkText(path, src string) []CodeChunk {
 		if utf8len(sym) > 80 {
 			sym = string([]rune(sym)[:80])
 		}
-		out = append(out, windowChunks(path, lines, start, end, sym, textWinLines, textOverlap)...)
+		out = append(out, windowChunks(path, lines, start, end, sym, textWin, textOv)...)
 	}
 	return out
 }
