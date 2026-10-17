@@ -132,6 +132,9 @@ type UIOverlay struct {
 	OutputKeepKB   *int    `yaml:"output_keep_kb" json:"output_keep_kb"`
 	Palette        *string `yaml:"palette" json:"palette"`
 	Banner         *bool   `yaml:"banner" json:"banner"`
+	Theme          *string `yaml:"theme" json:"theme"`
+	CodeHighlight  *bool   `yaml:"code_highlight" json:"code_highlight"`
+	ClearOnStart   *bool   `yaml:"clear_on_start" json:"clear_on_start"`
 }
 
 type LanguageOverlay struct {
@@ -287,6 +290,10 @@ func normalizeUI(c *Config) {
 	if c.UI.Palette == "" {
 		c.UI.Palette = "amber"
 	}
+	c.UI.Theme = strings.ToLower(strings.TrimSpace(c.UI.Theme))
+	if c.UI.Theme == "" {
+		c.UI.Theme = "auto"
+	}
 }
 
 func langAllowed(code string, langs []string) bool {
@@ -406,6 +413,11 @@ func Validate(c Config) error {
 	case "", "amber", "violet":
 	default:
 		return fmt.Errorf("config: ui.palette must be amber or violet, got %q", c.UI.Palette)
+	}
+	switch strings.ToLower(strings.TrimSpace(c.UI.Theme)) {
+	case "", "auto", "dark", "light":
+	default:
+		return fmt.Errorf("config: ui.theme must be auto, dark or light, got %q", c.UI.Theme)
 	}
 	return nil
 }
