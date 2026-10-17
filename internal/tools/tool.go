@@ -91,6 +91,7 @@ type Options struct {
 	Request       string
 	OnWebFetch    func(url, title, text string)
 	Recall        RecallFunc
+	DisplayLines  int
 }
 
 const DocsSourceReject = "docs tasks may not create or modify source files; write Markdown and use export_doc for PDF/HTML"
@@ -123,7 +124,7 @@ func NewRegistry(g *safety.Guard, out io.Writer, files FileLister, cache WebCach
 		facts = NopFactStore{}
 	}
 	list := []Tool{
-		newShell(g, out, o.ReadOnlyShell, o.DocsTask),
+		newShellLimit(g, out, o.ReadOnlyShell, o.DocsTask, o.DisplayLines),
 		newWriteFile(g, o.DocsTask),
 		newReadFile(g),
 		newListDir(g),
