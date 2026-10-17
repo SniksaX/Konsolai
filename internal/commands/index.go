@@ -47,9 +47,29 @@ func runIndex(ctx context.Context, env *Env, args []string) int {
 		filter = rel
 	}
 	live := ui.StartLive("indexing")
-	stats, err := rag.Index(ctx, st, env.Embed, env.Profile.Name, pid, root, filter, func(done, total int) {
-		live.SetLabel(fmt.Sprintf("indexing %d/%d files", done, total))
-	})
+	hooks := rag.IndexHooks{
+		Yes: env.Yes,
+		Progress: func(done, total int, eta time.Duration) {
+			label := fmt.Sprintf("indexing %d/%d files", done, total)
+			if eta > 0 {
+				label += fmt.Sprintf(" ~%s left", formatIndexDur(eta))
+			}
+			live.SetLabel(label)
+		},
+		Confirm: func(n int, eta time.Duration) bool {
+			live.Stop()
+			msg := fmt.Sprintf("Indexing ~%d files will take about %s (embedding is slow). Continue? [y/N]", n, formatIndexDur(eta))
+			if env.Confirm != nil {
+				d, _, err := env.Confirm.Confirm(msg, "")
+				live = ui.StartLive("indexing")
+				return err == nil && (d == ui.Approve || d == ui.ApproveAll)
+			}
+			fmt.Fprintln(env.out(), msg)
+			live = ui.StartLive("indexing")
+			return false
+		},
+	}
+	stats, err := rag.IndexTune(ctx, st, env.Embed, env.Profile.Name, pid, root, filter, rag.TuneFrom(env.Profile), hooks)
 	live.Stop()
 	if err != nil {
 		fmt.Fprintln(env.errw(), "konsolai:", err)
@@ -57,6 +77,9 @@ func runIndex(ctx context.Context, env *Env, args []string) int {
 	}
 	fmt.Fprintf(env.out(), "indexed %d files (%d chunks, %d unchanged) in %s\n",
 		stats.Indexed, stats.Chunks, stats.Unchanged, formatIndexDur(stats.Duration))
+	if stats.Orphans > 0 {
+		fmt.Fprintf(env.out(), "repaired %d memory_files rows with zero chunks\n", stats.Orphans)
+	}
 	if filter != "" && stats.Considered == 0 {
 		fmt.Fprintf(env.errw(), "no files matched %s\n", filter)
 		return 1
@@ -115,7 +138,7 @@ func indexClear(ctx context.Context, env *Env) int {
 
 func needIndex(ctx context.Context, env *Env) (*store.Store, int64, bool) {
 	if env == nil || env.Mem == nil || env.Mem.Store() == nil {
-		fmt.Fprintln(env.errw(), "memory is not configured (see ~/.config/konsolai/config.json)")
+		fmt.Fprintln(env.errw(), "memory is not configured (see ~/.config/konsolai/config.yaml)")
 		return nil, 0, false
 	}
 	st := env.Mem.Store()
