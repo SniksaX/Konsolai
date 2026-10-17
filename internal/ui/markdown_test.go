@@ -201,6 +201,24 @@ func TestLenientShorterCloserOnFlush(t *testing.T) {
 	}
 }
 
+func TestStripEmojiOutsideFences(t *testing.T) {
+	defer SetStripEmoji(true)()
+	restore := ForceTheme(Palette{})
+	defer restore()
+	var buf bytes.Buffer
+	r := NewRenderer(&buf, true)
+	src := "hello 😀 world\n```\nkeep 🎉\n```\nbye ✨\n"
+	_, _ = r.Write([]byte(src))
+	_ = r.Flush()
+	got := buf.String()
+	if strings.Contains(got, "😀") || strings.Contains(got, "✨") {
+		t.Fatalf("emoji leaked outside fence: %q", got)
+	}
+	if !strings.Contains(got, "keep 🎉") {
+		t.Fatalf("fence should keep emoji: %q", got)
+	}
+}
+
 func TestThemeNOCOLOR(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	t.Setenv("COLORTERM", "truecolor")
