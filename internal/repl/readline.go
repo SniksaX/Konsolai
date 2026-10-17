@@ -205,6 +205,42 @@ func (r *rlReader) printTopRule() {
 	fmt.Fprintln(os.Stdout, frameRule(theme.TermWidth()))
 }
 
+func (r *rlReader) ReadKey() (byte, error) {
+	if r == nil || r.sh == nil || r.sh.Keys == nil {
+		return 0, io.EOF
+	}
+	for {
+		if key, empty := r.sh.Keys.Pop(); !empty {
+			if key == 0 || key == '\r' || key == '\n' {
+				continue
+			}
+			return key, nil
+		}
+		break
+	}
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		st, err := term.MakeRaw(fd)
+		if err == nil {
+			defer func() { _ = term.Restore(fd, st) }()
+		}
+	}
+	for {
+		key, abort := r.sh.Keys.ReadKey()
+		if key == 0 && abort {
+			if r.sh.Keys.IsEOF() {
+				return 0, io.EOF
+			}
+			return 0x1b, nil
+		}
+		b := byte(key)
+		if b == 0 || b == '\r' || b == '\n' {
+			continue
+		}
+		return b, nil
+	}
+}
+
 func (r *rlReader) ReadLine(_ context.Context, prompt string) (string, error) {
 	r.innerPrompt = prompt
 	r.prompt = prompt
