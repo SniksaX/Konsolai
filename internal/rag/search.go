@@ -45,6 +45,10 @@ type Hit struct {
 }
 
 func Search(ctx context.Context, st SearchBackend, emb Embedder, rerank Reranker, profile string, projectID *int64, query, scope string, k int) ([]Hit, error) {
+	return SearchTune(ctx, st, emb, rerank, profile, projectID, query, scope, k, Tune{})
+}
+
+func SearchTune(ctx context.Context, st SearchBackend, emb Embedder, rerank Reranker, profile string, projectID *int64, query, scope string, k int, tune Tune) ([]Hit, error) {
 	if st == nil || emb == nil || !st.RAGAvailable(ctx) {
 		return nil, nil
 	}
@@ -56,8 +60,9 @@ func Search(ctx context.Context, st SearchBackend, emb Embedder, rerank Reranker
 	if scope == "" {
 		scope = "all"
 	}
+	vt, tt, rk, top, defK, floor := tune.search()
 	if k < 1 {
-		k = defaultK
+		k = defK
 	}
 	if k > maxK {
 		k = maxK
@@ -66,19 +71,19 @@ func Search(ctx context.Context, st SearchBackend, emb Embedder, rerank Reranker
 	if err != nil || len(vecs) == 0 {
 		return nil, err
 	}
-	vecHits, err := st.SearchVector(ctx, profile, projectID, scope, vecs[0], vectorTop)
+	vecHits, err := st.SearchVector(ctx, profile, projectID, scope, vecs[0], vt)
 	if err != nil {
 		return nil, err
 	}
-	txtHits, err := st.SearchText(ctx, profile, projectID, scope, query, textTop)
+	txtHits, err := st.SearchText(ctx, profile, projectID, scope, query, tt)
 	if err != nil {
 		return nil, err
 	}
-	merged := mergeRRF(vecHits, txtHits, rrfK)
-	if len(merged) > rerankTop {
-		merged = merged[:rerankTop]
+	merged := mergeRRF(vecHits, txtHits, rk)
+	if len(merged) > top {
+		merged = merged[:top]
 	}
-	return applyRerank(ctx, rerank, query, merged, k), nil
+	return applyRerankFloor(ctx, rerank, query, merged, k, floor), nil
 }
 
 func mergeRRF(vec, txt []store.SearchHit, k int) []Hit {
@@ -111,6 +116,10 @@ func mergeRRF(vec, txt []store.SearchHit, k int) []Hit {
 }
 
 func applyRerank(ctx context.Context, r Reranker, query string, hits []Hit, k int) []Hit {
+	return applyRerankFloor(ctx, r, query, hits, k, rerankFloor)
+}
+
+func applyRerankFloor(ctx context.Context, r Reranker, query string, hits []Hit, k int, floor float64) []Hit {
 	if len(hits) == 0 {
 		return hits
 	}
@@ -130,7 +139,10 @@ func applyRerank(ctx context.Context, r Reranker, query string, hits []Hit, k in
 		if s.Index < 0 || s.Index >= len(hits) {
 			continue
 		}
-		if s.Score < rerankFloor {
+		if floor <= 0 {
+			floor = rerankFloor
+		}
+		if s.Score < floor {
 			continue
 		}
 		h := hits[s.Index]
