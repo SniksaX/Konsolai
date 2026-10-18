@@ -1,0 +1,861 @@
+## v0.2.0 (unreleased)
+
+### Added
+- [ADD|MEDIUM] Print a changelog grouped by commit type
+- [ADD|MEDIUM] Test explain capture and history fallback
+- [ADD|MEDIUM] Explain the last failed shell command
+- [ADD|MEDIUM] Test save naming, overwrite, and PDF skip
+- [ADD|MAJOR] Save and export the last answer
+- [ADD|MAJOR] Test doctor probes, modes, and missing tools
+- [ADD|MAJOR] Add the doctor slash command
+- [ADD|MEDIUM] Test stats rendering without a database
+- [ADD|MINOR] Add the stats table golden
+- [ADD|MAJOR] Add the stats slash command
+- [ADD|MAJOR] Test usage totals against the schema
+- [ADD|MEDIUM] Report schema version and pgvector
+- [ADD|MAJOR] Report token and latency totals from turn stats
+- [ADD|MINOR] Assemble shell history test tokens at runtime
+- [ADD|MINOR] Assemble REPL test tokens at runtime
+- [ADD|MINOR] Assemble memory test tokens at runtime
+- [ADD|MINOR] Assemble tools test hex at runtime
+- [ADD|MEDIUM] Assemble store test secrets at runtime
+- [ADD|MEDIUM] Assemble redact test secrets at runtime
+- [ADD|MEDIUM] Reject local machine names in tracked files
+- [ADD|MAJOR] Generate the sample config and env file
+- [ADD|MINOR] Prove a welcome with only the main endpoint
+- [ADD|MINOR] Prove recall is omitted when RAG is off
+- [ADD|MINOR] Drop a named tool from a registry
+- [ADD|MAJOR] Lock the README slash table to the registry
+- [ADD|MAJOR] Add the README
+- [ADD|MEDIUM] Add AGENTS.md project context for new sessions
+- [ADD|MINOR] Prove the stat insert timeout follows the profile
+- [ADD|MEDIUM] Prove the isolated memory timeout override
+- [ADD|MEDIUM] Prove store open deadlines can be overridden
+- [ADD|MEDIUM] Prove shell timeout options are honored
+- [ADD|MEDIUM] Prove a welcome slow threshold override
+- [ADD|MAJOR] Check every config leaf is wired
+- [ADD|MAJOR] Guard welcome defaults against local copies
+- [ADD|MEDIUM] Resolve zero welcome limits from Builtin
+- [ADD|MEDIUM] Test a shorter welcome probe deadline
+- [ADD|MEDIUM] Test omitted tunables and three overrides
+- [ADD|MAJOR] Add profile fields for runtime tunables
+- [ADD|MEDIUM] Test repeated plan rejects and planned shell
+- [ADD|MAJOR] Test command-only plans and plan error shape
+- [ADD|MEDIUM] Test wide split keeps session beside recent
+- [ADD|MEDIUM] Test welcome size through a wrapped TTY
+- [ADD|MAJOR] Test /theme Esc and Enter on a PTY
+- [ADD|MAJOR] Test the placeholder and Ctrl-L on a PTY
+- [ADD|MEDIUM] Test the context meter, echo color, and /clear
+- [ADD|MAJOR] Test welcome startup wait and cached redraw
+- [ADD|MAJOR] Cache startup welcome data for redraws
+- [ADD|MAJOR] Show the placeholder without accepting it
+- [ADD|MAJOR] Show a context meter in the footer
+- [ADD|MEDIUM] Cover ui.welcome load, show, and default
+- [ADD|MINOR] Document ui.welcome in the init config
+- [ADD|MEDIUM] Default ui.welcome to split
+- [ADD|MINOR] Apply ui.welcome from profile overlays
+- [ADD|MINOR] Load the ui.welcome overlay field
+- [ADD|MINOR] Accept ui.welcome in the config schema
+- [ADD|MINOR] Add split offline golden at 90x40
+- [ADD|MINOR] Add split offline golden at 90x26
+- [ADD|MINOR] Add split offline golden at 90x20
+- [ADD|MINOR] Add split offline golden at 60x40
+- [ADD|MINOR] Add split offline golden at 60x26
+- [ADD|MINOR] Add split offline golden at 60x20
+- [ADD|MEDIUM] Add split offline golden at 140x40
+- [ADD|MEDIUM] Add split offline golden at 140x26
+- [ADD|MINOR] Add split offline golden at 140x20
+- [ADD|MEDIUM] Add split offline golden at 120x40
+- [ADD|MEDIUM] Add split offline golden at 120x26
+- [ADD|MINOR] Add split offline golden at 120x20
+- [ADD|MEDIUM] Add split offline golden at 110x40
+- [ADD|MEDIUM] Add split offline golden at 110x26
+- [ADD|MINOR] Add split offline golden at 110x20
+- [ADD|MINOR] Add split no-git golden at 90x40
+- [ADD|MINOR] Add split no-git golden at 90x26
+- [ADD|MINOR] Add split no-git golden at 90x20
+- [ADD|MINOR] Add split no-git golden at 60x40
+- [ADD|MINOR] Add split no-git golden at 60x26
+- [ADD|MINOR] Add split no-git golden at 60x20
+- [ADD|MINOR] Add split no-git golden at 140x40
+- [ADD|MINOR] Add split no-git golden at 140x26
+- [ADD|MINOR] Add split no-git golden at 140x20
+- [ADD|MINOR] Add split no-git golden at 120x40
+- [ADD|MINOR] Add split no-git golden at 120x26
+- [ADD|MINOR] Add split no-git golden at 120x20
+- [ADD|MINOR] Add split no-git golden at 110x40
+- [ADD|MINOR] Add split no-git golden at 110x26
+- [ADD|MINOR] Add split no-git golden at 110x20
+- [ADD|MINOR] Add split empty-history golden at 90x40
+- [ADD|MINOR] Add split empty-history golden at 90x26
+- [ADD|MINOR] Add split empty-history golden at 90x20
+- [ADD|MINOR] Add split empty-history golden at 60x40
+- [ADD|MINOR] Add split empty-history golden at 60x26
+- [ADD|MINOR] Add split empty-history golden at 60x20
+- [ADD|MEDIUM] Add split empty-history golden at 140x40
+- [ADD|MEDIUM] Add split empty-history golden at 140x26
+- [ADD|MINOR] Add split empty-history golden at 140x20
+- [ADD|MEDIUM] Add split empty-history golden at 120x40
+- [ADD|MEDIUM] Add split empty-history golden at 120x26
+- [ADD|MINOR] Add split empty-history golden at 120x20
+- [ADD|MEDIUM] Add split empty-history golden at 110x40
+- [ADD|MEDIUM] Add split empty-history golden at 110x26
+- [ADD|MINOR] Add split empty-history golden at 110x20
+- [ADD|MINOR] Add split database-offline golden at 90x40
+- [ADD|MINOR] Add split database-offline golden at 90x26
+- [ADD|MINOR] Add split database-offline golden at 90x20
+- [ADD|MINOR] Add split database-offline golden at 60x40
+- [ADD|MINOR] Add split database-offline golden at 60x26
+- [ADD|MINOR] Add split database-offline golden at 60x20
+- [ADD|MEDIUM] Add split database-offline golden at 140x40
+- [ADD|MEDIUM] Add split database-offline golden at 140x26
+- [ADD|MINOR] Add split database-offline golden at 140x20
+- [ADD|MEDIUM] Add split database-offline golden at 120x40
+- [ADD|MEDIUM] Add split database-offline golden at 120x26
+- [ADD|MINOR] Add split database-offline golden at 120x20
+- [ADD|MEDIUM] Add split database-offline golden at 110x40
+- [ADD|MEDIUM] Add split database-offline golden at 110x26
+- [ADD|MINOR] Add split database-offline golden at 110x20
+- [ADD|MINOR] Add split all-up golden at 90x40
+- [ADD|MINOR] Add split all-up golden at 90x26
+- [ADD|MINOR] Add split all-up golden at 90x20
+- [ADD|MINOR] Add split all-up golden at 60x40
+- [ADD|MINOR] Add split all-up golden at 60x26
+- [ADD|MINOR] Add split all-up golden at 60x20
+- [ADD|MEDIUM] Add split all-up golden at 140x40
+- [ADD|MEDIUM] Add split all-up golden at 140x26
+- [ADD|MINOR] Add split all-up golden at 140x20
+- [ADD|MEDIUM] Add split all-up golden at 120x40
+- [ADD|MEDIUM] Add split all-up golden at 120x26
+- [ADD|MINOR] Add split all-up golden at 120x20
+- [ADD|MEDIUM] Add split all-up golden at 110x40
+- [ADD|MEDIUM] Add split all-up golden at 110x26
+- [ADD|MINOR] Add split all-up golden at 110x20
+- [ADD|MINOR] Add frame offline golden at 90x40
+- [ADD|MINOR] Add frame offline golden at 90x26
+- [ADD|MINOR] Add frame offline golden at 90x20
+- [ADD|MINOR] Add frame offline golden at 60x40
+- [ADD|MINOR] Add frame offline golden at 60x26
+- [ADD|MINOR] Add frame offline golden at 60x20
+- [ADD|MEDIUM] Add frame offline golden at 140x40
+- [ADD|MEDIUM] Add frame offline golden at 140x26
+- [ADD|MINOR] Add frame offline golden at 140x20
+- [ADD|MEDIUM] Add frame offline golden at 120x40
+- [ADD|MEDIUM] Add frame offline golden at 120x26
+- [ADD|MINOR] Add frame offline golden at 120x20
+- [ADD|MEDIUM] Add frame offline golden at 110x40
+- [ADD|MEDIUM] Add frame offline golden at 110x26
+- [ADD|MINOR] Add frame offline golden at 110x20
+- [ADD|MINOR] Add frame no-git golden at 90x40
+- [ADD|MINOR] Add frame no-git golden at 90x26
+- [ADD|MINOR] Add frame no-git golden at 90x20
+- [ADD|MINOR] Add frame no-git golden at 60x40
+- [ADD|MINOR] Add frame no-git golden at 60x26
+- [ADD|MINOR] Add frame no-git golden at 60x20
+- [ADD|MINOR] Add frame no-git golden at 140x40
+- [ADD|MINOR] Add frame no-git golden at 140x26
+- [ADD|MINOR] Add frame no-git golden at 140x20
+- [ADD|MINOR] Add frame no-git golden at 120x40
+- [ADD|MINOR] Add frame no-git golden at 120x26
+- [ADD|MINOR] Add frame no-git golden at 120x20
+- [ADD|MINOR] Add frame no-git golden at 110x40
+- [ADD|MINOR] Add frame no-git golden at 110x26
+- [ADD|MINOR] Add frame no-git golden at 110x20
+- [ADD|MINOR] Add frame empty-history golden at 90x40
+- [ADD|MINOR] Add frame empty-history golden at 90x26
+- [ADD|MINOR] Add frame empty-history golden at 90x20
+- [ADD|MINOR] Add frame empty-history golden at 60x40
+- [ADD|MINOR] Add frame empty-history golden at 60x26
+- [ADD|MINOR] Add frame empty-history golden at 60x20
+- [ADD|MEDIUM] Add frame empty-history golden at 140x40
+- [ADD|MEDIUM] Add frame empty-history golden at 140x26
+- [ADD|MINOR] Add frame empty-history golden at 140x20
+- [ADD|MEDIUM] Add frame empty-history golden at 120x40
+- [ADD|MEDIUM] Add frame empty-history golden at 120x26
+- [ADD|MINOR] Add frame empty-history golden at 120x20
+- [ADD|MEDIUM] Add frame empty-history golden at 110x40
+- [ADD|MEDIUM] Add frame empty-history golden at 110x26
+- [ADD|MINOR] Add frame empty-history golden at 110x20
+- [ADD|MINOR] Add frame database-offline golden at 90x40
+- [ADD|MINOR] Add frame database-offline golden at 90x26
+- [ADD|MINOR] Add frame database-offline golden at 90x20
+- [ADD|MINOR] Add frame database-offline golden at 60x40
+- [ADD|MINOR] Add frame database-offline golden at 60x26
+- [ADD|MINOR] Add frame database-offline golden at 60x20
+- [ADD|MEDIUM] Add frame database-offline golden at 140x40
+- [ADD|MEDIUM] Add frame database-offline golden at 140x26
+- [ADD|MINOR] Add frame database-offline golden at 140x20
+- [ADD|MEDIUM] Add frame database-offline golden at 120x40
+- [ADD|MEDIUM] Add frame database-offline golden at 120x26
+- [ADD|MINOR] Add frame database-offline golden at 120x20
+- [ADD|MEDIUM] Add frame database-offline golden at 110x40
+- [ADD|MEDIUM] Add frame database-offline golden at 110x26
+- [ADD|MINOR] Add frame database-offline golden at 110x20
+- [ADD|MINOR] Add frame all-up golden at 90x40
+- [ADD|MINOR] Add frame all-up golden at 90x26
+- [ADD|MINOR] Add frame all-up golden at 90x20
+- [ADD|MINOR] Add frame all-up golden at 60x40
+- [ADD|MINOR] Add frame all-up golden at 60x26
+- [ADD|MINOR] Add frame all-up golden at 60x20
+- [ADD|MEDIUM] Add frame all-up golden at 140x40
+- [ADD|MEDIUM] Add frame all-up golden at 140x26
+- [ADD|MINOR] Add frame all-up golden at 140x20
+- [ADD|MEDIUM] Add frame all-up golden at 120x40
+- [ADD|MEDIUM] Add frame all-up golden at 120x26
+- [ADD|MINOR] Add frame all-up golden at 120x20
+- [ADD|MEDIUM] Add frame all-up golden at 110x40
+- [ADD|MEDIUM] Add frame all-up golden at 110x26
+- [ADD|MINOR] Add frame all-up golden at 110x20
+- [ADD|MAJOR] Test welcome renders against goldens
+- [ADD|MAJOR] Draw the frame welcome layout
+- [ADD|MAJOR] Draw the split welcome layout
+- [ADD|MAJOR] Add the welcome screen renderer
+- [ADD|MAJOR] Test welcome probes, git, and offline memory
+- [ADD|MAJOR] Gather welcome data under a 400ms deadline
+- [ADD|MAJOR] Record model calls without affecting the turn
+- [ADD|MAJOR] Report usage and timing for each model call
+- [ADD|MEDIUM] Test welcome memory and recent session order
+- [ADD|MAJOR] Query welcome memory and recent sessions
+- [ADD|MAJOR] Cover turn stat rates and zero durations
+- [ADD|MAJOR] Add turn stat recording and ModelRate
+- [ADD|MINOR] Add the turn_stats table
+- [ADD|MEDIUM] Probe slash widgets, binds, and PTY Down
+- [ADD|MAJOR] Drive the slash menu on a real PTY
+- [ADD|MAJOR] Cover every slash-menu state transition
+- [ADD|MAJOR] Own slash-menu state instead of readline completion
+- [ADD|MINOR] Export ReadKey for the theme picker
+- [ADD|MEDIUM] Test shader span, chroma, and OKLab round-trip
+- [ADD|MEDIUM] Precompute the OKLab banner color grid
+- [ADD|MINOR] Cover cursor OSC apply and restore paths
+- [ADD|MEDIUM] Set and restore the terminal cursor via OSC 12/112
+- [ADD|MEDIUM] Add Ottosson OKLab conversion and mix
+- [ADD|MINOR] Accept ui.appearance and ui.cursor_color
+- [ADD|MEDIUM] Drive confirm on a real PTY with expect-style keys
+- [ADD|MEDIUM] Expose readline leftover keys to confirm
+- [ADD|MINOR] Expect no spinner output while the prompt is held
+- [ADD|MINOR] Confirm through SetKeyReader without /dev/tty
+- [ADD|MEDIUM] Share a key reader for single-key confirm
+- [ADD|MINOR] Cover /theme listing and comment-preserving save
+- [ADD|MEDIUM] Add /theme to list and apply palettes live
+- [ADD|MINOR] Keep comments when SetPalette rewrites the key
+- [ADD|MEDIUM] Set ui.palette through the yaml Node API
+- [ADD|MEDIUM] Add ocean, forest, rose and mono palettes
+- [ADD|MEDIUM] Cover the prod-switch transcript and lookup-to-act
+- [ADD|MINOR] Expect continueDecision to hold act on option replies
+- [ADD|MINOR] Cover English and French option follow-ups
+- [ADD|MEDIUM] Hold act when the user answers a clarifying question
+- [ADD|MEDIUM] Golden-test answer and act turn margins
+- [ADD|MINOR] Remember the last assistant reply on the runner
+- [ADD|MINOR] Allow ui.strip_emoji in the config schema
+- [ADD|MINOR] Accept strip_emoji on the UI overlay
+- [ADD|MINOR] Default ui.strip_emoji to true
+- [ADD|MINOR] Expect the badge margin and escalated suffix
+- [ADD|MINOR] Cover emoji stripping around code fences
+- [ADD|MINOR] Strip emoji code points from model text
+- [ADD|MINOR] Expect /clear to wipe scrollback
+- [ADD|MINOR] Cover shell-mode clear and reset builtins
+- [ADD|MINOR] Add a clear sequence that also wipes scrollback
+- [ADD|MAJOR] Cover frame cursor and leftover-rule bugs on a PTY
+- [ADD|MINOR] Add OnClear so /clear can redraw the header
+- [ADD|MEDIUM] Render the startup info card and compact header
+- [ADD|MEDIUM] Add ui.theme, code_highlight and clear_on_start
+- [ADD|MEDIUM] Assert WCAG floors for both palettes
+- [ADD|MINOR] Build a chroma style from theme roles
+- [ADD|MINOR] Cover unit-width glyphs and truncate
+- [ADD|MEDIUM] Measure display width with uniseg
+- [ADD|MINOR] Cover the OSC 11 timeout on a mute PTY
+- [ADD|MEDIUM] Detect auto appearance once at REPL start
+- [ADD|MAJOR] Add Style roles and amber/violet palettes
+- [ADD|MINOR] Centralize cursor and clear sequences
+- [ADD|MINOR] Add RGB helpers for theme tokens
+- [ADD|MEDIUM] Cover splash goldens and banner=false
+- [ADD|MINOR] Golden for the narrow splash fallback
+- [ADD|MINOR] Golden for the full-width splash
+- [ADD|MAJOR] Render the pixel splash from the theme
+- [ADD|MINOR] Add golang.org/x/term for banner TTY sizing
+- [ADD|MINOR] Reject an invalid ui.palette
+- [ADD|MINOR] Test promise discard and continue-after-promise
+- [ADD|MINOR] Assert submitted text appears once on a PTY
+- [ADD|MINOR] Carry RAG chunk search and index tunables
+- [ADD|MINOR] Detect promise replies and continue phrases
+- [ADD|MINOR] Cover the README floor and how-exempt
+- [ADD|MEDIUM] Raise intent when a verb hits a target
+- [ADD|MEDIUM] Add /config path show init validate
+- [ADD|MEDIUM] Show, mask and write commented config.yaml
+- [ADD|MAJOR] Load, migrate and resolve config.yaml
+- [ADD|MEDIUM] Reject unknown YAML keys with line numbers
+- [ADD|MEDIUM] Apply YAML overlays onto Config
+- [ADD|MINOR] Add go.yaml.in/yaml/v3 for config.yaml
+- [ADD|MEDIUM] Test /recall args and formatting with fake TEI servers
+- [ADD|MEDIUM] Add /recall to print memory hits without a model call
+- [ADD|MEDIUM] Test needs_memory injection wraps the user message
+- [ADD|MEDIUM] Test recall is read-only and prints numbered source lines
+- [ADD|MEDIUM] Add the read-only recall tool for session, code and web
+- [ADD|MAJOR] Test RRF merge, scope filters, threshold and formatting
+- [ADD|MAJOR] Merge vector and text hits with RRF then rerank
+- [ADD|MEDIUM] Test search scope filters against the vector database
+- [ADD|MEDIUM] Add vector and full-text search over memory_chunks
+- [ADD|MAJOR] Add /index, /index status and /index clear
+- [ADD|MAJOR] Test Go chunk boundaries and incremental index skip
+- [ADD|MAJOR] Index repo files into memory_chunks with Go AST windows
+- [ADD|MAJOR] Test chunk sizes, hash dedupe, flush cap and secrets
+- [ADD|MAJOR] Queue and embed redacted turn, summary and web chunks
+- [ADD|MAJOR] Split turn and web text into token-sized chunks
+- [ADD|MEDIUM] Test RAG migration, unique dedupe, tsv and skip path
+- [ADD|MAJOR] Add chunk and memory-file store helpers
+- [ADD|MAJOR] Add the RAG tables, tsv generated column and HNSW index
+- [ADD|MEDIUM] Test embed batching, dimension, retry and rerank
+- [ADD|MAJOR] Add TEI embed and rerank clients
+- [ADD|MINOR] Test RAG profile defaults and endpoint env overrides
+- [ADD|MEDIUM] Add embed, rerank and memory_rag profile fields
+- [ADD|MEDIUM] Test prompt render count and no input echo
+- [ADD|MINOR] Test agent tool lines use the new indent layout
+- [ADD|MEDIUM] Test shell output is not mixed with spinner frames
+- [ADD|MEDIUM] Test that spinner frames never prefix output lines
+- [ADD|MINOR] Test confirm preview indent and plan numbering
+- [ADD|MINOR] Test blank-line collapse outside code fences
+- [ADD|MINOR] Test gutter indent and numbered plan previews
+- [ADD|MEDIUM] Test continue-after-abort and fast jinja 500 retry
+- [ADD|MINOR] Detect continue phrases after a failed or aborted turn
+- [ADD|MEDIUM] Test MaxSteps no-tools summary and last prompt tokens
+- [ADD|MEDIUM] Test that compaction plus continue yields alternating roles
+- [ADD|MAJOR] Normalize chat histories before every model request
+- [ADD|MINOR] Test sys-awareness prompt lines and keep elision coverage
+- [ADD|MINOR] Test that Snapshot.String includes the package-manager line
+- [ADD|MINOR] Test the Arch and Debian package-manager context lines
+- [ADD|MAJOR] Detect the distro family and installed package managers
+- [ADD|MINOR] Test that read_file refuses .pem and list_dir shows it
+- [ADD|MEDIUM] Test new read-only commands and mutating negatives
+- [ADD|MEDIUM] Test read scope outside the root and the sensitive denylist
+- [ADD|MAJOR] Allow read-only tools to follow any user-readable path
+- [ADD|MEDIUM] Test plan-rule traces and ~/.local/bin writes
+- [ADD|MINOR] Test that propose_plan rejects sudo commands
+- [ADD|MEDIUM] Test plan matching rules and plan write roots
+- [ADD|MAJOR] Match run_shell against an approved plan by effect
+- [ADD|MEDIUM] Test that a router es hint does not reach the prompt
+- [ADD|MINOR] Test the reply-language instruction wording
+- [ADD|MEDIUM] Test greetings, follow-ups and ignored es hints
+- [ADD|MAJOR] Decide reply language without trusting the router
+- [ADD|MEDIUM] Test language profile defaults and clamping
+- [ADD|MEDIUM] Test Ctrl+D in shell mode returns to the AI prompt
+- [ADD|MINOR] Store shell-mode history under XDG_STATE_HOME
+- [ADD|MEDIUM] Test /cmd toggle, clear and usage
+- [ADD|MINOR] Implement /cmd and /cmd clear
+- [ADD|MAJOR] Test cd variants and the Guard Base update
+- [ADD|MAJOR] Handle shell-mode builtins and command dispatch
+- [ADD|MEDIUM] Test compgen parsing with a fake bash runner
+- [ADD|MAJOR] Complete shell words via bash compgen
+- [ADD|MEDIUM] Test pty echo when /dev/ptmx is available
+- [ADD|MAJOR] Run shell commands through a pty
+- [ADD|MEDIUM] Put the TTY in raw mode for interactive shells
+- [ADD|MEDIUM] Test shell history injection and capture caps
+- [ADD|MAJOR] Keep capped, redacted shell command history
+- [ADD|MEDIUM] Test Guard.SetBase stays inside the root
+- [ADD|MEDIUM] Allow moving the Guard base inside the root
+- [ADD|MEDIUM] Test paste chip thresholds, expand and undo
+- [ADD|MAJOR] Chip long pastes and expand them on submit
+- [ADD|MEDIUM] Test slash popup candidates and live filter
+- [ADD|MEDIUM] Test fast skip and act low vs high plan gates
+- [ADD|MINOR] Test the act-low router rule
+- [ADD|MEDIUM] Test n_ctx, /props and fast-window fallbacks
+- [ADD|MINOR] Test SlashLines lists slash commands
+- [ADD|MINOR] Test the About Konsolai answer block
+- [ADD|MINOR] Assert output ends with newline before ReadLine
+- [ADD|MINOR] Test /output from the runner ring
+- [ADD|MEDIUM] Add /output to reprint recent shell output
+- [ADD|MINOR] Test the shell output ring
+- [ADD|MINOR] Test full_output cap and RecentShellOutputs
+- [ADD|MINOR] Add actions.full_output column
+- [ADD|MEDIUM] Test finish longer-of and OnShell
+- [ADD|MEDIUM] Test headlines, previews and exit 141
+- [ADD|MINOR] Test confirm prompt script gutter
+- [ADD|MINOR] Test numbered gutter and diff detection
+- [ADD|MEDIUM] Test approve-all commands and multiline in-plan
+- [ADD|MINOR] Test propose_plan placeholder command rejection
+- [ADD|MINOR] Test if-fi read-only and rm-in-branch denial
+- [ADD|MEDIUM] Test named roots allow, deny and ../ tricks
+- [ADD|MAJOR] Accept named home paths as extra roots this turn
+- [ADD|MINOR] Test /think and status fast-model fields
+- [ADD|MINOR] Register the /think REPL command
+- [ADD|MINOR] Add /think on|off|auto for the session
+- [ADD|MEDIUM] Test effort mapping, prefixes and fast fallback
+- [ADD|MAJOR] Route the router and answers through the fast client
+- [ADD|MEDIUM] Test rejected-plan thinking-on retry
+- [ADD|MEDIUM] Test effort mapping, JSON extract and acks
+- [ADD|MEDIUM] Test fast client omits think kwargs and reach cache
+- [ADD|MINOR] Cache fast-model reachability for five minutes
+- [ADD|MINOR] Test fast model profile defaults and env overrides
+- [ADD|MINOR] Add fast_endpoint and fast_model profile fields
+- [ADD|MEDIUM] Test docs export note and forced export_doc
+- [ADD|MAJOR] Test elision dedupe, placeholders and stall guard
+- [ADD|MINOR] Add PostPlanNote for the post-plan stall guard
+- [ADD|MINOR] Expose FileOutline for elision placeholders
+- [ADD|MINOR] Detect a TTY on stdout for REPL entry
+- [ADD|MINOR] Test ReplOnly rejection and manual /compact
+- [ADD|MAJOR] Implement REPL-only slash commands
+- [ADD|MEDIUM] Test compact threshold and summary history loading
+- [ADD|MAJOR] Summarize old session messages when context is high
+- [ADD|MEDIUM] Test @mentions skip email, missing paths and caps
+- [ADD|MAJOR] Expand @path mentions into attached file blocks
+- [ADD|MINOR] Test SetCompact writes compacted_upto and summary
+- [ADD|MINOR] Add compacted_upto and compact_summary on sessions
+- [ADD|MAJOR] Test REPL commands, interrupt, history and completion
+- [ADD|MAJOR] Run an interactive REPL when both streams are TTYs
+- [ADD|MEDIUM] Wrap reeflective/readline as a LineReader
+- [ADD|MAJOR] Complete slash commands and @paths in the REPL
+- [ADD|MEDIUM] Format the REPL prompt from folder, branch and ctx
+- [ADD|MEDIUM] Persist redacted REPL history under XDG_STATE_HOME
+- [ADD|MEDIUM] Define LineReader so the REPL can be faked
+- [ADD|MINOR] Record checksums for readline and its deps
+- [ADD|MINOR] Approve reeflective/readline as a direct module
+- [ADD|MINOR] Test a ```` stream that closes with ```
+- [ADD|MINOR] Test /status prints max_model_len from a fake /v1/models
+- [ADD|MINOR] Test RunTurn picks max_model_len from /v1/models
+- [ADD|MEDIUM] Document turn, commands, clipboard and version stamping
+- [ADD|MINOR] Stamp the binary version in scripts/build.sh
+- [ADD|MINOR] Test parseArgs for --version and slash command args
+- [ADD|MAJOR] Test slash commands with fake history and clipboard
+- [ADD|MEDIUM] Move remember, facts, forget, prune and undo behind slash names
+- [ADD|MEDIUM] Add /status for version, model, database and environment
+- [ADD|MEDIUM] Add /run to execute a shell block from the last answer
+- [ADD|MEDIUM] Add /history, /show, /resume, /new and /diff
+- [ADD|MEDIUM] Add /copy for answers, pairs, code blocks and commands
+- [ADD|MAJOR] Add a slash-command registry with help and suggestions
+- [ADD|MAJOR] Add session and answer helpers for slash commands
+- [ADD|MINOR] Test ClearLast removes the fallback file
+- [ADD|MINOR] Add ClearLast to wipe the local fallback session
+- [ADD|MEDIUM] Test closed sessions hide from resume and history
+- [ADD|MINOR] Add sessions.closed for /new
+- [ADD|MEDIUM] Test clipboard backend order, OSC 52 and size limit
+- [ADD|MEDIUM] Add clipboard copy via wl-copy, xclip, xsel and OSC 52
+- [ADD|MEDIUM] Test RunTurn answer, agent, resume and exit codes
+- [ADD|MINOR] Move model error formatting into turn
+- [ADD|MAJOR] Run one request through Runner.RunTurn
+- [ADD|MEDIUM] Move session resume and fact helpers into turn
+- [ADD|MEDIUM] Add a turn Runner type for one request
+- [ADD|MEDIUM] Test range-aware read skips and invalid PlanStep plans
+- [ADD|MEDIUM] Skip covered read_file ranges and reject invalid off-think plans
+- [ADD|MINOR] Test docs PDF plans require export_doc
+- [ADD|MINOR] Test a rejected tool call prints both lines
+- [ADD|MINOR] Test RejectCall uses the warn color
+- [ADD|MINOR] Add RejectCall lines in Warn color
+- [ADD|MEDIUM] Test trace dumps, narration trim, and oversized export_doc args
+- [ADD|MEDIUM] Trace argument sizes, dump each step, truncate tool-step narration
+
+### Changed
+- [UPDATE|MINOR] Pass the last failed shell command to explain
+- [UPDATE|MINOR] List the new slash commands in the README
+- [UPDATE|MINOR] Register stats, doctor, save, pdf, and explain
+- [UPDATE|MEDIUM] Test the forced plan after a gated call
+- [UPDATE|MEDIUM] Force a plan after the first gated call
+- [UPDATE|MINOR] Apply a requested effort to the turn
+- [UPDATE|MINOR] Accept an effort on a turn request
+- [UPDATE|MEDIUM] Record a failed shell command for explain
+- [UPDATE|MINOR] Store the exit code of a shell command
+- [UPDATE|MINOR] Keep shell-mode exit codes in history
+- [UPDATE|MINOR] Use runtime fixtures in shell history tests
+- [UPDATE|MINOR] Use runtime fixtures in REPL history tests
+- [UPDATE|MINOR] Use runtime fixtures in memory tests
+- [UPDATE|MINOR] Use runtime fixtures in file tool tests
+- [UPDATE|MINOR] Use runtime fixtures in store tests
+- [UPDATE|MEDIUM] Use runtime fixtures in redact tests
+- [REFACTOR|MAJOR] Rename the module to github.com/SniksaX/Konsolai
+- [UPDATE|MEDIUM] Describe the config table and a generic setup
+- [UPDATE|MEDIUM] Document generated config and install paths
+- [UPDATE|MINOR] Ignore env files and local Cursor rules
+- [UPDATE|MAJOR] Regenerate welcome goldens for generic fixtures
+- [UPDATE|MINOR] Use a generic model in gather tests
+- [UPDATE|MINOR] Use a generic host in error-line tests
+- [UPDATE|MINOR] Use a generic user in context tests
+- [UPDATE|MINOR] Use a generic model in welcome store tests
+- [UPDATE|MEDIUM] Use a generic model in stat tests
+- [UPDATE|MINOR] Use a generic model in theme tests
+- [UPDATE|MEDIUM] Use generic paths in REPL tests
+- [UPDATE|MEDIUM] Use a generic model in client tests
+- [UPDATE|MINOR] Use a generic model in router tests
+- [UPDATE|MINOR] Use a generic home in chrome path tests
+- [UPDATE|MINOR] Use a generic profile endpoint in config tests
+- [UPDATE|MINOR] Rename the readme host check
+- [UPDATE|MINOR] Use a generic model in command tests
+- [UPDATE|MINOR] Use a generic model in the narrow banner sample
+- [UPDATE|MINOR] Use a generic model in the wide banner sample
+- [UPDATE|MINOR] Use generic banner fixture text
+- [UPDATE|MINOR] Use a generic host in startup tests
+- [UPDATE|MINOR] Describe the test database without a personal port
+- [UPDATE|MINOR] Fall back to a generic welcome host
+- [UPDATE|MINOR] Describe the welcome host generically
+- [UPDATE|MEDIUM] Mark unconfigured roles in status
+- [UPDATE|MEDIUM] List only configured welcome endpoints
+- [UPDATE|MINOR] Omit recall when RAG is off
+- [UPDATE|MINOR] Apply thinking kwargs on turn clients
+- [UPDATE|MINOR] Apply thinking kwargs on the main client
+- [UPDATE|MAJOR] Send thinking kwargs only when enabled
+- [UPDATE|MAJOR] Use generic server defaults
+- [UPDATE|MINOR] Document the config subcommands
+- [UPDATE|MEDIUM] Add config diff and init from current
+- [REFACTOR|MAJOR] Declare every config key in one table
+- [REFACTOR|MINOR] Build startup profiles from nested config
+- [REFACTOR|MEDIUM] Read startup settings from nested config
+- [REFACTOR|MINOR] Build command profiles from nested config
+- [REFACTOR|MINOR] Read retention from nested config
+- [REFACTOR|MINOR] Read model info from nested config
+- [REFACTOR|MINOR] Read status lines from nested config
+- [REFACTOR|MINOR] Build theme profiles from nested config
+- [REFACTOR|MINOR] Build REPL profiles from nested config
+- [REFACTOR|MINOR] Read welcome probes from nested config
+- [REFACTOR|MINOR] Read REPL settings from nested config
+- [REFACTOR|MINOR] Build turn profiles from nested config
+- [REFACTOR|MINOR] Read turn language from nested config
+- [REFACTOR|MINOR] Read model clients from nested config
+- [REFACTOR|MINOR] Read session settings from nested config
+- [UPDATE|MINOR] Record the README in project status
+- [MOVE|MEDIUM] Move the header image into docs/assets
+- [UPDATE|MINOR] Correct the build explore budget
+- [MOVE|MAJOR] Split welcome paint helpers by concern
+- [MOVE|MAJOR] Split plan matching into rules and segments
+- [MOVE|MAJOR] Split the agent helpers out of the loop
+- [UPDATE|MINOR] Clear the screen through the theme
+- [UPDATE|MINOR] Echo submitted lines through the theme
+- [UPDATE|MINOR] Add the submitted-line echo sequence
+- [UPDATE|MINOR] Probe the database with the profile query deadline
+- [UPDATE|MINOR] Open memory with the profile deadlines
+- [UPDATE|MINOR] Pass profile shell timeouts into /run
+- [UPDATE|MINOR] Pass profile shell and memory timeouts into the turn
+- [UPDATE|MINOR] Read the stat insert timeout from the profile
+- [UPDATE|MEDIUM] Read the isolated memory timeout from config
+- [UPDATE|MEDIUM] Use the store query deadline
+- [UPDATE|MINOR] Use the store query deadline
+- [UPDATE|MINOR] Use the store query deadline
+- [UPDATE|MINOR] Use the store query deadline
+- [UPDATE|MINOR] Use the store migration deadline
+- [UPDATE|MAJOR] Read store deadlines from config
+- [UPDATE|MINOR] Pass shell timeouts through tool options
+- [UPDATE|MEDIUM] Read shell timeouts from the built-in profile
+- [UPDATE|MINOR] Pass the profile slow threshold into welcome
+- [UPDATE|MINOR] Read the welcome slow threshold from config
+- [UPDATE|MEDIUM] Write the new timeout keys into the sample file
+- [UPDATE|MEDIUM] Apply the new timeout config keys
+- [UPDATE|MEDIUM] Load and validate the new timeout keys
+- [UPDATE|MINOR] Accept the new timeout config keys
+- [UPDATE|MEDIUM] Add timeout and slow-model defaults
+- [UPDATE|MINOR] Read the footer git timeout from Builtin
+- [UPDATE|MEDIUM] Read startup welcome timers from Builtin
+- [UPDATE|MEDIUM] Read welcome gather budgets from Builtin
+- [UPDATE|MINOR] Paint the responsive welcome from resolved limits
+- [UPDATE|MINOR] Paint the split welcome from resolved limits
+- [UPDATE|MINOR] Paint the frame from resolved limits
+- [UPDATE|MINOR] Fill the footer meter from the profile
+- [UPDATE|MEDIUM] Read footer meter and git timeout from config
+- [UPDATE|MINOR] Pass the identical-reject limit into the agent
+- [UPDATE|MEDIUM] Stop identical rejects at the configured limit
+- [UPDATE|MEDIUM] Drive startup welcome from the profile
+- [UPDATE|MINOR] Frame the welcome on the configured cuts
+- [UPDATE|MINOR] Split the welcome on the configured cuts
+- [UPDATE|MINOR] Use the frame-width and wordmark cuts
+- [UPDATE|MEDIUM] Let the splash wordmark use a configured floor
+- [UPDATE|MEDIUM] Read welcome budgets and layout cuts from input
+- [UPDATE|MAJOR] Document every tunable in the init config
+- [UPDATE|MEDIUM] Apply tunable overrides onto the profile
+- [UPDATE|MEDIUM] Load and validate the new tunables
+- [UPDATE|MEDIUM] Accept the new profile keys
+- [UPDATE|MINOR] Tell the model when a plan may omit files
+- [UPDATE|MAJOR] Draw the welcome while startup probes run
+- [UPDATE|MINOR] Note session and intent for turn stats
+- [UPDATE|MINOR] Attach the turn stat recorder to clients
+- [UPDATE|MAJOR] Wait on the current screen for slash PTY cases
+- [UPDATE|MINOR] Ignore the user inputrc in E2E PTY sessions
+- [UPDATE|MEDIUM] Assert Down replaces the line on a real PTY
+- [UPDATE|MINOR] Reset selection before the detail render check
+- [UPDATE|MINOR] Keep slash selection when the line is the typed filter
+- [UPDATE|MINOR] Pass a registry into NewReadline PTY helpers
+- [UPDATE|MINOR] Pass the command registry into NewReadline
+- [UPDATE|MAJOR] Bind slash-menu widgets on emacs and vi-insert
+- [UPDATE|MEDIUM] Assert slash names skip readline completions
+- [UPDATE|MINOR] Stop readline completing slash command names
+- [UPDATE|MAJOR] Add slash-command arg and example metadata
+- [UPDATE|MINOR] Cover /theme list, aliases, and persist
+- [UPDATE|MAJOR] Open an interactive /theme picker
+- [UPDATE|MINOR] Honor ui.cursor_color at process start
+- [UPDATE|MINOR] Apply and restore cursor color in the REPL
+- [UPDATE|MINOR] Color the selected completion with Heading
+- [UPDATE|MEDIUM] Shade the wordmark with the OKLab grid
+- [UPDATE|MINOR] Paint the commit hash Muted on the card
+- [UPDATE|MINOR] Paint numbered list markers AccentDim
+- [UPDATE|MEDIUM] Check the new contrast floors per theme
+- [UPDATE|MAJOR] Load five hue themes plus mono as role data
+- [UPDATE|MINOR] Validate hue names and appearance
+- [UPDATE|MAJOR] Cover theme aliases and old-key migration
+- [UPDATE|MINOR] Document theme, appearance, and cursor_color
+- [UPDATE|MINOR] Apply ui.appearance and ui.cursor_color overlays
+- [UPDATE|MEDIUM] Normalize and validate the new theme keys
+- [UPDATE|MEDIUM] Store hue on ui.theme and appearance separately
+- [UPDATE|MAJOR] Resolve theme aliases and migrate old UI keys
+- [UPDATE|MINOR] Wire confirm to readline and hold paints
+- [UPDATE|MINOR] Hold spinner paints while readline owns the frame
+- [UPDATE|MINOR] Cover single-key confirm and typed-ahead y
+- [UPDATE|MAJOR] Confirm with a single key on the shared reader
+- [UPDATE|MINOR] Register the /theme command
+- [UPDATE|MINOR] Accept ocean forest rose and mono in Validate
+- [UPDATE|MINOR] Document the extra palettes in InitYAML
+- [UPDATE|MINOR] Validate the six ui.palette values
+- [UPDATE|MINOR] Accept the new ui.palette names
+- [UPDATE|MINOR] Resolve every role for all six palettes
+- [UPDATE|MINOR] Contrast-test every palette on both appearances
+- [UPDATE|MAJOR] Rerun a mutating lookup once as act
+- [UPDATE|MINOR] Abort lookup when run_shell is not read-only
+- [UPDATE|MINOR] Export the lookup mutating-shell error
+- [UPDATE|MINOR] Reuse the last intent for clarification replies
+- [UPDATE|MEDIUM] Print only the final badge when a turn escalates
+- [UPDATE|MINOR] Apply strip_emoji when the process starts
+- [UPDATE|MINOR] Write strip_emoji into the init YAML
+- [UPDATE|MINOR] Merge ui.strip_emoji from the overlay
+- [UPDATE|MINOR] Require Do not use emoji in every prompt
+- [UPDATE|MINOR] Tell every system prompt not to use emoji
+- [UPDATE|MINOR] Honor ui.strip_emoji when applying the theme
+- [UPDATE|MINOR] Strip emoji outside fenced code blocks
+- [UPDATE|MINOR] Give intent badges a two-space margin
+- [UPDATE|MINOR] Give shell mode the same clear header callback
+- [UPDATE|MEDIUM] Treat clear and reset as shell builtins
+- [UPDATE|MINOR] Wipe scrollback from /clear
+- [UPDATE|MINOR] Make Ctrl-L wipe scrollback like /clear
+- [UPDATE|MINOR] Expect /help to list aliases and drop --
+- [UPDATE|MEDIUM] Fold /quit into /exit and restyle /help rows
+- [UPDATE|MEDIUM] Steer up and down into the slash menu
+- [UPDATE|MEDIUM] Cover slash aliases, the eight-row cap, and no --
+- [UPDATE|MEDIUM] Restyle the slash menu and cap it at eight rows
+- [UPDATE|MINOR] Indent streamed answers and skip the extra blank
+- [UPDATE|MINOR] Expect exact tokens below 1000 in the summary
+- [UPDATE|MEDIUM] Restyle tool lines and drop the badge blank
+- [UPDATE|MINOR] Expect one echo line per accepted input
+- [UPDATE|MEDIUM] Detect theme, echo input and map ? to /help
+- [UPDATE|MINOR] Accept the shorter slash navigation hint
+- [UPDATE|MINOR] Keep slash rows Primary and clip descriptions
+- [UPDATE|MEDIUM] Frame input between Subtle rules
+- [UPDATE|MAJOR] Restyle the footer with dirty star and ctx colors
+- [UPDATE|MINOR] Clear the screen through theme.ClearHome
+- [UPDATE|MEDIUM] Cover the card, compact header and parse helpers
+- [UPDATE|MEDIUM] Draw the card under an optional wordmark
+- [UPDATE|MINOR] Drive spinner CSI from the theme package
+- [UPDATE|MINOR] Match the new fence and NO_COLOR checks
+- [UPDATE|MEDIUM] Restyle markdown from theme roles
+- [UPDATE|MINOR] Paint tool output through Subtle and Primary
+- [UPDATE|MINOR] Apply appearance and code highlight at start
+- [UPDATE|MINOR] Print the new UI keys in config show
+- [UPDATE|MINOR] Allow the new UI keys in the schema
+- [UPDATE|MINOR] Parse and default the new UI keys
+- [UPDATE|MINOR] Overlay the new UI theme keys
+- [UPDATE|MINOR] Point palette tests at the theme package
+- [REFACTOR|MAJOR] Route all palette styling through theme
+- [UPDATE|MINOR] Promote uniseg and x/term to direct deps
+- [UPDATE|MINOR] Keep the muted line when the banner is off
+- [UPDATE|MINOR] Show the pixel splash on a REPL TTY
+- [UPDATE|MINOR] Lock golang.org/x/term v0.38.0
+- [UPDATE|MINOR] Apply the config palette at startup
+- [UPDATE|MINOR] Mute completion hints from the palette
+- [UPDATE|MINOR] Compare popup style to the active accent
+- [UPDATE|MINOR] Style the slash popup from the palette
+- [UPDATE|MINOR] Pin the heading-color test to violet
+- [UPDATE|MINOR] Paint the spinner with the palette accent
+- [UPDATE|MINOR] Route Dim and ANSI helpers through the theme
+- [UPDATE|MEDIUM] Cover every role on both palettes
+- [UPDATE|MAJOR] Define amber and violet palettes
+- [UPDATE|MINOR] Document palette and banner in /config init
+- [UPDATE|MINOR] Accept ui.palette and ui.banner keys
+- [UPDATE|MINOR] Apply ui.palette and ui.banner overlays
+- [UPDATE|MINOR] Parse and validate ui.palette
+- [UPDATE|MINOR] Add ui.palette and ui.banner to the config
+- [UPDATE|MINOR] Pin the test-db image to pg17-trixie in the rules
+- [UPDATE|MINOR] Use pgvector pg17-trixie for the test database
+- [UPDATE|MINOR] Track promise state and fast-router enable
+- [UPDATE|MINOR] Apply the action floor after classify
+- [UPDATE|MAJOR] Apply intent floor and escalate empty promises
+- [UPDATE|MINOR] Continue after a promised answer
+- [UPDATE|MINOR] Use config compact threshold
+- [UPDATE|MINOR] Add DisplayLines to tool Options
+- [UPDATE|MINOR] Pass display_lines into the line limiter
+- [UPDATE|MINOR] Make the tool output line limit configurable
+- [UPDATE|MINOR] Test persist txn and orphan listing
+- [UPDATE|MEDIUM] Write memory_files after chunks in one txn
+- [UPDATE|MINOR] Deny extra read paths from config
+- [UPDATE|MEDIUM] Honor extra command and read deny lists
+- [UPDATE|MINOR] Test footer branch updates between renders
+- [UPDATE|MINOR] Apply paste-chip limits from the profile
+- [UPDATE|MEDIUM] Read the footer branch from .git/HEAD
+- [UPDATE|MINOR] Read paste-chip limits from config
+- [UPDATE|MINOR] Cover ingest pause on connection refused
+- [UPDATE|MEDIUM] Pause ingest when embed is unreachable
+- [UPDATE|MEDIUM] Test orphan reindex and slow-embed confirm
+- [UPDATE|MAJOR] Index in a transaction and guard slow embeds
+- [UPDATE|MINOR] Search with configurable RRF and rerank
+- [UPDATE|MINOR] Split turns and web docs with config sizes
+- [UPDATE|MINOR] Make embed batch size configurable
+- [UPDATE|MINOR] Register the /config command
+- [UPDATE|MINOR] Search recall with profile RAG tunables
+- [UPDATE|MINOR] Point memory errors at config.yaml
+- [UPDATE|MEDIUM] Confirm slow /index and pass RAG tunables
+- [UPDATE|MINOR] Test /config path and password masking
+- [UPDATE|MINOR] Prefer search over recall for code
+- [UPDATE|MINOR] Expect the new recall prompt wording
+- [UPDATE|MEDIUM] Honor config token caps and elide ratios
+- [UPDATE|MEDIUM] Load YAML config and wire RAG tunables
+- [UPDATE|MINOR] Point project rules at config.yaml
+- [UPDATE|MAJOR] Cover YAML precedence, migration and init
+- [UPDATE|MAJOR] Replace JSON profile with typed YAML Config
+- [UPDATE|MINOR] Record go.yaml.in/yaml/v3 checksums
+- [UPDATE|MINOR] Print /index failures and unmatched path filters
+- [UPDATE|MINOR] Count considered and failed files during /index
+- [UPDATE|MINOR] Attach the embed client to the turn runner
+- [UPDATE|MEDIUM] Show embed, rerank, chunk counts and project index
+- [UPDATE|MINOR] Register the /recall slash command
+- [UPDATE|MINOR] Require the recall rule on lookup, act and build prompts
+- [UPDATE|MINOR] Tell lookup, act and build to recall before exploring
+- [UPDATE|MEDIUM] Test needs_memory schema, prompt and cue phrases
+- [UPDATE|MINOR] Add needs_memory to the router schema and cue phrases
+- [UPDATE|MEDIUM] Inject session memories and wire the recall tool
+- [UPDATE|MINOR] Hold the embed client on the turn runner
+- [UPDATE|MINOR] Register recall on the tool registry
+- [UPDATE|MINOR] Share the embed client with slash commands
+- [UPDATE|MINOR] Register /index and pass embed plus project id on Env
+- [UPDATE|MINOR] Clear a project's code index and scan a null last time
+- [UPDATE|MINOR] Ingest compaction summaries from /compact
+- [UPDATE|MEDIUM] Start background RAG ingest in the REPL and flush one-shot
+- [UPDATE|MINOR] Forward extracted web_fetch text to the ingest callback
+- [UPDATE|MINOR] Pass a web-fetch ingest callback through registry options
+- [UPDATE|MINOR] Enqueue turn, summary and web text after each turn
+- [UPDATE|MINOR] Hold the RAG ingester on the turn runner
+- [UPDATE|MINOR] Put public on the test search_path for vector
+- [UPDATE|MAJOR] Apply RAG only when the vector extension exists
+- [UPDATE|MINOR] Document the pgvector test-database image
+- [UPDATE|MINOR] Run the test database on pgvector/pgvector:pg17
+- [UPDATE|MINOR] Drop the empty prompt left by Ctrl+C on a TTY
+- [UPDATE|MINOR] Keep submitted input only on the transient prompt
+- [UPDATE|MINOR] Blank-line the intent badge and clear the spinner
+- [UPDATE|MAJOR] Apply the indented tool-step layout on agent turns
+- [UPDATE|MINOR] Clear the running spinner before shell output
+- [UPDATE|MINOR] Align the hidden-line notice with the tool gutter
+- [UPDATE|MEDIUM] Stop the spinner before forwarding any output
+- [UPDATE|MEDIUM] Restyle the confirm block with a blank frame
+- [UPDATE|MEDIUM] Collapse blank-line runs in model markdown
+- [UPDATE|MAJOR] Indent tool output and keep plan step numbers
+- [UPDATE|MAJOR] Retry fast-model failures on main and keep ctx% on main
+- [UPDATE|MINOR] Remember the last turn's intent and exit code
+- [UPDATE|MAJOR] Track last main-model prompt tokens and resume plans
+- [UPDATE|MINOR] Expect the summary to sit on the following user turn
+- [UPDATE|MINOR] Merge the compaction summary into the next user message
+- [UPDATE|MINOR] Run the message normalizer on every Complete call
+- [UPDATE|MEDIUM] Tell lookup, act and build how to use this system
+- [UPDATE|MINOR] Include the package-manager line in the system context
+- [UPDATE|MINOR] Allow reading a file outside the repo; keep writes inside
+- [UPDATE|MEDIUM] Search a given directory even outside the repo root
+- [UPDATE|MEDIUM] Outline paths outside the repo and skip sensitive files
+- [UPDATE|MINOR] Resolve read_file and list_dir with the read guard
+- [UPDATE|MAJOR] Treat package and git query commands as read-only
+- [UPDATE|MINOR] Pass the path Guard into the agent loop
+- [UPDATE|MAJOR] Use effect-based plan matching for run_shell
+- [UPDATE|MEDIUM] Reject privileged commands in propose_plan
+- [UPDATE|MINOR] Treat pkexec as a privileged command
+- [UPDATE|MINOR] Resolve language after session history is loaded
+- [UPDATE|MINOR] Instruct the model in the user's language name
+- [UPDATE|MAJOR] Add profile languages and default_language
+- [UPDATE|MAJOR] Wire shell mode, !commands and Ctrl+D into the REPL
+- [UPDATE|MEDIUM] Keep a separate readline history for shell mode
+- [UPDATE|MINOR] Register /cmd to toggle REPL shell mode
+- [UPDATE|MINOR] Approve creack/pty for interactive shell mode
+- [UPDATE|MINOR] Expand paste chips when a REPL line is submitted
+- [UPDATE|MEDIUM] Turn long pastes into chips in readline
+- [UPDATE|MEDIUM] Test the footer, short path and input prompt
+- [UPDATE|MEDIUM] Feed session state into the REPL footer
+- [UPDATE|MINOR] Drive the footer and transient prompt from readline
+- [UPDATE|MAJOR] Move status into a footer below the input
+- [UPDATE|MINOR] Enable as-you-type slash completion in readline
+- [UPDATE|MAJOR] Show described slash completions as a live list
+- [UPDATE|MEDIUM] Skip a full fast prompt; plan-gate only act high
+- [UPDATE|MEDIUM] Test gated writes skip the explore budget
+- [UPDATE|MINOR] Reject pre-plan mutations without spending explore
+- [UPDATE|MINOR] Treat a single explicit command as effort low
+- [UPDATE|MEDIUM] Read n_ctx from models, then /props, else 8192
+- [UPDATE|MINOR] Pass --trace into the REPL
+- [UPDATE|MINOR] Honour --trace in the REPL session
+- [UPDATE|MINOR] Pass the slash-command list into the runner
+- [UPDATE|MINOR] Append live slash commands to answer prompts
+- [UPDATE|MINOR] Add About Konsolai to the answer prompt
+- [UPDATE|MEDIUM] Ensure a newline before every ReadLine
+- [UPDATE|MINOR] Register /output and expose slash lines
+- [UPDATE|MINOR] Forward run_shell output to the runner ring
+- [UPDATE|MINOR] Store finish output as the session answer
+- [UPDATE|MEDIUM] Keep a ring of recent shell outputs
+- [UPDATE|MEDIUM] Persist and fetch full shell output
+- [UPDATE|MEDIUM] Pick longer finish text and remember shells
+- [UPDATE|MAJOR] Headline multi-line cmds and treat exit 141 cuts
+- [UPDATE|MINOR] Point truncated output at /output
+- [UPDATE|MINOR] Clear leftover spinner before the next prompt
+- [UPDATE|MINOR] Show scripts with a line-number gutter
+- [UPDATE|MINOR] Add numbered gutter for confirm scripts
+- [UPDATE|MEDIUM] Auto-approve outside-plan commands after "a"
+- [UPDATE|MINOR] Reject placeholder commands in propose_plan
+- [UPDATE|MEDIUM] Treat test, brackets and if-fi as read-only
+- [UPDATE|MINOR] Attach named roots and list them in context
+- [UPDATE|MEDIUM] ResolvePath accepts extra allowed roots
+- [UPDATE|MINOR] Map answer effort and act to plan_step
+- [UPDATE|MINOR] Attach a fast client on the runner
+- [UPDATE|MEDIUM] Show fast model and which endpoint is routing
+- [UPDATE|MINOR] Default forced intents to effort low
+- [UPDATE|MAJOR] Print router traces and run none-effort on fast
+- [UPDATE|MAJOR] Recover thinking after failures and rejected plans
+- [UPDATE|MAJOR] Add effort to the router schema and extract JSON
+- [UPDATE|MEDIUM] Omit think kwargs and read llama.cpp n_ctx
+- [UPDATE|MAJOR] Enter the REPL when there is no request on a TTY
+- [UPDATE|MINOR] Make /new start a fresh REPL session in-loop
+- [UPDATE|MEDIUM] Gate ReplOnly commands and register REPL verbs
+- [UPDATE|MINOR] Unblock Confirm when the turn is cancelled
+- [UPDATE|MAJOR] Attach mentions, auto-compact and keep REPL sessions
+- [UPDATE|MEDIUM] Track prompt tokens and interrupt the confirm TTY
+- [UPDATE|MINOR] Keep compact fields on the local last-session file
+- [UPDATE|MEDIUM] Load and persist session compaction fields
+- [UPDATE|MINOR] Document the REPL and the readline dependency
+- [UPDATE|MEDIUM] Close a ```` fence that ends with a shorter ```
+- [UPDATE|MINOR] Prefer ``` fences unless the body contains ```
+- [UPDATE|MINOR] Require every commit to land on dev
+- [UPDATE|MINOR] Show the /v1/models id when the profile model is empty
+- [UPDATE|MAJOR] Dispatch slash commands and stamp --version
+- [UPDATE|MAJOR] Skip closed sessions and add history, close and list helpers
+- [REFACTOR|MAJOR] Keep main as flags, input and a Runner call
+- [UPDATE|MINOR] Expose the resolved path from read_file actions
+- [UPDATE|MINOR] Give propose_plan the user request for docs export checks
+- [UPDATE|MINOR] Reject docs plans that omit export_doc for PDF/HTML
+- [UPDATE|MINOR] Pass the user request into the tool registry
+- [UPDATE|MINOR] Print a visible line when Prepare rejects a tool call
+- [UPDATE|MINOR] Pass the session id into agent traces
+- [UPDATE|MEDIUM] Test export_doc reads sibling Markdown and rejects extra fields
+- [UPDATE|MAJOR] Make export_doc read the Markdown file; args are path and format
+
+### Fixed
+- [FIX|MAJOR] Stop repeating an identical rejected tool call
+- [FIX|MAJOR] Accept command-only plans without a file list
+- [FIX|MAJOR] Read welcome height from the wrapped TTY
+- [FIX|MINOR] Ignore suggestion text in slash prompt checks
+- [FIX|MAJOR] Keep theme preview on the picker rows
+- [FIX|MINOR] Tighten slash PTY asserts against leftover text
+- [FIX|MAJOR] Make real-TTY arrows and Esc reach the slash menu
+- [FIX|MINOR] Nudge jade and mono banner lightness for shader span
+- [FIX|MINOR] Drop the leftover Profile self-assignment
+- [FIX|MEDIUM] Print the top input rule outside readline
+- [FIX|MINOR] Detect the REPL TTY before wrapping stdout
+- [FIX|MINOR] Stop reprinting the accepted line on a TTY
+- [FIX|MEDIUM] Bound TEI HTTP waits with header timeout and no keep-alives
+- [FIX|MINOR] Timestamp recall-test chunks so each run is a new hash
+- [FIX|MINOR] Use unique recall-test content so reruns can insert
+- [FIX|MINOR] Check missing vector tables in the test schema only
+- [FIX|MINOR] Map 5xx model errors without dumping the raw JSON body
+- [FIX|MEDIUM] Force export_doc after docs write stalls
+- [FIX|MAJOR] Drop dedupe on elide and break post-plan read stalls
+- [FIX|MINOR] Print cancelled only when the turn was interrupted
+- [FIX|MINOR] Skip cursor-position probes in the line editor
+- [FIX|MINOR] Resolve the model before /status prints the window
+- [FIX|MINOR] Resolve the model before a turn uses the context window
+- [FIX|MINOR] Scope slash history to cwd when there is no git project
+
+### Removed
+- [DELETE|MINOR] Stop tracking the local Cursor rules
+- [DELETE|MINOR] Drop the unused store timeout helper
+
