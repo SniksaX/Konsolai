@@ -177,6 +177,21 @@ func TestLiveSetLabel(t *testing.T) {
 	}
 }
 
+func TestHoldPromptBlocksSpinner(t *testing.T) {
+	var buf bytes.Buffer
+	restore := TestHook(&buf, true, 5*time.Millisecond, nil)
+	defer restore()
+	HoldPrompt(true)
+	defer HoldPrompt(false)
+	stop := Start("thinking")
+	time.Sleep(20 * time.Millisecond)
+	stop()
+	ResetDisplay()
+	if buf.Len() != 0 {
+		t.Fatalf("drew while prompt held: %q", buf.String())
+	}
+}
+
 func TestSpinnerCallSiteLabels(t *testing.T) {
 	labels := []string{"understanding", "loading memory", "thinking", "planning", "working", "running", "exporting", "fetching"}
 	for _, label := range labels {

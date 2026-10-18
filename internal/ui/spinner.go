@@ -5,10 +5,21 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/siraj/konsolai/internal/ui/theme"
 )
+
+var promptHeld atomic.Bool
+
+// HoldPrompt blocks spinner, step and confirm paints while readline owns
+// the input frame. The top rule is printed only inside ReadLine.
+func HoldPrompt(on bool) {
+	promptHeld.Store(on)
+}
+
+func promptOwned() bool { return promptHeld.Load() }
 
 var braille = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
@@ -138,7 +149,7 @@ func StartAfter(label string, delay time.Duration) func() {
 }
 
 func startLiveAfter(label string, delay time.Duration) *Live {
-	if !hookTTY() {
+	if promptOwned() || !hookTTY() {
 		return &Live{}
 	}
 	s := &spinner{
@@ -218,7 +229,7 @@ func (s *spinner) Stop() {
 
 // ResetDisplay clears a leftover spinner line and shows the cursor.
 func ResetDisplay() {
-	if !hookTTY() {
+	if promptOwned() || !hookTTY() {
 		return
 	}
 	fmt.Fprint(hookWriter(), clearLine+showCursor)
@@ -287,7 +298,7 @@ func (q *Quiet) watch() {
 }
 
 func (q *Quiet) maybeStart() {
-	if !hookTTY() {
+	if promptOwned() || !hookTTY() {
 		return
 	}
 	q.mu.Lock()

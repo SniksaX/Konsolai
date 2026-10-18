@@ -243,7 +243,7 @@ func (r *Renderer) emitLine(s string) error {
 		return r.writeHanging(m[1], p.AccentDim("•")+" ", m[3])
 	case reNumber.MatchString(s):
 		m := reNumber.FindStringSubmatch(s)
-		return r.writeHanging(m[1], p.Accent(m[2]+m[3])+" ", m[4])
+		return r.writeHanging(m[1], p.AccentDim(m[2]+m[3])+" ", m[4])
 	case reQuote.MatchString(s):
 		m := reQuote.FindStringSubmatch(s)
 		_, err := io.WriteString(r.w, m[1]+p.Subtle("│ ")+inline(p, m[2])+"\n")

@@ -12,18 +12,30 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/siraj/konsolai/internal/config"
 	"github.com/siraj/konsolai/internal/redact"
 )
 
 const (
-	queryTimeout  = 2 * time.Second
 	maxOutput     = 8 * 1024
 	maxFullOutput = 256 * 1024
 	maxBefore     = 1 << 20
 )
 
+// queryTimeout is the built-in query limit. Open stores the resolved value
+// on Store; this name stays for callers that open a pool directly.
+var queryTimeout = config.Builtin().StoreQueryTimeout()
+
 type Store struct {
-	pool *pgxpool.Pool
+	pool           *pgxpool.Pool
+	queryTimeout   time.Duration
+	migrateTimeout time.Duration
+}
+
+// OpenOptions carries store deadlines. Zero values keep the built-in limits.
+type OpenOptions struct {
+	QueryTimeout   time.Duration
+	MigrateTimeout time.Duration
 }
 
 type Session struct {
@@ -107,25 +119,42 @@ type Fact struct {
 }
 
 func Open(ctx context.Context, databaseURL string) (*Store, error) {
+	return OpenWith(ctx, databaseURL, OpenOptions{})
+}
+
+func resolvedOpen(opt OpenOptions) (query, migrate time.Duration) {
+	query = opt.QueryTimeout
+	if query <= 0 {
+		query = config.Builtin().StoreQueryTimeout()
+	}
+	migrate = opt.MigrateTimeout
+	if migrate <= 0 {
+		migrate = config.Builtin().StoreMigrateTimeout()
+	}
+	return query, migrate
+}
+
+func OpenWith(ctx context.Context, databaseURL string, opt OpenOptions) (*Store, error) {
+	query, migrate := resolvedOpen(opt)
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("store: parse config: %w", err)
 	}
-	cfg.ConnConfig.ConnectTimeout = queryTimeout
-	connectCtx, cancel := context.WithTimeout(ctx, queryTimeout)
+	cfg.ConnConfig.ConnectTimeout = query
+	connectCtx, cancel := context.WithTimeout(ctx, query)
 	pool, err := pgxpool.NewWithConfig(connectCtx, cfg)
 	cancel()
 	if err != nil {
 		return nil, fmt.Errorf("store: connect: %w", err)
 	}
-	pingCtx, cancel := context.WithTimeout(ctx, queryTimeout)
+	pingCtx, cancel := context.WithTimeout(ctx, query)
 	err = pool.Ping(pingCtx)
 	cancel()
 	if err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("store: ping: %w", err)
 	}
-	s := &Store{pool: pool}
+	s := &Store{pool: pool, queryTimeout: query, migrateTimeout: migrate}
 	if err := s.migrate(ctx); err != nil {
 		pool.Close()
 		return nil, err
@@ -147,7 +176,7 @@ func (s *Store) UpsertProject(ctx context.Context, root string, kinds, commands 
 	if commands == nil {
 		commands = []string{}
 	}
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	var id int64
 	err := s.pool.QueryRow(ctx, `
@@ -164,7 +193,7 @@ func (s *Store) UpsertProject(ctx context.Context, root string, kinds, commands 
 
 func (s *Store) FindResumableSession(ctx context.Context, profile string, projectID *int64, cwd, mode string, idle time.Duration) (Session, bool, error) {
 	_ = mode
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	mins := int(idle / time.Minute)
 	if mins < 1 {
@@ -204,7 +233,7 @@ type RecentSession struct {
 }
 
 func (s *Store) RecentSessions(ctx context.Context, profile string, projectID *int64, cwd string, idle time.Duration, limit int) ([]RecentSession, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	mins := int(idle / time.Minute)
 	if mins < 1 {
@@ -261,7 +290,7 @@ func cutRunes(s string, n int) string {
 }
 
 func (s *Store) CreateSession(ctx context.Context, ns NewSession) (string, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	var id string
 	err := s.pool.QueryRow(ctx, `
@@ -276,7 +305,7 @@ func (s *Store) CreateSession(ctx context.Context, ns NewSession) (string, error
 }
 
 func (s *Store) TouchSession(ctx context.Context, id string) error {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	_, err := s.pool.Exec(ctx, `UPDATE sessions SET last_activity_at = now() WHERE id = $1::uuid`, id)
 	if err != nil {
@@ -286,7 +315,7 @@ func (s *Store) TouchSession(ctx context.Context, id string) error {
 }
 
 func (s *Store) EndSession(ctx context.Context, id, status string) error {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	_, err := s.pool.Exec(ctx, `
 		UPDATE sessions SET status = $2, ended_at = now(), last_activity_at = now()
@@ -298,7 +327,7 @@ func (s *Store) EndSession(ctx context.Context, id, status string) error {
 }
 
 func (s *Store) NextSeq(ctx context.Context, sessionID string) (int, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	var seq int
 	err := s.pool.QueryRow(ctx, `
@@ -314,7 +343,7 @@ func (s *Store) NextSeq(ctx context.Context, sessionID string) (int, error) {
 }
 
 func (s *Store) AppendMessage(ctx context.Context, sessionID string, seq int, m Message) error {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	content := redact.String(m.Content)
 	var calls []byte
@@ -340,7 +369,7 @@ func (s *Store) AppendMessage(ctx context.Context, sessionID string, seq int, m 
 }
 
 func (s *Store) SessionByID(ctx context.Context, id string) (Session, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	var sess Session
 	err := s.pool.QueryRow(ctx, `
@@ -356,7 +385,7 @@ func (s *Store) SessionByID(ctx context.Context, id string) (Session, error) {
 }
 
 func (s *Store) SetCompact(ctx context.Context, id string, upto int, summary string) error {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	_, err := s.pool.Exec(ctx, `
 		UPDATE sessions SET compacted_upto = $2, compact_summary = $3, last_activity_at = now()
@@ -368,7 +397,7 @@ func (s *Store) SetCompact(ctx context.Context, id string, upto int, summary str
 }
 
 func (s *Store) LoadMessages(ctx context.Context, sessionID string) ([]Message, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	rows, err := s.pool.Query(ctx, `
 		SELECT seq, role, content, tool_calls, COALESCE(tool_call_id, ''), token_estimate, COALESCE(cwd, '')
@@ -389,7 +418,7 @@ func (s *Store) LoadMessages(ctx context.Context, sessionID string) ([]Message, 
 }
 
 func (s *Store) RecordAction(ctx context.Context, a ActionIn) error {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	args := a.Args
 	if len(args) == 0 {
@@ -417,7 +446,7 @@ func (s *Store) RecordAction(ctx context.Context, a ActionIn) error {
 }
 
 func (s *Store) RecordFileChange(ctx context.Context, c FileChangeIn) error {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	diffText := redact.String(c.Diff)
 	var before []byte
@@ -446,7 +475,7 @@ func (s *Store) RecordFileChange(ctx context.Context, c FileChangeIn) error {
 }
 
 func (s *Store) UndoCandidates(ctx context.Context, projectID *int64, cwd string) ([]FileChangeRow, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	rows, err := s.pool.Query(ctx, `
 		SELECT f.id, f.session_id::text, f.seq, f.path, f.existed_before, f.before_content,
@@ -483,7 +512,7 @@ func (s *Store) UndoCandidates(ctx context.Context, projectID *int64, cwd string
 }
 
 func (s *Store) MarkReverted(ctx context.Context, id int64) error {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	_, err := s.pool.Exec(ctx, `UPDATE file_changes SET reverted_at = now() WHERE id = $1`, id)
 	if err != nil {
@@ -493,7 +522,7 @@ func (s *Store) MarkReverted(ctx context.Context, id int64) error {
 }
 
 func (s *Store) ListSessions(ctx context.Context, profile string, limit int) ([]Session, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	if limit <= 0 {
 		limit = 20
@@ -521,7 +550,7 @@ func (s *Store) ListSessions(ctx context.Context, profile string, limit int) ([]
 }
 
 func (s *Store) AddUserFact(ctx context.Context, profile, fact, source string) (int64, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	var id int64
 	err := s.pool.QueryRow(ctx, `
@@ -536,7 +565,7 @@ func (s *Store) AddUserFact(ctx context.Context, profile, fact, source string) (
 }
 
 func (s *Store) AddProjectFact(ctx context.Context, projectID int64, fact string, sourceSession *string) (int64, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	var id int64
 	err := s.pool.QueryRow(ctx, `
@@ -551,7 +580,7 @@ func (s *Store) AddProjectFact(ctx context.Context, projectID int64, fact string
 }
 
 func (s *Store) ListFacts(ctx context.Context, profile string, projectID *int64) (user, project []Fact, err error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, fact, source FROM user_facts WHERE profile = $1 ORDER BY id`, profile)
@@ -592,7 +621,7 @@ func (s *Store) ListFacts(ctx context.Context, profile string, projectID *int64)
 }
 
 func (s *Store) DeleteFact(ctx context.Context, scope string, id int64) error {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	var q string
 	switch scope {
@@ -614,7 +643,7 @@ func (s *Store) DeleteFact(ctx context.Context, scope string, id int64) error {
 }
 
 func (s *Store) GetWebCache(ctx context.Context, url string) (title, text string, ok bool, err error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	err = s.pool.QueryRow(ctx, `
 		SELECT title, text FROM web_cache WHERE url = $1 AND expires_at > now()`, url).Scan(&title, &text)
@@ -628,7 +657,7 @@ func (s *Store) GetWebCache(ctx context.Context, url string) (title, text string
 }
 
 func (s *Store) PutWebCache(ctx context.Context, url, title, text string, ttl time.Duration) error {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	secs := int(ttl / time.Second)
 	if secs < 1 {
@@ -651,7 +680,7 @@ func (s *Store) PutWebCache(ctx context.Context, url, title, text string, ttl ti
 }
 
 func (s *Store) PruneIfDue(ctx context.Context, retentionDays int) error {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	var last string
 	err := s.pool.QueryRow(ctx, `SELECT value FROM meta WHERE key = 'last_prune'`).Scan(&last)
@@ -688,7 +717,7 @@ func (s *Store) PruneIfDue(ctx context.Context, retentionDays int) error {
 }
 
 func (s *Store) HistorySessions(ctx context.Context, profile string, projectID *int64, cwd string, limit int) ([]Session, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	if limit < 1 {
 		limit = 10
@@ -722,7 +751,7 @@ func (s *Store) HistorySessions(ctx context.Context, profile string, projectID *
 }
 
 func (s *Store) CloseSessions(ctx context.Context, profile string, projectID *int64, cwd string) (int64, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE sessions SET closed = true
@@ -739,7 +768,7 @@ func (s *Store) CloseSessions(ctx context.Context, profile string, projectID *in
 }
 
 func (s *Store) SchemaVersion(ctx context.Context) (int, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	var v int
 	err := s.pool.QueryRow(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&v)
@@ -758,7 +787,7 @@ type ActionRow struct {
 }
 
 func (s *Store) ListActions(ctx context.Context, sessionID string) ([]ActionRow, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	rows, err := s.pool.Query(ctx, `
 		SELECT seq, tool, args, kind, output FROM actions
@@ -779,7 +808,7 @@ func (s *Store) ListActions(ctx context.Context, sessionID string) ([]ActionRow,
 }
 
 func (s *Store) ListFileChanges(ctx context.Context, sessionID string) ([]FileChangeRow, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, session_id::text, seq, path, existed_before, COALESCE(before_content, ''::bytea),
@@ -802,7 +831,7 @@ func (s *Store) ListFileChanges(ctx context.Context, sessionID string) ([]FileCh
 }
 
 func (s *Store) RecentShellOutputs(ctx context.Context, profile string, limit int) ([]string, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	if limit < 1 {
 		limit = 1
@@ -843,8 +872,15 @@ func clipString(s string, n int) string {
 	return s
 }
 
-func withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(ctx, queryTimeout)
+func (s *Store) withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	d := time.Duration(0)
+	if s != nil {
+		d = s.queryTimeout
+	}
+	if d <= 0 {
+		d = config.Builtin().StoreQueryTimeout()
+	}
+	return context.WithTimeout(ctx, d)
 }
 
 func sha256Hex(b []byte) string {

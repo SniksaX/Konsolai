@@ -59,7 +59,7 @@ func VectorLiteral(v []float32) string {
 }
 
 func (s *Store) Meta(ctx context.Context, key string) (string, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	var v string
 	err := s.pool.QueryRow(ctx, `SELECT value FROM meta WHERE key = $1`, key).Scan(&v)
@@ -78,7 +78,7 @@ func (s *Store) RAGAvailable(ctx context.Context) bool {
 }
 
 func (s *Store) InsertChunk(ctx context.Context, in ChunkIn) (bool, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	if in.Ref == nil {
 		in.Ref = json.RawMessage(`{}`)
@@ -102,7 +102,7 @@ func (s *Store) InsertChunk(ctx context.Context, in ChunkIn) (bool, error) {
 }
 
 func (s *Store) DeleteCodeChunks(ctx context.Context, projectID int64, path string) error {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	_, err := s.pool.Exec(ctx, `
 		DELETE FROM memory_chunks
@@ -114,7 +114,7 @@ func (s *Store) DeleteCodeChunks(ctx context.Context, projectID int64, path stri
 }
 
 func (s *Store) UpsertMemoryFile(ctx context.Context, projectID int64, path, sha string) error {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO memory_files (project_id, path, sha256, indexed_at)
@@ -128,7 +128,7 @@ func (s *Store) UpsertMemoryFile(ctx context.Context, projectID int64, path, sha
 }
 
 func (s *Store) MemoryFileSHA(ctx context.Context, projectID int64, path string) (string, bool, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	var sha string
 	err := s.pool.QueryRow(ctx, `
@@ -143,7 +143,7 @@ func (s *Store) MemoryFileSHA(ctx context.Context, projectID int64, path string)
 }
 
 func (s *Store) ListMemoryFiles(ctx context.Context, projectID int64) ([]MemoryFile, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	rows, err := s.pool.Query(ctx, `
 		SELECT path, sha256, indexed_at FROM memory_files WHERE project_id = $1`, projectID)
@@ -163,7 +163,7 @@ func (s *Store) ListMemoryFiles(ctx context.Context, projectID int64) ([]MemoryF
 }
 
 func (s *Store) DeleteMemoryFile(ctx context.Context, projectID int64, path string) error {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	if _, err := s.pool.Exec(ctx, `DELETE FROM memory_files WHERE project_id = $1 AND path = $2`, projectID, path); err != nil {
 		return fmt.Errorf("store: delete memory file: %w", err)
@@ -172,7 +172,7 @@ func (s *Store) DeleteMemoryFile(ctx context.Context, projectID int64, path stri
 }
 
 func (s *Store) ChunkCounts(ctx context.Context, profile string, projectID *int64) (map[string]int, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	rows, err := s.pool.Query(ctx, `
 		SELECT source, count(*) FROM memory_chunks
@@ -195,7 +195,7 @@ func (s *Store) ChunkCounts(ctx context.Context, profile string, projectID *int6
 }
 
 func (s *Store) ClearCodeIndex(ctx context.Context, projectID int64) error {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	if _, err := s.pool.Exec(ctx, `DELETE FROM memory_chunks WHERE source = 'code' AND project_id = $1`, projectID); err != nil {
 		return fmt.Errorf("store: clear code chunks: %w", err)
@@ -207,7 +207,7 @@ func (s *Store) ClearCodeIndex(ctx context.Context, projectID int64) error {
 }
 
 func (s *Store) OrphanMemoryFiles(ctx context.Context, projectID int64) ([]string, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	rows, err := s.pool.Query(ctx, `
 		SELECT mf.path
@@ -279,7 +279,7 @@ func (s *Store) PersistCodeFile(ctx context.Context, profile string, projectID i
 }
 
 func (s *Store) LastIndexedAt(ctx context.Context, projectID int64) (time.Time, bool, error) {
-	ctx, cancel := withTimeout(ctx)
+	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	var t *time.Time
 	err := s.pool.QueryRow(ctx, `SELECT max(indexed_at) FROM memory_files WHERE project_id = $1`, projectID).Scan(&t)

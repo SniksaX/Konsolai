@@ -61,6 +61,8 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 		fmt.Fprintln(r.errw(), "konsolai:", err)
 		return Result{ExitCode: 1}
 	}
+	r.beginStats(req.Intent)
+	defer r.endStats()
 	client := r.client()
 	if _, err := client.ResolveModel(ctx); err != nil {
 		fmt.Fprintln(r.errw(), "konsolai:", err)
@@ -106,6 +108,7 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	}
 	understand()
 	routerTime := time.Since(routedAt)
+	r.setStatIntent(string(dec.Intent))
 	if thinkMode == ThinkAlways {
 		dec.Effort = intent.EffortHigh
 	}
@@ -129,6 +132,7 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 		picked.Messages = LoadCompacted(ctx, mem, picked.ID, r.Profile.Name, cwd)
 	}
 	sessionID, history := picked.ID, picked.Messages
+	r.setStatSession(sessionID)
 	win := client.ContextWindow()
 	r.LastWindow = win
 	if ShouldCompactRatio(r.LastPromptTokens, win, r.Profile.CompactThreshold()) && len(history) > compactKeep {
@@ -164,6 +168,7 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	if sessionID == "" && len(history) == 0 {
 		sessionID = CreateSession(ctx, mem, r.Profile, projectID, cwd, string(dec.Intent), req.Text)
 	}
+	r.setStatSession(sessionID)
 	rec := memory.NewRecorder(mem, sessionID, cwd)
 	tap := &sessionTap{inner: rec, msgs: append([]llm.Message(nil), history...)}
 	if len(tap.msgs) > 20 {
@@ -186,7 +191,7 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	r.lastAssistant = answer
 	if sessionID != "" && !req.KeepOpen {
 		if s := mem.Store(); s != nil {
-			endCtx, cancel := memory.Isolated(ctx)
+			endCtx, cancel := mem.Isolated(ctx)
 			defer cancel()
 			if err := s.EndSession(endCtx, sessionID, SessionStatus(code)); err != nil {
 				mem.Fail(err)
@@ -335,12 +340,15 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 	}
 	for attempt := 0; attempt < 2; attempt++ {
 		reg := tools.NewRegistry(sg, toolOut, lister, memory.NewWebCache(mem), memory.NewFactStore(mem, r.Profile.Name, projectID, sessionID), tools.Options{
-			ReadOnlyShell: dec.Intent == intent.Lookup,
-			DocsTask:      dec.Task == intent.TaskDocs,
-			Request:       req.Text,
-			OnWebFetch:    onWeb,
-			Recall:        onRecall,
-			DisplayLines:  r.Profile.DisplayLines(),
+			ReadOnlyShell:       dec.Intent == intent.Lookup,
+			DocsTask:            dec.Task == intent.TaskDocs,
+			Request:             req.Text,
+			OnWebFetch:          onWeb,
+			Recall:              onRecall,
+			DisplayLines:        r.Profile.DisplayLines(),
+			ShellDefaultTimeout: r.Profile.ShellDefaultTimeout(),
+			ShellMaxTimeout:     r.Profile.ShellMaxTimeout(),
+			ShellWaitDelay:      r.Profile.ShellWaitDelay(),
 		})
 		cfg := agent.Config{
 			Client:         client,
@@ -404,6 +412,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		cfg.TokenCap = r.Profile.TokenCap(string(dec.Intent))
 		cfg.ElideTrigger = r.Profile.ElideTrigger()
 		cfg.ElideTarget = r.Profile.ElideTarget()
+		cfg.IdenticalRejects = r.Profile.IdenticalRejectLimit()
 
 		if dec.Intent == intent.Lookup && !r.escalated {
 			r.emitBadge(req, "lookup", false)

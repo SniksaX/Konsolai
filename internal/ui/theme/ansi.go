@@ -10,6 +10,12 @@ const (
 	ClearLine   = "\r\x1b[K"
 )
 
+// InputEcho paints a submitted line in bold default foreground.
+// 39 keeps a surrounding accent color from sticking.
+func InputEcho(text string) string {
+	return "\x1b[1;39m" + text + "\x1b[0m"
+}
+
 func CursorUp(n int) string {
 	if n <= 0 {
 		return ""

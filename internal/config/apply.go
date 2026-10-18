@@ -53,6 +53,9 @@ func applyOverlay(c *Config, o Overlay) {
 		if o.Memory.CompactThreshold != nil {
 			c.Memory.CompactThreshold = *o.Memory.CompactThreshold
 		}
+		if o.Memory.IsolatedTimeoutMS != nil {
+			c.Memory.IsolatedTimeoutMS = *o.Memory.IsolatedTimeoutMS
+		}
 	}
 	if o.Context != nil {
 		if o.Context.ElideTrigger != nil {
@@ -65,6 +68,9 @@ func applyOverlay(c *Config, o Overlay) {
 	if o.Agent != nil {
 		if o.Agent.BuildThinking != nil {
 			c.Agent.BuildThinking = *o.Agent.BuildThinking
+		}
+		if o.Agent.IdenticalRejects != nil {
+			c.Agent.IdenticalRejects = *o.Agent.IdenticalRejects
 		}
 		if o.Agent.MaxSteps != nil {
 			if o.Agent.MaxSteps.Lookup != nil {
@@ -188,8 +194,17 @@ func applyOverlay(c *Config, o Overlay) {
 		if o.UI.Banner != nil {
 			c.UI.Banner = *o.UI.Banner
 		}
+		if o.UI.Welcome != nil {
+			c.UI.Welcome = *o.UI.Welcome
+		}
 		if o.UI.Theme != nil {
 			c.UI.Theme = *o.UI.Theme
+		}
+		if o.UI.Appearance != nil {
+			c.UI.Appearance = *o.UI.Appearance
+		}
+		if o.UI.CursorColor != nil {
+			c.UI.CursorColor = *o.UI.CursorColor
 		}
 		if o.UI.CodeHighlight != nil {
 			c.UI.CodeHighlight = *o.UI.CodeHighlight
@@ -199,6 +214,60 @@ func applyOverlay(c *Config, o Overlay) {
 		}
 		if o.UI.StripEmoji != nil {
 			c.UI.StripEmoji = *o.UI.StripEmoji
+		}
+		if o.UI.ProbeDeadlineMS != nil {
+			c.UI.ProbeDeadlineMS = *o.UI.ProbeDeadlineMS
+		}
+		if o.UI.ProbeTimeoutMS != nil {
+			c.UI.ProbeTimeoutMS = *o.UI.ProbeTimeoutMS
+		}
+		if o.UI.GitQueryMS != nil {
+			c.UI.GitQueryMS = *o.UI.GitQueryMS
+		}
+		if o.UI.MemoryQueryMS != nil {
+			c.UI.MemoryQueryMS = *o.UI.MemoryQueryMS
+		}
+		if o.UI.StartupCapMS != nil {
+			c.UI.StartupCapMS = *o.UI.StartupCapMS
+		}
+		if o.UI.WelcomeCacheSeconds != nil {
+			c.UI.WelcomeCacheSeconds = *o.UI.WelcomeCacheSeconds
+		}
+		if o.UI.ModelRateCalls != nil {
+			c.UI.ModelRateCalls = *o.UI.ModelRateCalls
+		}
+		if o.UI.ModelSlowMS != nil {
+			c.UI.ModelSlowMS = *o.UI.ModelSlowMS
+		}
+		if o.UI.CtxWarnPct != nil {
+			c.UI.CtxWarnPct = *o.UI.CtxWarnPct
+		}
+		if o.UI.CtxHotPct != nil {
+			c.UI.CtxHotPct = *o.UI.CtxHotPct
+		}
+		if o.UI.CtxCells != nil {
+			c.UI.CtxCells = *o.UI.CtxCells
+		}
+		if o.UI.CtxNarrowCols != nil {
+			c.UI.CtxNarrowCols = *o.UI.CtxNarrowCols
+		}
+		if o.UI.Layout != nil {
+			l := o.UI.Layout
+			if l.TinyHeight != nil {
+				c.UI.Layout.TinyHeight = *l.TinyHeight
+			}
+			if l.RecentHeight != nil {
+				c.UI.Layout.RecentHeight = *l.RecentHeight
+			}
+			if l.TinyWidth != nil {
+				c.UI.Layout.TinyWidth = *l.TinyWidth
+			}
+			if l.NarrowWidth != nil {
+				c.UI.Layout.NarrowWidth = *l.NarrowWidth
+			}
+			if l.FrameWidth != nil {
+				c.UI.Layout.FrameWidth = *l.FrameWidth
+			}
 		}
 	}
 	if o.Language != nil {
@@ -224,5 +293,28 @@ func applyOverlay(c *Config, o Overlay) {
 		if o.Router.Targets != nil {
 			c.Router.Targets = append([]string(nil), (*o.Router.Targets)...)
 		}
+	}
+	if o.Tools != nil && o.Tools.Shell != nil {
+		sh := o.Tools.Shell
+		if sh.DefaultTimeoutSec != nil {
+			c.Tools.Shell.DefaultTimeoutSec = *sh.DefaultTimeoutSec
+		}
+		if sh.MaxTimeoutSec != nil {
+			c.Tools.Shell.MaxTimeoutSec = *sh.MaxTimeoutSec
+		}
+		if sh.WaitDelayMS != nil {
+			c.Tools.Shell.WaitDelayMS = *sh.WaitDelayMS
+		}
+	}
+	if o.Store != nil {
+		if o.Store.QueryTimeoutMS != nil {
+			c.Store.QueryTimeoutMS = *o.Store.QueryTimeoutMS
+		}
+		if o.Store.MigrateTimeoutMS != nil {
+			c.Store.MigrateTimeoutMS = *o.Store.MigrateTimeoutMS
+		}
+	}
+	if o.Stats != nil && o.Stats.InsertTimeoutMS != nil {
+		c.Stats.InsertTimeoutMS = *o.Stats.InsertTimeoutMS
 	}
 }

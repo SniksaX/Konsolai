@@ -85,9 +85,29 @@ func card(info Info, pal ui.Palette, width int) string {
 	b.WriteString(indent + top + "\n")
 	b.WriteString(cardRow(pal, inner, "model", modelVal, ""))
 	b.WriteString(cardRow(pal, inner, "dir", dirVal, info.Branch))
-	b.WriteString(cardRow(pal, inner, "build", buildVal, ""))
+	b.WriteString(cardBuildRow(pal, inner, buildVal))
 	b.WriteString(indent + bot + "\n")
 	return b.String()
+}
+
+func cardBuildRow(pal ui.Palette, inner int, build string) string {
+	label := pal.Muted(padRight("build", 6))
+	room := inner - 2 - 6 - 2
+	ver, hash, ok := strings.Cut(build, "  ")
+	plain := build
+	var val string
+	if ok && hash != "" {
+		if theme.DisplayWidth(plain) > max(4, room) {
+			plain = theme.MiddleTruncate(plain, max(4, room))
+			val = pal.Meta(plain)
+		} else {
+			val = pal.Meta(ver) + "  " + pal.Muted(hash)
+		}
+	} else {
+		val = pal.Meta(theme.MiddleTruncate(plain, max(4, room)))
+	}
+	line := "  " + label + "  " + val
+	return indent + pal.Subtle("│") + padInner(line, inner) + pal.Subtle("│") + "\n"
 }
 
 func cardRow(pal ui.Palette, inner int, key, value, branch string) string {

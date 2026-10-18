@@ -23,6 +23,7 @@ import (
 	"github.com/siraj/konsolai/internal/turn"
 	"github.com/siraj/konsolai/internal/ui"
 	"github.com/siraj/konsolai/internal/ui/theme"
+	"golang.org/x/term"
 )
 
 type Config struct {
@@ -143,7 +144,8 @@ func Run(ctx context.Context, cfg Config) int {
 		fmt.Fprint(out, theme.ClearHome)
 	}
 	show := env == nil || env.Profile.ShowBanner()
-	if err := banner.Startup(out, info, show, tty, p, banner.Width(origOut)); err != nil {
+	welcome, err := openWelcome(ctx, out, env, info, tty, show)
+	if err != nil {
 		fmt.Fprintln(errw, "konsolai:", err)
 		return 1
 	}
@@ -153,6 +155,12 @@ func Run(ctx context.Context, cfg Config) int {
 	if tty {
 		if f, ok := origOut.(*os.File); ok {
 			theme.DetectOnce(f)
+		}
+		if env != nil && env.Profile.CursorColorOn() && term.IsTerminal(int(os.Stdout.Fd())) {
+			theme.SetCursorColor(true)
+			theme.ApplyCursor(origOut)
+			undoCur := theme.InstallCursorRestore(origOut)
+			defer undoCur()
 		}
 	}
 
@@ -171,11 +179,16 @@ func Run(ctx context.Context, cfg Config) int {
 		var err error
 		rd, err = NewReadline(completer, func() string {
 			return sessionFooter(st, cfg)
-		}, st.pastes)
+		}, st.pastes, reg)
 		if err != nil {
 			fmt.Fprintln(errw, "konsolai:", err)
 			return 1
 		}
+	}
+	bindWelcome(env, welcome, rd)
+	if kr, ok := rd.(interface{ ReadKey() (byte, error) }); ok {
+		ui.SetKeyReader(kr.ReadKey)
+		defer ui.SetKeyReader(nil)
 	}
 	if clr, ok := rd.(interface{ SetOnClear(func()) }); ok {
 		clr.SetOnClear(func() {
@@ -224,7 +237,9 @@ func Run(ctx context.Context, cfg Config) int {
 		shell := st.shell
 		st.mu.Unlock()
 		prompt := inputPrompt(shell)
+		ui.HoldPrompt(true)
 		line, err := rd.ReadLine(ctx, prompt)
+		ui.HoldPrompt(false)
 		if err != nil {
 			if err == ErrEOF {
 				if shell {
@@ -388,7 +403,16 @@ func echoInput(w io.Writer, text string) {
 		limit = 8
 	}
 	text = theme.Truncate(text, limit)
-	fmt.Fprintln(w, "  "+theme.Style(theme.Accent, "›")+" "+theme.Bold(text))
+	fmt.Fprintln(w, "  "+theme.Style(theme.Accent, "›")+" "+echoBody(text))
+}
+
+// echoBody is the submitted line: primary (default foreground, never Accent
+// or Link) plus bold. 39 keeps a surrounding accent color from sticking.
+func echoBody(text string) string {
+	if text == "" || !theme.Enabled() {
+		return text
+	}
+	return theme.InputEcho(text)
 }
 
 func sessionFooter(st *session, cfg Config) string {
@@ -405,10 +429,19 @@ func sessionFooter(st *session, cfg Config) string {
 	if model == "" && cfg.Env != nil {
 		model = cfg.Env.Profile.Model
 	}
-	return formatFooter(footerInfo{
+	info := footerInfo{
 		Cwd: cwd, Model: model, Routing: routing,
 		CtxPct: ctxPct, ShowCtx: showCtx, Down: down, Shell: shell,
-	})
+	}
+	if cfg.Env != nil {
+		p := cfg.Env.Profile
+		info.GitQuery = p.GitQueryTimeout()
+		info.CtxWarn = p.CtxWarnPct()
+		info.CtxHot = p.CtxHotPct()
+		info.CtxCells = p.CtxCells()
+		info.CtxNarrow = p.CtxNarrowCols()
+	}
+	return formatFooter(info)
 }
 
 func wireEnv(env *commands.Env, st *session, cfg Config) {
@@ -541,7 +574,10 @@ func probeBackground(ctx context.Context, prof config.Profile, errw io.Writer, s
 		}
 		cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
-		s, err := store.Open(cctx, prof.DatabaseURL)
+		s, err := store.OpenWith(cctx, prof.DatabaseURL, store.OpenOptions{
+			QueryTimeout:   prof.StoreQueryTimeout(),
+			MigrateTimeout: prof.StoreMigrateTimeout(),
+		})
 		if err != nil {
 			addWarn(st, p.Warn("database unreachable"))
 			return

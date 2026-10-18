@@ -3,6 +3,7 @@ package repl
 import (
 	"bytes"
 	"context"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/siraj/konsolai/internal/config"
 	"github.com/siraj/konsolai/internal/ui"
 	"github.com/siraj/konsolai/internal/ui/theme"
 )
@@ -118,13 +120,18 @@ func inputPrompt(shell bool) string {
 }
 
 type footerInfo struct {
-	Cwd     string
-	Model   string
-	Routing string
-	CtxPct  int
-	ShowCtx bool
-	Down    bool
-	Shell   bool
+	Cwd       string
+	Model     string
+	Routing   string
+	CtxPct    int
+	ShowCtx   bool
+	Down      bool
+	Shell     bool
+	GitQuery  time.Duration
+	CtxWarn   int
+	CtxHot    int
+	CtxCells  int
+	CtxNarrow int
 }
 
 var (
@@ -135,15 +142,22 @@ var (
 )
 
 func gitDirty(cwd string) bool {
+	return gitDirtyFor(cwd, 0)
+}
+
+func gitDirtyFor(cwd string, timeout time.Duration) bool {
 	if cwd == "" {
 		return false
+	}
+	if timeout <= 0 {
+		timeout = config.Builtin().GitQueryTimeout()
 	}
 	dirtyMu.Lock()
 	defer dirtyMu.Unlock()
 	if cwd == dirtyCwd && time.Since(dirtyAt) < 5*time.Second {
 		return dirtyOn
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", "-C", cwd, "status", "--porcelain")
 	out, err := cmd.Output()
@@ -176,7 +190,7 @@ func formatFooter(f footerInfo) string {
 	br := gitBranch(f.Cwd)
 	branch := ""
 	if br != "" {
-		if gitDirty(f.Cwd) {
+		if gitDirtyFor(f.Cwd, f.GitQuery) {
 			br += "*"
 		}
 		branch = theme.Style(theme.Accent, br)
@@ -188,15 +202,9 @@ func formatFooter(f footerInfo) string {
 	model := theme.Style(theme.Muted, modelWord)
 	ctx := ""
 	if f.ShowCtx {
-		label := "ctx " + itoa(clampPct(f.CtxPct)) + "%"
-		switch {
-		case f.CtxPct >= 85:
-			ctx = theme.Style(theme.Error, label)
-		case f.CtxPct >= 60:
-			ctx = theme.Style(theme.Warn, label)
-		default:
-			ctx = theme.Style(theme.Muted, label)
-		}
+		ctx = paintMeter(f.CtxPct, width, meterStyle{
+			Warn: f.CtxWarn, Hot: f.CtxHot, Cells: f.CtxCells, Narrow: f.CtxNarrow,
+		})
 	}
 	routing := f.Routing
 	if routing == "" {
@@ -242,6 +250,81 @@ func pick(skip bool, empty, val string) string {
 		return empty
 	}
 	return val
+}
+
+type meterStyle struct {
+	Warn   int
+	Hot    int
+	Cells  int
+	Narrow int
+}
+
+func (m meterStyle) norm() meterStyle {
+	if m.Warn <= 0 {
+		m.Warn = 60
+	}
+	if m.Hot <= 0 {
+		m.Hot = 85
+	}
+	if m.Cells <= 0 {
+		m.Cells = 8
+	}
+	if m.Narrow <= 0 {
+		m.Narrow = 90
+	}
+	return m
+}
+
+func ctxMeter(pct, width int) string {
+	return paintMeter(pct, width, meterStyle{})
+}
+
+func paintMeter(pct, width int, m meterStyle) string {
+	m = m.norm()
+	shown := clampPct(pct)
+	if width < m.Narrow {
+		label := "ctx " + itoa(shown) + "%"
+		switch {
+		case pct >= m.Hot:
+			return theme.Style(theme.Error, label)
+		case pct >= m.Warn:
+			return theme.Style(theme.Warn, label)
+		default:
+			return theme.Style(theme.Muted, label)
+		}
+	}
+	filled := filledCells(shown, m.Cells)
+	role := theme.Accent
+	switch {
+	case pct >= m.Hot:
+		role = theme.Error
+	case pct >= m.Warn:
+		role = theme.Warn
+	}
+	cells := theme.Style(role, strings.Repeat("▰", filled)) +
+		theme.Style(theme.Subtle, strings.Repeat("▱", m.Cells-filled))
+	return theme.Style(theme.Muted, "ctx ") + cells + theme.Style(theme.Muted, " "+itoa(shown)+"%")
+}
+
+func ctxFilled(pct int) int {
+	return filledCells(pct, 8)
+}
+
+func filledCells(pct, cells int) int {
+	if cells < 1 {
+		cells = 8
+	}
+	if pct < 0 {
+		pct = 0
+	}
+	n := int(math.Round(float64(pct) / (100 / float64(cells))))
+	if n < 0 {
+		return 0
+	}
+	if n > cells {
+		return cells
+	}
+	return n
 }
 
 func clampPct(n int) int {

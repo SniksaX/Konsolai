@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -25,7 +26,7 @@ func TestReadlineSubmittedOnceOnPTY(t *testing.T) {
 		t.Skip("no /dev/ptmx")
 	}
 	if os.Getenv("KONSOLAI_PTY_CHILD") == "1" {
-		rd, err := NewReadline(nil, func() string { return "cwd · branch" }, nil)
+		rd, err := NewReadline(nil, func() string { return "cwd · branch" }, nil, nil)
 		if err != nil {
 			os.Stderr.WriteString(err.Error())
 			os.Exit(1)
@@ -67,6 +68,88 @@ func TestReadlineSubmittedOnceOnPTY(t *testing.T) {
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("child: %v raw=%q", err, raw)
 	}
+}
+
+func TestSlashMenuDownReplacesLineOnPTY(t *testing.T) {
+	if _, err := os.Stat("/dev/ptmx"); err != nil && os.Getenv("KONSOLAI_PTY_CHILD") == "" {
+		t.Skip("no /dev/ptmx")
+	}
+	if os.Getenv("KONSOLAI_PTY_CHILD") == "slash-down" {
+		rd, err := NewReadline(nil, func() string { return "FOOTER_MARK · branch" }, nil, commands.Default())
+		if err != nil {
+			os.Stderr.WriteString(err.Error())
+			os.Exit(1)
+		}
+		line, err := rd.ReadLine(context.Background(), "› ")
+		if err != nil && err != ErrInterrupt && err != ErrEOF {
+			os.Stderr.WriteString(err.Error())
+			os.Exit(1)
+		}
+		os.Stdout.WriteString("SUBMIT=" + line + "\n")
+		os.Exit(0)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=TestSlashMenuDownReplacesLineOnPTY")
+	logf := filepath.Join(t.TempDir(), "slash.log")
+	cmd.Env = append(os.Environ(), "KONSOLAI_PTY_CHILD=slash-down", "COLUMNS=80", "INPUTRC=/dev/null", "KONSOLAI_SLASH_LOG="+logf)
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = ptmx.Close()
+		_ = cmd.Wait()
+	}()
+	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 24, Cols: 80})
+	var mu sync.Mutex
+	var buf bytes.Buffer
+	go func() {
+		tmp := make([]byte, 4096)
+		for {
+			n, err := ptmx.Read(tmp)
+			if n > 0 {
+				mu.Lock()
+				buf.Write(tmp[:n])
+				mu.Unlock()
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	time.Sleep(150 * time.Millisecond)
+	if _, err := ptmx.Write([]byte("/")); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if _, err := ptmx.Write([]byte("\x1b[B")); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if _, err := ptmx.Write([]byte("\r")); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		plain := ansiRe.ReplaceAllString(strings.ReplaceAll(buf.String(), "\r", ""), "")
+		mu.Unlock()
+		if strings.Contains(plain, "SUBMIT=") {
+			if !strings.Contains(plain, "SUBMIT=/help") {
+				logb, _ := os.ReadFile(logf)
+				loga, _ := os.ReadFile(logf + ".after")
+				t.Fatalf("submitted %q\nlog=%q after=%q\n%s", plain, logb, loga, plain)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	mu.Lock()
+	plain := buf.String()
+	mu.Unlock()
+	t.Fatalf("timeout\n%s", ansiRe.ReplaceAllString(plain, ""))
 }
 
 func TestFrameSlashBackspaceClearsMenu(t *testing.T) {
@@ -123,7 +206,7 @@ func TestFrameNoPartialRuleAfterTurn(t *testing.T) {
 		t.Skip("no /dev/ptmx")
 	}
 	if os.Getenv("KONSOLAI_PTY_CHILD") == "turn" {
-		rd, err := NewReadline(nil, func() string { return "FOOTER_MARK · branch" }, nil)
+		rd, err := NewReadline(nil, func() string { return "FOOTER_MARK · branch" }, nil, nil)
 		if err != nil {
 			os.Stderr.WriteString(err.Error())
 			os.Exit(1)
@@ -201,7 +284,7 @@ func TestFrameNoPartialRuleAfterTurn(t *testing.T) {
 func runSlashChild() {
 	rd, err := NewReadline(Completer(commands.Default(), func() string { return os.TempDir() }), func() string {
 		return "FOOTER_MARK · branch"
-	}, nil)
+	}, nil, commands.Default())
 	if err != nil {
 		os.Stderr.WriteString(err.Error())
 		os.Exit(1)
@@ -566,4 +649,148 @@ func (s *screen) applyCSI(cmd byte, args []int) {
 	case 'K':
 		s.clearLine()
 	}
+}
+
+func TestPlaceholderNotAcceptedOnPTY(t *testing.T) {
+	if _, err := os.Stat("/dev/ptmx"); err != nil && os.Getenv("KONSOLAI_PTY_CHILD") == "" {
+		t.Skip("no /dev/ptmx")
+	}
+	if os.Getenv("KONSOLAI_PTY_CHILD") == "placeholder" {
+		rd, err := NewReadline(nil, func() string { return "FOOTER_MARK" }, nil, commands.Default())
+		if err != nil {
+			os.Stderr.WriteString(err.Error())
+			os.Exit(1)
+		}
+		if sp, ok := rd.(interface{ SetPlaceholder(string) }); ok {
+			sp.SetPlaceholder("ask anything")
+		}
+		line, err := rd.ReadLine(context.Background(), "› ")
+		if err != nil && err != ErrInterrupt && err != ErrEOF {
+			os.Stderr.WriteString(err.Error())
+			os.Exit(1)
+		}
+		os.Stdout.WriteString("SUBMIT=" + line + "\n")
+		os.Exit(0)
+	}
+	cases := []struct {
+		name   string
+		keys   string
+		submit string
+	}{
+		{name: "right", keys: "\x1b[C\r", submit: ""},
+		{name: "end", keys: "\x1b[F\r", submit: ""},
+		{name: "tab", keys: "\t\r", submit: ""},
+		{name: "type", keys: "hi\r", submit: "hi"},
+		{name: "slash", keys: "/\r", submit: "/"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			plain := drivePlaceholder(t, tc.keys)
+			if !strings.Contains(plain, "ask anything") {
+				t.Fatalf("placeholder not shown:\n%s", plain)
+			}
+			if strings.Contains(plain, "SUBMIT=ask anything") {
+				t.Fatalf("placeholder submitted:\n%s", plain)
+			}
+			if !strings.Contains(plain, "SUBMIT="+tc.submit+"\n") {
+				t.Fatalf("submit want %q\n%s", tc.submit, plain)
+			}
+			if tc.name == "slash" && !strings.Contains(plain, "/help") {
+				t.Fatalf("slash menu did not open:\n%s", plain)
+			}
+		})
+	}
+}
+
+func TestCtrlLCallsClearHook(t *testing.T) {
+	if _, err := os.Stat("/dev/ptmx"); err != nil && os.Getenv("KONSOLAI_PTY_CHILD") == "" {
+		t.Skip("no /dev/ptmx")
+	}
+	if os.Getenv("KONSOLAI_PTY_CHILD") == "ctrl-l" {
+		rd, err := NewReadline(nil, func() string { return "FOOTER_MARK" }, nil, nil)
+		if err != nil {
+			os.Stderr.WriteString(err.Error())
+			os.Exit(1)
+		}
+		if clr, ok := rd.(interface{ SetOnClear(func()) }); ok {
+			clr.SetOnClear(func() { os.Stdout.WriteString("COMPACT_ONLY\n") })
+		}
+		_, _ = rd.ReadLine(context.Background(), "› ")
+		os.Exit(0)
+	}
+	plain := driveKeys(t, "TestCtrlLCallsClearHook", "ctrl-l", "\x0c", "COMPACT_ONLY")
+	if !strings.Contains(plain, "COMPACT_ONLY") {
+		t.Fatalf("ctrl-l did not clear:\n%s", plain)
+	}
+	if strings.Contains(plain, "╭") {
+		t.Fatalf("ctrl-l drew a welcome card:\n%s", plain)
+	}
+}
+
+func drivePlaceholder(t *testing.T, keys string) string {
+	t.Helper()
+	return driveKeys(t, "TestPlaceholderNotAcceptedOnPTY", "placeholder", keys, "SUBMIT=")
+}
+
+func driveKeys(t *testing.T, testName, child, keys, done string) string {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^"+testName+"$")
+	cmd.Env = append(os.Environ(), "KONSOLAI_PTY_CHILD="+child, "COLUMNS=80", "INPUTRC=/dev/null")
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = ptmx.Close()
+		_ = cmd.Wait()
+	}()
+	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 24, Cols: 80})
+	var mu sync.Mutex
+	var buf bytes.Buffer
+	go func() {
+		tmp := make([]byte, 4096)
+		for {
+			n, err := ptmx.Read(tmp)
+			if n > 0 {
+				mu.Lock()
+				buf.Write(tmp[:n])
+				mu.Unlock()
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		plain := ansiRe.ReplaceAllString(strings.ReplaceAll(buf.String(), "\r", ""), "")
+		mu.Unlock()
+		if strings.Contains(plain, "›") || strings.Contains(plain, "ask anything") || strings.Contains(plain, "FOOTER_MARK") {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(80 * time.Millisecond)
+	if _, err := ptmx.Write([]byte(keys)); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		plain := ansiRe.ReplaceAllString(strings.ReplaceAll(buf.String(), "\r", ""), "")
+		mu.Unlock()
+		if strings.Contains(plain, done) {
+			return plain
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	mu.Lock()
+	plain := ansiRe.ReplaceAllString(strings.ReplaceAll(buf.String(), "\r", ""), "")
+	mu.Unlock()
+	t.Fatalf("timeout waiting for %q\n%s", done, plain)
+	return plain
 }

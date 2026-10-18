@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -48,6 +49,9 @@ type Config struct {
 	Language Language `yaml:"language"`
 	Safety   Safety   `yaml:"safety"`
 	Router   Router   `yaml:"router"`
+	Tools    Tools    `yaml:"tools"`
+	Store    Store    `yaml:"store"`
+	Stats    Stats    `yaml:"stats"`
 
 	DatabaseURL           string   `yaml:"-" json:"-"`
 	Endpoint              string   `yaml:"-" json:"-"`
@@ -94,6 +98,7 @@ type Memory struct {
 	SessionIdleMinutes int     `yaml:"session_idle_minutes"`
 	RetentionDays      int     `yaml:"retention_days"`
 	CompactThreshold   float64 `yaml:"compact_threshold"`
+	IsolatedTimeoutMS  int     `yaml:"isolated_timeout_ms"`
 }
 
 type Context struct {
@@ -102,9 +107,10 @@ type Context struct {
 }
 
 type Agent struct {
-	MaxSteps      Steps         `yaml:"max_steps"`
-	ExploreBudget ExploreBudget `yaml:"explore_budget"`
-	BuildThinking string        `yaml:"build_thinking"`
+	MaxSteps         Steps         `yaml:"max_steps"`
+	ExploreBudget    ExploreBudget `yaml:"explore_budget"`
+	BuildThinking    string        `yaml:"build_thinking"`
+	IdenticalRejects int           `yaml:"identical_rejects"`
 }
 
 type Steps struct {
@@ -158,16 +164,41 @@ type RAGIndex struct {
 }
 
 type UI struct {
-	DisplayLines   int    `yaml:"display_lines"`
-	PasteChipLines int    `yaml:"paste_chip_lines"`
-	PasteChipChars int    `yaml:"paste_chip_chars"`
-	OutputKeepKB   int    `yaml:"output_keep_kb"`
-	Palette        string `yaml:"palette"`
-	Banner         bool   `yaml:"banner"`
-	Theme          string `yaml:"theme"`
-	CodeHighlight  bool   `yaml:"code_highlight"`
-	ClearOnStart   bool   `yaml:"clear_on_start"`
-	StripEmoji     bool   `yaml:"strip_emoji"`
+	DisplayLines        int      `yaml:"display_lines"`
+	PasteChipLines      int      `yaml:"paste_chip_lines"`
+	PasteChipChars      int      `yaml:"paste_chip_chars"`
+	OutputKeepKB        int      `yaml:"output_keep_kb"`
+	Palette             string   `yaml:"palette,omitempty"`
+	Banner              bool     `yaml:"banner"`
+	Welcome             string   `yaml:"welcome"`
+	Theme               string   `yaml:"theme"`
+	Appearance          string   `yaml:"appearance"`
+	CursorColor         bool     `yaml:"cursor_color"`
+	CodeHighlight       bool     `yaml:"code_highlight"`
+	ClearOnStart        bool     `yaml:"clear_on_start"`
+	StripEmoji          bool     `yaml:"strip_emoji"`
+	ProbeDeadlineMS     int      `yaml:"probe_deadline_ms"`
+	ProbeTimeoutMS      int      `yaml:"probe_timeout_ms"`
+	GitQueryMS          int      `yaml:"git_query_ms"`
+	MemoryQueryMS       int      `yaml:"memory_query_ms"`
+	StartupCapMS        int      `yaml:"startup_cap_ms"`
+	WelcomeCacheSeconds int      `yaml:"welcome_cache_seconds"`
+	ModelRateCalls      int      `yaml:"model_rate_calls"`
+	ModelSlowMS         int      `yaml:"model_slow_ms"`
+	CtxWarnPct          int      `yaml:"ctx_warn_pct"`
+	CtxHotPct           int      `yaml:"ctx_hot_pct"`
+	CtxCells            int      `yaml:"ctx_cells"`
+	CtxNarrowCols       int      `yaml:"ctx_narrow_cols"`
+	Layout              UILayout `yaml:"layout"`
+}
+
+// UILayout is the welcome size cuts. Zero fields keep the built-in cuts.
+type UILayout struct {
+	TinyHeight   int `yaml:"tiny_height"`
+	RecentHeight int `yaml:"recent_height"`
+	TinyWidth    int `yaml:"tiny_width"`
+	NarrowWidth  int `yaml:"narrow_width"`
+	FrameWidth   int `yaml:"frame_width"`
 }
 
 type Language struct {
@@ -183,6 +214,25 @@ type Safety struct {
 type Router struct {
 	ActionVerbs []string `yaml:"action_verbs"`
 	Targets     []string `yaml:"targets"`
+}
+
+type Tools struct {
+	Shell ToolShell `yaml:"shell"`
+}
+
+type ToolShell struct {
+	DefaultTimeoutSec int `yaml:"default_timeout_sec"`
+	MaxTimeoutSec     int `yaml:"max_timeout_sec"`
+	WaitDelayMS       int `yaml:"wait_delay_ms"`
+}
+
+type Store struct {
+	QueryTimeoutMS   int `yaml:"query_timeout_ms"`
+	MigrateTimeoutMS int `yaml:"migrate_timeout_ms"`
+}
+
+type Stats struct {
+	InsertTimeoutMS int `yaml:"insert_timeout_ms"`
 }
 
 func Builtin() Config {
@@ -203,6 +253,7 @@ func Builtin() Config {
 			SessionIdleMinutes: defaultIdleMinutes,
 			RetentionDays:      defaultRetention,
 			CompactThreshold:   0.7,
+			IsolatedTimeoutMS:  2000,
 		},
 		Context: Context{ElideTrigger: 0.60, ElideTarget: 0.40},
 		Agent: Agent{
@@ -211,7 +262,8 @@ func Builtin() Config {
 				Lookup: 6, LookupAnalysis: 10, Act: 6,
 				Build: 8, BuildDocs: 16, BuildAnalysis: 12,
 			},
-			BuildThinking: "plan_step",
+			BuildThinking:    "plan_step",
+			IdenticalRejects: 2,
 		},
 		RAG: RAG{
 			Enabled:        true,
@@ -231,8 +283,15 @@ func Builtin() Config {
 		},
 		UI: UI{
 			DisplayLines: 60, PasteChipLines: 11, PasteChipChars: 1000, OutputKeepKB: 256,
-			Palette: "amber", Banner: true, Theme: "auto",
+			Banner: true, Welcome: "split", Theme: "amber", Appearance: "auto", CursorColor: true,
 			CodeHighlight: true, ClearOnStart: true, StripEmoji: true,
+			ProbeDeadlineMS: 400, ProbeTimeoutMS: 300, GitQueryMS: 200, MemoryQueryMS: 200,
+			StartupCapMS: 500, WelcomeCacheSeconds: 60, ModelRateCalls: 20, ModelSlowMS: 1000,
+			CtxWarnPct: 60, CtxHotPct: 85, CtxCells: 8, CtxNarrowCols: 90,
+			Layout: UILayout{
+				TinyHeight: 22, RecentHeight: 30, TinyWidth: 64,
+				NarrowWidth: 110, FrameWidth: 120,
+			},
 		},
 		Language: Language{Languages: []string{"en", "fr"}, Default: "en"},
 		Safety:   Safety{ExtraReadDeny: []string{}, ExtraCommandDeny: []string{}},
@@ -240,6 +299,9 @@ func Builtin() Config {
 			ActionVerbs: defaultActionVerbs(),
 			Targets:     defaultTargets(),
 		},
+		Tools:     Tools{Shell: ToolShell{DefaultTimeoutSec: 120, MaxTimeoutSec: 600, WaitDelayMS: 2000}},
+		Store:     Store{QueryTimeoutMS: 2000, MigrateTimeoutMS: 15000},
+		Stats:     Stats{InsertTimeoutMS: 2000},
 		MemoryRAG: &on,
 	}
 	c.syncFlat()
@@ -326,6 +388,11 @@ func (c Config) MaxStepsFor(intent string) int {
 	}
 }
 
+// IdenticalRejectLimit stops a turn after this many identical rejected tool calls.
+func (c Config) IdenticalRejectLimit() int {
+	return nonzero(c.Agent.IdenticalRejects, 2)
+}
+
 func (c Config) ExploreBudgetFor(intent, task string) int {
 	b := c.Agent.ExploreBudget
 	switch intent {
@@ -392,25 +459,128 @@ func (c Config) OutputKeepBytes() int {
 }
 
 func (c Config) PaletteName() string {
-	switch strings.ToLower(strings.TrimSpace(c.UI.Palette)) {
-	case "violet", "ocean", "forest", "rose", "mono":
-		return strings.ToLower(strings.TrimSpace(c.UI.Palette))
-	default:
-		return "amber"
+	if name, ok := ResolveTheme(c.UI.Theme); ok {
+		return name
 	}
+	if name, ok := ResolveTheme(c.UI.Palette); ok {
+		return name
+	}
+	return "amber"
 }
 
 func (c Config) ShowBanner() bool {
 	return c.UI.Banner
 }
 
+// ProbeDeadline is the welcome gather budget. Omitted config keeps 400ms.
+func (c Config) ProbeDeadline() time.Duration {
+	return time.Duration(nonzero(c.UI.ProbeDeadlineMS, 400)) * time.Millisecond
+}
+
+// ProbeTimeout is one welcome endpoint probe. Omitted config keeps 300ms.
+func (c Config) ProbeTimeout() time.Duration {
+	return time.Duration(nonzero(c.UI.ProbeTimeoutMS, 300)) * time.Millisecond
+}
+
+// GitQueryTimeout bounds git status checks. Omitted config keeps 200ms.
+func (c Config) GitQueryTimeout() time.Duration {
+	return time.Duration(nonzero(c.UI.GitQueryMS, 200)) * time.Millisecond
+}
+
+// MemoryQueryTimeout bounds the welcome memory query. Omitted config keeps 200ms.
+func (c Config) MemoryQueryTimeout() time.Duration {
+	return time.Duration(nonzero(c.UI.MemoryQueryMS, 200)) * time.Millisecond
+}
+
+// StartupCap is the longest startup wait before the prompt. Omitted config keeps 500ms.
+func (c Config) StartupCap() time.Duration {
+	return time.Duration(nonzero(c.UI.StartupCapMS, 500)) * time.Millisecond
+}
+
+// WelcomeCacheFor is how long a painted welcome stays fresh. Omitted config keeps 60s.
+func (c Config) WelcomeCacheFor() time.Duration {
+	return time.Duration(nonzero(c.UI.WelcomeCacheSeconds, 60)) * time.Second
+}
+
+// ModelRateWindow is how many recent calls feed tokens/s. Omitted config keeps 20.
+func (c Config) ModelRateWindow() int {
+	return nonzero(c.UI.ModelRateCalls, 20)
+}
+
+// ModelSlow is the welcome latency that counts as slow. Omitted config keeps 1s.
+func (c Config) ModelSlow() time.Duration {
+	return time.Duration(nonzero(c.UI.ModelSlowMS, 1000)) * time.Millisecond
+}
+
+// ShellDefaultTimeout is run_shell's timeout when the model omits one. Omitted config keeps 120s.
+func (c Config) ShellDefaultTimeout() time.Duration {
+	return time.Duration(nonzero(c.Tools.Shell.DefaultTimeoutSec, 120)) * time.Second
+}
+
+// ShellMaxTimeout is the longest run_shell timeout. Omitted config keeps 600s.
+func (c Config) ShellMaxTimeout() time.Duration {
+	return time.Duration(nonzero(c.Tools.Shell.MaxTimeoutSec, 600)) * time.Second
+}
+
+// ShellWaitDelay is how long a cancelled shell may take to exit. Omitted config keeps 2s.
+func (c Config) ShellWaitDelay() time.Duration {
+	return time.Duration(nonzero(c.Tools.Shell.WaitDelayMS, 2000)) * time.Millisecond
+}
+
+// StoreQueryTimeout bounds a database call. Omitted config keeps 2s.
+func (c Config) StoreQueryTimeout() time.Duration {
+	return time.Duration(nonzero(c.Store.QueryTimeoutMS, 2000)) * time.Millisecond
+}
+
+// StoreMigrateTimeout bounds schema migration. Omitted config keeps 15s.
+func (c Config) StoreMigrateTimeout() time.Duration {
+	return time.Duration(nonzero(c.Store.MigrateTimeoutMS, 15000)) * time.Millisecond
+}
+
+// IsolatedTimeout bounds a memory call detached from the turn. Omitted config keeps 2s.
+func (c Config) IsolatedTimeout() time.Duration {
+	return time.Duration(nonzero(c.Memory.IsolatedTimeoutMS, 2000)) * time.Millisecond
+}
+
+// StatsInsertTimeout bounds a turn-stat insert. Omitted config keeps 2s.
+func (c Config) StatsInsertTimeout() time.Duration {
+	return time.Duration(nonzero(c.Stats.InsertTimeoutMS, 2000)) * time.Millisecond
+}
+
+func (c Config) CtxWarnPct() int { return nonzero(c.UI.CtxWarnPct, 60) }
+func (c Config) CtxHotPct() int  { return nonzero(c.UI.CtxHotPct, 85) }
+func (c Config) CtxCells() int   { return nonzero(c.UI.CtxCells, 8) }
+func (c Config) CtxNarrowCols() int {
+	return nonzero(c.UI.CtxNarrowCols, 90)
+}
+
+func (c Config) LayoutTinyHeight() int   { return nonzero(c.UI.Layout.TinyHeight, 22) }
+func (c Config) LayoutRecentHeight() int { return nonzero(c.UI.Layout.RecentHeight, 30) }
+func (c Config) LayoutTinyWidth() int    { return nonzero(c.UI.Layout.TinyWidth, 64) }
+func (c Config) LayoutNarrowWidth() int  { return nonzero(c.UI.Layout.NarrowWidth, 110) }
+func (c Config) LayoutFrameWidth() int   { return nonzero(c.UI.Layout.FrameWidth, 120) }
+
+// WelcomeLayout is ui.welcome: split, frame, or minimal. Anything else is split.
+func (c Config) WelcomeLayout() string {
+	switch strings.ToLower(strings.TrimSpace(c.UI.Welcome)) {
+	case "frame", "minimal", "split":
+		return strings.ToLower(strings.TrimSpace(c.UI.Welcome))
+	default:
+		return "split"
+	}
+}
+
 func (c Config) Appearance() string {
-	switch strings.ToLower(strings.TrimSpace(c.UI.Theme)) {
+	switch strings.ToLower(strings.TrimSpace(c.UI.Appearance)) {
 	case "light", "dark":
-		return strings.ToLower(strings.TrimSpace(c.UI.Theme))
+		return strings.ToLower(strings.TrimSpace(c.UI.Appearance))
 	default:
 		return "auto"
 	}
+}
+
+func (c Config) CursorColorOn() bool {
+	return c.UI.CursorColor
 }
 
 func (c Config) CodeHighlightOn() bool {

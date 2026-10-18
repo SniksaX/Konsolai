@@ -14,11 +14,12 @@ import (
 
 // Info is the metadata shown under the wordmark. Empty fields are skipped.
 type Info struct {
-	Version string
-	Model   string
-	Dir     string
-	Branch  string
-	Host    string
+	Version  string
+	Model    string
+	Dir      string
+	Branch   string
+	Host     string
+	MinWidth int // wordmark floor; 0 keeps 64 columns
 }
 
 const (
@@ -88,9 +89,10 @@ func Render(w io.Writer, info Info, pal ui.Palette, width int, wordmark bool) er
 	var b strings.Builder
 	prompt := pixelLines(">")
 	word := pixelLines(wordmrk + "#")
+	markAt := info.markMin()
 	full := len(indent) + glyphW + 2 + runeLen(word[0])
 	cardW := full
-	if width < minMark {
+	if width < markAt {
 		cardW = width - 4
 		if cardW < 24 {
 			cardW = 24
@@ -100,16 +102,40 @@ func Render(w io.Writer, info Info, pal ui.Palette, width int, wordmark bool) er
 	}
 
 	b.WriteByte('\n')
-	if wordmark && width >= minMark {
+	if wordmark && width >= markAt {
+		cols := runeLen(word[0])
+		mode := theme.Mode()
+		var grid [][]ui.RGB
+		var rows []ui.RGB
+		if mode == theme.ColorTrue {
+			grid = theme.ShaderGrid(theme.PaletteName(), theme.AppearanceName(), cols)
+		} else if mode == theme.Color256 {
+			rows = theme.ShaderRows(theme.PaletteName(), theme.AppearanceName())
+		}
 		for i := range word {
 			b.WriteString(indent)
 			b.WriteString(pal.PaintRGB(roles.AccentDim, prompt[i]))
 			b.WriteString("  ")
-			b.WriteString(pal.PaintRGB(lerp(roles.BannerTop, roles.BannerBottom, i, len(word)), word[i]))
+			switch mode {
+			case theme.ColorTrue:
+				if i < len(grid) {
+					b.WriteString(theme.PaintShaderLine(word[i], grid[i]))
+				} else {
+					b.WriteString(word[i])
+				}
+			case theme.Color256:
+				if i < len(rows) {
+					b.WriteString(pal.PaintRGB(rows[i], word[i]))
+				} else {
+					b.WriteString(word[i])
+				}
+			default:
+				b.WriteString(word[i])
+			}
 			b.WriteByte('\n')
 		}
 		b.WriteByte('\n')
-	} else if wordmark || width < minMark {
+	} else if wordmark || width < markAt {
 		b.WriteString(indent + pal.Accent("›") + " " + pal.Heading("konsolai") + "\n\n")
 	}
 
@@ -118,6 +144,13 @@ func Render(w io.Writer, info Info, pal ui.Palette, width int, wordmark bool) er
 
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+func (info Info) markMin() int {
+	if info.MinWidth > 0 {
+		return info.MinWidth
+	}
+	return minMark
 }
 
 func pixelLines(text string) []string {
@@ -163,14 +196,6 @@ func pixelLines(text string) []string {
 		out[i] = rows[i].String()
 	}
 	return out
-}
-
-func lerp(a, b ui.RGB, i, n int) ui.RGB {
-	if n <= 1 {
-		return a
-	}
-	t := func(x, y uint8) uint8 { return uint8(int(x) + (int(y)-int(x))*i/(n-1)) }
-	return ui.RGB{R: t(a.R, b.R), G: t(a.G, b.G), B: t(a.B, b.B)}
 }
 
 func runeLen(s string) int { return len([]rune(s)) }

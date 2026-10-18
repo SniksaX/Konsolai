@@ -31,6 +31,9 @@ type Overlay struct {
 	Language *LanguageOverlay `yaml:"language,omitempty" json:"language,omitempty"`
 	Safety   *SafetyOverlay   `yaml:"safety,omitempty" json:"safety,omitempty"`
 	Router   *RouterOverlay   `yaml:"router,omitempty" json:"router,omitempty"`
+	Tools    *ToolsOverlay    `yaml:"tools,omitempty" json:"tools,omitempty"`
+	Store    *StoreOverlay    `yaml:"store,omitempty" json:"store,omitempty"`
+	Stats    *StatsOverlay    `yaml:"stats,omitempty" json:"stats,omitempty"`
 }
 
 type LLMOverlay struct {
@@ -62,6 +65,7 @@ type MemoryOverlay struct {
 	SessionIdleMinutes *int     `yaml:"session_idle_minutes" json:"session_idle_minutes"`
 	RetentionDays      *int     `yaml:"retention_days" json:"retention_days"`
 	CompactThreshold   *float64 `yaml:"compact_threshold" json:"compact_threshold"`
+	IsolatedTimeoutMS  *int     `yaml:"isolated_timeout_ms" json:"isolated_timeout_ms"`
 }
 
 type ContextOverlay struct {
@@ -70,9 +74,10 @@ type ContextOverlay struct {
 }
 
 type AgentOverlay struct {
-	MaxSteps      *StepsOverlay         `yaml:"max_steps" json:"max_steps"`
-	ExploreBudget *ExploreBudgetOverlay `yaml:"explore_budget" json:"explore_budget"`
-	BuildThinking *string               `yaml:"build_thinking" json:"build_thinking"`
+	MaxSteps         *StepsOverlay         `yaml:"max_steps" json:"max_steps"`
+	ExploreBudget    *ExploreBudgetOverlay `yaml:"explore_budget" json:"explore_budget"`
+	BuildThinking    *string               `yaml:"build_thinking" json:"build_thinking"`
+	IdenticalRejects *int                  `yaml:"identical_rejects" json:"identical_rejects"`
 }
 
 type StepsOverlay struct {
@@ -126,16 +131,40 @@ type RAGIndexOverlay struct {
 }
 
 type UIOverlay struct {
-	DisplayLines   *int    `yaml:"display_lines" json:"display_lines"`
-	PasteChipLines *int    `yaml:"paste_chip_lines" json:"paste_chip_lines"`
-	PasteChipChars *int    `yaml:"paste_chip_chars" json:"paste_chip_chars"`
-	OutputKeepKB   *int    `yaml:"output_keep_kb" json:"output_keep_kb"`
-	Palette        *string `yaml:"palette" json:"palette"`
-	Banner         *bool   `yaml:"banner" json:"banner"`
-	Theme          *string `yaml:"theme" json:"theme"`
-	CodeHighlight  *bool   `yaml:"code_highlight" json:"code_highlight"`
-	ClearOnStart   *bool   `yaml:"clear_on_start" json:"clear_on_start"`
-	StripEmoji     *bool   `yaml:"strip_emoji" json:"strip_emoji"`
+	DisplayLines        *int             `yaml:"display_lines" json:"display_lines"`
+	PasteChipLines      *int             `yaml:"paste_chip_lines" json:"paste_chip_lines"`
+	PasteChipChars      *int             `yaml:"paste_chip_chars" json:"paste_chip_chars"`
+	OutputKeepKB        *int             `yaml:"output_keep_kb" json:"output_keep_kb"`
+	Palette             *string          `yaml:"palette" json:"palette"`
+	Banner              *bool            `yaml:"banner" json:"banner"`
+	Welcome             *string          `yaml:"welcome" json:"welcome"`
+	Theme               *string          `yaml:"theme" json:"theme"`
+	Appearance          *string          `yaml:"appearance" json:"appearance"`
+	CursorColor         *bool            `yaml:"cursor_color" json:"cursor_color"`
+	CodeHighlight       *bool            `yaml:"code_highlight" json:"code_highlight"`
+	ClearOnStart        *bool            `yaml:"clear_on_start" json:"clear_on_start"`
+	StripEmoji          *bool            `yaml:"strip_emoji" json:"strip_emoji"`
+	ProbeDeadlineMS     *int             `yaml:"probe_deadline_ms" json:"probe_deadline_ms"`
+	ProbeTimeoutMS      *int             `yaml:"probe_timeout_ms" json:"probe_timeout_ms"`
+	GitQueryMS          *int             `yaml:"git_query_ms" json:"git_query_ms"`
+	MemoryQueryMS       *int             `yaml:"memory_query_ms" json:"memory_query_ms"`
+	StartupCapMS        *int             `yaml:"startup_cap_ms" json:"startup_cap_ms"`
+	WelcomeCacheSeconds *int             `yaml:"welcome_cache_seconds" json:"welcome_cache_seconds"`
+	ModelRateCalls      *int             `yaml:"model_rate_calls" json:"model_rate_calls"`
+	ModelSlowMS         *int             `yaml:"model_slow_ms" json:"model_slow_ms"`
+	CtxWarnPct          *int             `yaml:"ctx_warn_pct" json:"ctx_warn_pct"`
+	CtxHotPct           *int             `yaml:"ctx_hot_pct" json:"ctx_hot_pct"`
+	CtxCells            *int             `yaml:"ctx_cells" json:"ctx_cells"`
+	CtxNarrowCols       *int             `yaml:"ctx_narrow_cols" json:"ctx_narrow_cols"`
+	Layout              *UILayoutOverlay `yaml:"layout" json:"layout"`
+}
+
+type UILayoutOverlay struct {
+	TinyHeight   *int `yaml:"tiny_height" json:"tiny_height"`
+	RecentHeight *int `yaml:"recent_height" json:"recent_height"`
+	TinyWidth    *int `yaml:"tiny_width" json:"tiny_width"`
+	NarrowWidth  *int `yaml:"narrow_width" json:"narrow_width"`
+	FrameWidth   *int `yaml:"frame_width" json:"frame_width"`
 }
 
 type LanguageOverlay struct {
@@ -151,6 +180,25 @@ type SafetyOverlay struct {
 type RouterOverlay struct {
 	ActionVerbs *[]string `yaml:"action_verbs" json:"action_verbs"`
 	Targets     *[]string `yaml:"targets" json:"targets"`
+}
+
+type ToolsOverlay struct {
+	Shell *ToolShellOverlay `yaml:"shell" json:"shell"`
+}
+
+type ToolShellOverlay struct {
+	DefaultTimeoutSec *int `yaml:"default_timeout_sec" json:"default_timeout_sec"`
+	MaxTimeoutSec     *int `yaml:"max_timeout_sec" json:"max_timeout_sec"`
+	WaitDelayMS       *int `yaml:"wait_delay_ms" json:"wait_delay_ms"`
+}
+
+type StoreOverlay struct {
+	QueryTimeoutMS   *int `yaml:"query_timeout_ms" json:"query_timeout_ms"`
+	MigrateTimeoutMS *int `yaml:"migrate_timeout_ms" json:"migrate_timeout_ms"`
+}
+
+type StatsOverlay struct {
+	InsertTimeoutMS *int `yaml:"insert_timeout_ms" json:"insert_timeout_ms"`
 }
 
 func Load(path string) (File, error) {
@@ -177,6 +225,20 @@ func LoadNotice(path string) (File, string, error) {
 			return File{}, notice, nil
 		}
 		return File{}, notice, fmt.Errorf("config: read %s: %w", path, err)
+	}
+	migrated, err := migrateUIKeys(path, b)
+	if err != nil {
+		return File{}, notice, err
+	}
+	if migrated {
+		b, err = os.ReadFile(path)
+		if err != nil {
+			return File{}, notice, fmt.Errorf("config: read %s: %w", path, err)
+		}
+		if notice != "" {
+			notice += "; "
+		}
+		notice += "migrated ui.theme / ui.palette → ui.appearance / ui.theme"
 	}
 	f, err := Parse(b, path)
 	if err != nil {
@@ -287,14 +349,30 @@ func normalizeLanguage(c *Config) {
 }
 
 func normalizeUI(c *Config) {
-	c.UI.Palette = strings.ToLower(strings.TrimSpace(c.UI.Palette))
-	if c.UI.Palette == "" {
-		c.UI.Palette = "amber"
+	theme := strings.ToLower(strings.TrimSpace(c.UI.Theme))
+	appear := strings.ToLower(strings.TrimSpace(c.UI.Appearance))
+	palette := strings.ToLower(strings.TrimSpace(c.UI.Palette))
+	if isOldAppearance(theme) {
+		if appear == "" {
+			appear = theme
+		}
+		theme = ""
 	}
-	c.UI.Theme = strings.ToLower(strings.TrimSpace(c.UI.Theme))
-	if c.UI.Theme == "" {
-		c.UI.Theme = "auto"
+	if name, ok := ResolveTheme(theme); ok {
+		theme = name
+	} else if name, ok := ResolveTheme(palette); ok {
+		theme = name
+	} else {
+		theme = "amber"
 	}
+	switch appear {
+	case "light", "dark":
+	default:
+		appear = "auto"
+	}
+	c.UI.Theme = theme
+	c.UI.Appearance = appear
+	c.UI.Palette = ""
 }
 
 func langAllowed(code string, langs []string) bool {
@@ -393,6 +471,29 @@ func Validate(c Config) error {
 		{"ui.paste_chip_lines", c.UI.PasteChipLines},
 		{"ui.paste_chip_chars", c.UI.PasteChipChars},
 		{"ui.output_keep_kb", c.UI.OutputKeepKB},
+		{"agent.identical_rejects", c.Agent.IdenticalRejects},
+		{"ui.probe_deadline_ms", c.UI.ProbeDeadlineMS},
+		{"ui.probe_timeout_ms", c.UI.ProbeTimeoutMS},
+		{"ui.git_query_ms", c.UI.GitQueryMS},
+		{"ui.memory_query_ms", c.UI.MemoryQueryMS},
+		{"ui.startup_cap_ms", c.UI.StartupCapMS},
+		{"ui.welcome_cache_seconds", c.UI.WelcomeCacheSeconds},
+		{"ui.model_rate_calls", c.UI.ModelRateCalls},
+		{"ui.model_slow_ms", c.UI.ModelSlowMS},
+		{"memory.isolated_timeout_ms", c.Memory.IsolatedTimeoutMS},
+		{"tools.shell.default_timeout_sec", c.Tools.Shell.DefaultTimeoutSec},
+		{"tools.shell.max_timeout_sec", c.Tools.Shell.MaxTimeoutSec},
+		{"tools.shell.wait_delay_ms", c.Tools.Shell.WaitDelayMS},
+		{"store.query_timeout_ms", c.Store.QueryTimeoutMS},
+		{"store.migrate_timeout_ms", c.Store.MigrateTimeoutMS},
+		{"stats.insert_timeout_ms", c.Stats.InsertTimeoutMS},
+		{"ui.ctx_cells", c.UI.CtxCells},
+		{"ui.ctx_narrow_cols", c.UI.CtxNarrowCols},
+		{"ui.layout.tiny_height", c.UI.Layout.TinyHeight},
+		{"ui.layout.recent_height", c.UI.Layout.RecentHeight},
+		{"ui.layout.tiny_width", c.UI.Layout.TinyWidth},
+		{"ui.layout.narrow_width", c.UI.Layout.NarrowWidth},
+		{"ui.layout.frame_width", c.UI.Layout.FrameWidth},
 	} {
 		if err := requirePositive(pair.name, pair.n); err != nil {
 			return err
@@ -404,21 +505,33 @@ func Validate(c Config) error {
 	if err := requireURL("rag.rerank_endpoint", c.RAG.RerankEndpoint); err != nil {
 		return err
 	}
+	if c.Tools.Shell.DefaultTimeoutSec > c.Tools.Shell.MaxTimeoutSec {
+		return fmt.Errorf("config: tools.shell.default_timeout_sec (%d) must be <= tools.shell.max_timeout_sec (%d)", c.Tools.Shell.DefaultTimeoutSec, c.Tools.Shell.MaxTimeoutSec)
+	}
+	if c.UI.CtxWarnPct <= 0 || c.UI.CtxWarnPct >= 100 {
+		return fmt.Errorf("config: ui.ctx_warn_pct must be in (0,100), got %d", c.UI.CtxWarnPct)
+	}
+	if c.UI.CtxHotPct <= c.UI.CtxWarnPct || c.UI.CtxHotPct > 100 {
+		return fmt.Errorf("config: ui.ctx_hot_pct must be greater than ui.ctx_warn_pct and at most 100, got %d", c.UI.CtxHotPct)
+	}
 	if c.RAG.Search.RerankThreshold <= 0 || c.RAG.Search.RerankThreshold > 1 {
 		return fmt.Errorf("config: rag.search.rerank_threshold must be in (0,1], got %g", c.RAG.Search.RerankThreshold)
 	}
 	if c.LLM.Model != "" && strings.TrimSpace(c.LLM.Model) == "" {
 		return fmt.Errorf("config: llm.model is empty")
 	}
-	switch strings.ToLower(strings.TrimSpace(c.UI.Palette)) {
-	case "", "amber", "violet", "ocean", "forest", "rose", "mono":
-	default:
-		return fmt.Errorf("config: ui.palette must be amber, violet, ocean, forest, rose or mono, got %q", c.UI.Palette)
+	if pal := strings.ToLower(strings.TrimSpace(c.UI.Palette)); pal != "" {
+		if _, ok := ResolveTheme(pal); !ok {
+			return fmt.Errorf("config: ui.palette must be a known theme or alias, got %q", c.UI.Palette)
+		}
 	}
-	switch strings.ToLower(strings.TrimSpace(c.UI.Theme)) {
+	if _, ok := ResolveTheme(c.UI.Theme); !ok && strings.TrimSpace(c.UI.Theme) != "" {
+		return fmt.Errorf("config: ui.theme must be amber, glacier, nebula, jade, rose or mono, got %q", c.UI.Theme)
+	}
+	switch strings.ToLower(strings.TrimSpace(c.UI.Appearance)) {
 	case "", "auto", "dark", "light":
 	default:
-		return fmt.Errorf("config: ui.theme must be auto, dark or light, got %q", c.UI.Theme)
+		return fmt.Errorf("config: ui.appearance must be auto, dark or light, got %q", c.UI.Appearance)
 	}
 	return nil
 }
