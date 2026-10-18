@@ -15,6 +15,7 @@ import (
 	"github.com/siraj/konsolai/internal/intent"
 	"github.com/siraj/konsolai/internal/llm"
 	"github.com/siraj/konsolai/internal/memory"
+	"github.com/siraj/konsolai/internal/tools"
 	"github.com/siraj/konsolai/internal/ui"
 )
 
@@ -234,6 +235,31 @@ func TestStripThinkPrefix(t *testing.T) {
 	}
 	if _, ok := StripThinkPrefix("hello"); ok {
 		t.Fatal("no prefix")
+	}
+}
+
+func TestRAGOffDropsRecall(t *testing.T) {
+	reg := tools.NewRegistry(nil, nil, nil, nil, nil)
+	if _, ok := registryForRAG(reg, false).Get("recall"); ok {
+		t.Fatal("recall offered while rag is off")
+	}
+	if _, ok := registryForRAG(reg, true).Get("recall"); !ok {
+		t.Fatal("recall missing while rag is on")
+	}
+	names := lookupToolNames(false)
+	for _, n := range names {
+		if n == "recall" {
+			t.Fatal("lookup lists recall while rag is off")
+		}
+	}
+	found := false
+	for _, n := range lookupToolNames(true) {
+		if n == "recall" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("lookup omits recall while rag is on")
 	}
 }
 
