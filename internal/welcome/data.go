@@ -145,6 +145,7 @@ func Gather(ctx context.Context, in Input) (Data, error) {
 	}
 	now := nowFn()
 
+	models, specs := configuredProbes(in)
 	g := &gate{d: Data{
 		Host:        banner.HostOf(in.Endpoint),
 		Version:     in.Version,
@@ -155,13 +156,8 @@ func Gather(ctx context.Context, in Input) (Data, error) {
 			Build:  banner.ParseBuild(in.Version),
 			Memory: "memory offline",
 		},
-		Models: []Model{
-			{Name: in.Model, Role: "main", Status: StatusTimeout, Stat: "timeout"},
-			{Name: in.FastModel, Role: "fast", Status: StatusTimeout, Stat: "timeout"},
-			{Role: "embed", Status: StatusTimeout, Stat: "timeout"},
-			{Role: "rerank", Status: StatusTimeout, Stat: "timeout"},
-		},
-		Total: 4,
+		Models: models,
+		Total:  len(models),
 	}}
 
 	var wg sync.WaitGroup
@@ -172,19 +168,6 @@ func Gather(ctx context.Context, in Input) (Data, error) {
 			defer func() { _ = recover() }()
 			fn()
 		}()
-	}
-	type spec struct {
-		i    int
-		role string
-		name string
-		ep   string
-		kind string
-	}
-	specs := []spec{
-		{0, "main", in.Model, in.Endpoint, "models"},
-		{1, "fast", in.FastModel, in.FastEndpoint, "models"},
-		{2, "embed", "", in.EmbedEndpoint, "embed"},
-		{3, "rerank", "", in.RerankEndpoint, "rerank"},
 	}
 	for _, sp := range specs {
 		sp := sp
@@ -246,6 +229,31 @@ func (g *gate) setModel(i int, m Model) {
 		return
 	}
 	g.d.Models[i] = m
+}
+
+type probeSpec struct {
+	i    int
+	role string
+	name string
+	ep   string
+	kind string
+}
+
+func configuredProbes(in Input) ([]Model, []probeSpec) {
+	var models []Model
+	var specs []probeSpec
+	add := func(role, name, ep, kind string) {
+		if strings.TrimSpace(ep) == "" {
+			return
+		}
+		specs = append(specs, probeSpec{i: len(models), role: role, name: name, ep: ep, kind: kind})
+		models = append(models, Model{Name: name, Role: role, Status: StatusTimeout, Stat: "timeout"})
+	}
+	add("main", in.Model, in.Endpoint, "models")
+	add("fast", in.FastModel, in.FastEndpoint, "models")
+	add("embed", "", in.EmbedEndpoint, "embed")
+	add("rerank", "", in.RerankEndpoint, "rerank")
+	return models, specs
 }
 
 func probeModel(ctx context.Context, in Input, role, name, endpoint, kind string) Model {
