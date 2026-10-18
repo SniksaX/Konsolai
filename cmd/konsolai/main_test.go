@@ -271,7 +271,7 @@ func TestStreamAnswerRetryThenEmpty(t *testing.T) {
 		_, _ = io.WriteString(w, "data: [DONE]\n\n")
 	}))
 	t.Cleanup(srv.Close)
-	c := llm.New(srv.URL+"/v1", "qwen")
+	c := llm.New(srv.URL+"/v1", "main-model")
 	out, _, err := streamAnswer(context.Background(), c, []llm.Message{{Role: llm.RoleUser, Content: "q"}}, false, true)
 	if err != nil {
 		t.Fatal(err)
@@ -345,8 +345,8 @@ func TestTopicAwareResume(t *testing.T) {
 }
 
 func TestModelErrorLine(t *testing.T) {
-	ep := "http://fatboy:11436/v1"
-	if got := modelErrorLine(ep, llm.ErrIdleTimeout, false); !strings.Contains(got, "stopped responding (fatboy:11436)") {
+	ep := "http://gpu-box:8000/v1"
+	if got := modelErrorLine(ep, llm.ErrIdleTimeout, false); !strings.Contains(got, "stopped responding (gpu-box:8000)") {
 		t.Fatalf("idle %q", got)
 	}
 	if got := modelErrorLine(ep, llm.ErrTruncated, false); !strings.Contains(got, "cut off") {
@@ -357,7 +357,7 @@ func TestModelErrorLine(t *testing.T) {
 		t.Fatalf("4xx %q", got)
 	}
 	dial := errors.New("llm: chat: dial tcp: connection refused")
-	if got := modelErrorLine(ep, dial, false); got != "konsolai: cannot reach the model server at fatboy:11436." {
+	if got := modelErrorLine(ep, dial, false); got != "konsolai: cannot reach the model server at gpu-box:8000." {
 		t.Fatalf("dial %q", got)
 	}
 	if got := modelErrorLine(ep, llm.ErrIdleTimeout, true); !strings.Contains(got, llm.ErrIdleTimeout.Error()) {
