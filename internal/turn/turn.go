@@ -121,8 +121,8 @@ func (r *Runner) errw() io.Writer {
 
 func (r *Runner) client() *llm.Client {
 	if r.Client == nil {
-		c := llm.New(r.Profile.Endpoint, r.Profile.Model)
-		c.SetIdleTimeout(time.Duration(r.Profile.LLMIdleTimeoutSeconds) * time.Second)
+		c := llm.New(r.Profile.LLM.Endpoint, r.Profile.LLM.Model)
+		c.SetIdleTimeout(time.Duration(r.Profile.LLM.IdleTimeoutSeconds) * time.Second)
 		r.Client = c
 	}
 	r.attachStats(r.Client)
@@ -137,12 +137,12 @@ func (r *Runner) fastClient() *llm.Client {
 	if !r.Profile.FastOn() {
 		return nil
 	}
-	ep := r.Profile.FastEndpoint
+	ep := r.Profile.Fast.Endpoint
 	if ep == "" {
 		return nil
 	}
-	c := llm.NewFast(ep, r.Profile.FastModel)
-	c.SetIdleTimeout(time.Duration(r.Profile.LLMIdleTimeoutSeconds) * time.Second)
+	c := llm.NewFast(ep, r.Profile.Fast.Model)
+	c.SetIdleTimeout(time.Duration(r.Profile.LLM.IdleTimeoutSeconds) * time.Second)
 	r.FastClient = c
 	r.attachStats(c)
 	return c
