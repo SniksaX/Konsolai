@@ -24,7 +24,7 @@ func TestClassifySchemaAndRecent(t *testing.T) {
 		})
 	}))
 	t.Cleanup(srv.Close)
-	c := llm.New(srv.URL+"/v1", "qwen")
+	c := llm.New(srv.URL+"/v1", "main-model")
 	cands := []Candidate{
 		{Title: "add a Subtract function", LastUser: "do it", Age: time.Minute},
 	}
@@ -223,7 +223,7 @@ func TestClassifyTellsNoPrevious(t *testing.T) {
 		})
 	}))
 	t.Cleanup(srv.Close)
-	c := llm.New(srv.URL+"/v1", "qwen")
+	c := llm.New(srv.URL+"/v1", "main-model")
 	if _, err := Classify(context.Background(), c, "hi", nil, false); err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestClassifyFallbackOnError(t *testing.T) {
 		http.Error(w, "nope", 500)
 	}))
 	t.Cleanup(srv.Close)
-	c := llm.New(srv.URL+"/v1", "qwen")
+	c := llm.New(srv.URL+"/v1", "main-model")
 	d, err := Classify(context.Background(), c, "which go version?", nil, true)
 	if err == nil {
 		t.Fatal("want error")
@@ -267,7 +267,7 @@ func TestAckAfterActRoutesAnswerNone(t *testing.T) {
 		})
 	}))
 	t.Cleanup(srv.Close)
-	c := llm.New(srv.URL+"/v1", "qwen")
+	c := llm.New(srv.URL+"/v1", "main-model")
 	cands := []Candidate{{Title: "create folders", LastUser: "mkdir a b", Age: time.Minute}}
 	d, err := Classify(context.Background(), c, "okey good", cands, false)
 	if err != nil {
