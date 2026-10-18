@@ -77,6 +77,7 @@ type Env struct {
 	OnCmd        func() int
 	OnCmdClear   func()
 	OnClear      func()
+	FailedShell  func() (cmd string, exit int, output string, ok bool)
 	Embed        *embed.Client
 	ProjectID    *int64
 	ConfigPath   string
@@ -296,6 +297,15 @@ func Default() *Registry {
 			Args:    []Arg{{Name: "scope", Help: "user or project", Required: true}, {Name: "id", Help: "fact id", Required: true}},
 			Example: "/forget user 3", Run: runForget},
 		Command{Name: "prune", Usage: "prune", Summary: "Prune old sessions now", Example: "/prune", Run: runPrune},
+		Command{Name: "stats", Usage: "stats [today|week|all]", Summary: "Show calls, tokens, and latency",
+			Args: []Arg{{Name: "window", Help: "today, week, or all"}}, Example: "/stats week", Run: runStats},
+		Command{Name: "doctor", Usage: "doctor", Summary: "Check config, endpoints, database, and local tools", Example: "/doctor", Run: runDoctor},
+		Command{Name: "save", Usage: "save [file] [--force]", Summary: "Write the last answer to a Markdown file",
+			Args: []Arg{{Name: "file", Help: "output path"}}, Example: "/save", Run: runSave},
+		Command{Name: "pdf", Usage: "pdf [file] [--force]", Summary: "Render the last answer to a PDF",
+			Args: []Arg{{Name: "file", Help: "output path"}}, Example: "/pdf", Run: runPDF},
+		Command{Name: "explain", Usage: "explain", Summary: "Explain the last failed shell command (set PROMPT_COMMAND=\"history -a\")",
+			Example: "/explain", Run: runExplain},
 	)
 }
 
