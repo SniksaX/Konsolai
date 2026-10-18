@@ -17,6 +17,7 @@ const (
 type Entry struct {
 	Cmd    string
 	Output string
+	Exit   int
 }
 
 type History struct {
@@ -24,6 +25,10 @@ type History struct {
 }
 
 func (h *History) Add(cmd, output string) {
+	h.AddExit(cmd, output, 0)
+}
+
+func (h *History) AddExit(cmd, output string, exit int) {
 	if h == nil {
 		return
 	}
@@ -34,6 +39,7 @@ func (h *History) Add(cmd, output string) {
 	h.items = append(h.items, Entry{
 		Cmd:    redact.String(cmd),
 		Output: redact.String(clipBytes(output, contextCap)),
+		Exit:   exit,
 	})
 	if len(h.items) > maxKept {
 		h.items = append([]Entry(nil), h.items[len(h.items)-maxKept:]...)
@@ -52,6 +58,18 @@ func (h *History) Len() int {
 		return 0
 	}
 	return len(h.items)
+}
+
+func (h *History) LastFailure() (Entry, bool) {
+	if h == nil {
+		return Entry{}, false
+	}
+	for i := len(h.items) - 1; i >= 0; i-- {
+		if h.items[i].Exit != 0 {
+			return h.items[i], true
+		}
+	}
+	return Entry{}, false
 }
 
 func (h *History) Items() []Entry {
