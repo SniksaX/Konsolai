@@ -113,7 +113,7 @@ func runPrune(ctx context.Context, env *Env, _ []string) int {
 		fmt.Fprintln(env.errw(), "memory is not configured (see ~/.config/konsolai/config.yaml)")
 		return 1
 	}
-	days := env.Profile.RetentionDays
+	days := env.Profile.Memory.RetentionDays
 	if days < 1 {
 		days = 30
 	}
