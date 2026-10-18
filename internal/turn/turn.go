@@ -123,6 +123,7 @@ func (r *Runner) client() *llm.Client {
 	if r.Client == nil {
 		c := llm.New(r.Profile.LLM.Endpoint, r.Profile.LLM.Model)
 		c.SetIdleTimeout(time.Duration(r.Profile.LLM.IdleTimeoutSeconds) * time.Second)
+		c.SetThinkKwargs(r.Profile.LLM.ThinkingKwargs)
 		r.Client = c
 	}
 	r.attachStats(r.Client)
@@ -143,6 +144,7 @@ func (r *Runner) fastClient() *llm.Client {
 	}
 	c := llm.NewFast(ep, r.Profile.Fast.Model)
 	c.SetIdleTimeout(time.Duration(r.Profile.LLM.IdleTimeoutSeconds) * time.Second)
+	c.SetThinkKwargs(r.Profile.Fast.ThinkingKwargs)
 	r.FastClient = c
 	r.attachStats(c)
 	return c
