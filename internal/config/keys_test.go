@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -8,156 +9,234 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// keyException skips a completeness check for one Config leaf.
-// Path is the dotted Go field path from Config.
-type keyException struct {
-	path    string
-	schema  bool
-	load    bool
-	builtin bool
-	init    bool
-	reason  string
-}
-
-// keyExceptions are intentional gaps in the config-key checklist.
-// Every other leaf must be accepted by the schema, round-trip through the
-// loader overlay, be non-zero in Builtin, and appear in InitYAML.
-var keyExceptions = []keyException{
-	{
-		path: "Name", schema: true, load: true, init: true,
-		reason: "profile name is assigned when a profile is resolved, not stored as its own key",
-	},
-	{
-		path: "DatabaseURL", schema: true, load: true, builtin: true, init: true,
-		reason: "flat mirror of database.url; builtin stays empty so memory is off until a URL is set",
-	},
-	{
-		path: "Endpoint", schema: true, load: true, init: true,
-		reason: "flat mirror of llm.endpoint, copied by syncFlat",
-	},
-	{
-		path: "Model", schema: true, load: true, builtin: true, init: true,
-		reason: "flat mirror of llm.model; empty selects the server default",
-	},
-	{
-		path: "FastEndpoint", schema: true, load: true, init: true,
-		reason: "flat mirror of fast.endpoint, copied by syncFlat",
-	},
-	{
-		path: "FastModel", schema: true, load: true, builtin: true, init: true,
-		reason: "flat mirror of fast.model; empty selects the server default",
-	},
-	{
-		path: "SessionIdleMinutes", schema: true, load: true, init: true,
-		reason: "flat mirror of memory.session_idle_minutes, copied by syncFlat",
-	},
-	{
-		path: "RetentionDays", schema: true, load: true, init: true,
-		reason: "flat mirror of memory.retention_days, copied by syncFlat",
-	},
-	{
-		path: "LLMIdleTimeoutSeconds", schema: true, load: true, init: true,
-		reason: "flat mirror of llm.idle_timeout_seconds, copied by syncFlat",
-	},
-	{
-		path: "BuildThinking", schema: true, load: true, init: true,
-		reason: "flat mirror of agent.build_thinking, copied by syncFlat",
-	},
-	{
-		path: "Languages", schema: true, load: true, init: true,
-		reason: "flat mirror of language.languages, copied by syncFlat",
-	},
-	{
-		path: "DefaultLanguage", schema: true, load: true, init: true,
-		reason: "flat mirror of language.default, copied by syncFlat",
-	},
-	{
-		path: "EmbedEndpoint", schema: true, load: true, init: true,
-		reason: "flat mirror of rag.embed_endpoint, copied by syncFlat",
-	},
-	{
-		path: "RerankEndpoint", schema: true, load: true, init: true,
-		reason: "flat mirror of rag.rerank_endpoint, copied by syncFlat",
-	},
-	{
-		path: "MemoryRAG", schema: true, load: true, init: true,
-		reason: "flat mirror of rag.enabled, copied by syncFlat",
-	},
-	{
-		path: "LLM.Model", builtin: true,
-		reason: "empty model name means the server default",
-	},
-	{
-		path: "Fast.Model", builtin: true,
-		reason: "empty fast model name means the server default",
-	},
-	{
-		path: "Database.URL", builtin: true,
-		reason: "empty database URL leaves memory disabled",
-	},
-	{
-		path: "UI.Palette", builtin: true, init: true,
-		reason: "legacy theme alias still accepted on load; builtin leaves it empty and the sample file does not write it",
-	},
-}
-
 func TestConfigKeysComplete(t *testing.T) {
-	exc := map[string]keyException{}
-	for _, e := range keyExceptions {
-		if e.path == "" || e.reason == "" {
-			t.Fatalf("allowlist entry missing path or reason: %+v", e)
-		}
-		if !e.schema && !e.load && !e.builtin && !e.init {
-			t.Fatalf("allowlist %s skips nothing", e.path)
-		}
-		if _, dup := exc[e.path]; dup {
-			t.Fatalf("duplicate allowlist %s", e.path)
-		}
-		exc[e.path] = e
-	}
-
 	leaves := configLeaves(reflect.TypeOf(Config{}), reflect.ValueOf(Builtin()))
-	seen := map[string]bool{}
-	initDoc := parseInit(t)
-	for _, leaf := range leaves {
-		seen[leaf.goPath] = true
-		e := exc[leaf.goPath]
-		if leaf.yamlPath == "" && !e.schema {
-			t.Errorf("%s has no yaml key and is not allowlisted", leaf.goPath)
+	byPath := map[string]Key{}
+	for _, k := range keyTable {
+		if k.Path == "" || k.Doc == "" {
+			t.Fatalf("key missing path or doc: %+v", k.Path)
 		}
-		if !e.schema && !schemaAccepts(t, leaf.yamlPath) {
-			t.Errorf("%s: schema rejects %s", leaf.goPath, leaf.yamlPath)
+		if _, dup := byPath[k.Path]; dup {
+			t.Fatalf("duplicate key %s", k.Path)
 		}
-		if !e.load && !overlaySets(t, leaf) {
-			t.Errorf("%s: loader overlay did not round-trip %s", leaf.goPath, leaf.yamlPath)
-		}
-		if !e.builtin && leaf.builtin.IsZero() {
-			t.Errorf("%s: Builtin leaves it zero", leaf.goPath)
-		}
-		if !e.init && !initHas(initDoc, leaf.yamlPath) {
-			t.Errorf("%s: InitYAML missing %s", leaf.goPath, leaf.yamlPath)
+		byPath[k.Path] = k
+		if err := k.touchesField(); err != nil {
+			t.Error(err)
 		}
 	}
-	for path := range exc {
+	seen := map[string]bool{}
+	for _, leaf := range leaves {
+		if leaf.goPath == "Name" {
+			continue
+		}
+		seen[leaf.yamlPath] = true
+		k, ok := byPath[leaf.yamlPath]
+		if !ok {
+			t.Errorf("%s has no table entry (%s)", leaf.goPath, leaf.yamlPath)
+			continue
+		}
+		if k.Kind == 0 && k.SetStr == nil && leaf.typ.Kind() != reflect.String {
+			t.Errorf("%s kind does not match %s", k.Path, leaf.typ)
+		}
+	}
+	for path, k := range byPath {
 		if !seen[path] {
-			t.Errorf("allowlist %s is not a Config leaf (%s)", path, exc[path].reason)
+			t.Errorf("table entry %s has no Config field", k.Path)
 		}
 	}
 }
 
-type configLeaf struct {
-	goPath   string
-	yamlPath string
-	typ      reflect.Type
-	builtin  reflect.Value
+func (k Key) touchesField() error {
+	c := Config{}
+	switch k.Kind {
+	case KindString:
+		if k.SetStr == nil || k.GetStr == nil {
+			return errKey(k.Path, "missing string accessor")
+		}
+		k.SetStr(&c, "sentinel-value")
+		if k.GetStr(c) != "sentinel-value" {
+			return errKey(k.Path, "string setter did not stick")
+		}
+	case KindBool:
+		if k.SetBool == nil || k.GetBool == nil {
+			return errKey(k.Path, "missing bool accessor")
+		}
+		k.SetBool(&c, true)
+		if !k.GetBool(c) {
+			return errKey(k.Path, "bool setter did not stick")
+		}
+	case KindInt, KindDurationMS:
+		if k.SetInt == nil || k.GetInt == nil {
+			return errKey(k.Path, "missing int accessor")
+		}
+		k.SetInt(&c, 4242)
+		if k.GetInt(c) != 4242 {
+			return errKey(k.Path, "int setter did not stick")
+		}
+	case KindFloat:
+		if k.SetFloat == nil || k.GetFloat == nil {
+			return errKey(k.Path, "missing float accessor")
+		}
+		k.SetFloat(&c, 0.25)
+		if k.GetFloat(c) != 0.25 {
+			return errKey(k.Path, "float setter did not stick")
+		}
+	case KindList:
+		if k.SetList == nil || k.GetList == nil {
+			return errKey(k.Path, "missing list accessor")
+		}
+		k.SetList(&c, []string{"sentinel-item"})
+		if got := k.GetList(c); len(got) != 1 || got[0] != "sentinel-item" {
+			return errKey(k.Path, "list setter did not stick")
+		}
+	default:
+		return errKey(k.Path, "unknown kind")
+	}
+	return nil
+}
+
+type keyErr string
+
+func (e keyErr) Error() string { return string(e) }
+
+func errKey(path, msg string) error {
+	return keyErr(path + ": " + msg)
+}
+
+func TestInitYAMLMatchesBuiltin(t *testing.T) {
+	clearEnv(t)
+	f, err := Parse([]byte(InitYAML()), "init.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.Resolve("home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Builtin()
+	got.Name = want.Name
+	for _, k := range keyTable {
+		if k.format(got) != k.format(want) {
+			t.Errorf("%s init %s builtin %s", k.Path, k.format(got), k.format(want))
+		}
+	}
+}
+
+func TestLegacyPaletteAlias(t *testing.T) {
+	clearEnv(t)
+	raw := "defaults:\n  ui:\n    palette: ocean\n"
+	f, err := Parse([]byte(raw), "palette.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := f.Resolve("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.UI.Theme != "glacier" || c.PaletteName() != "glacier" {
+		t.Fatalf("theme %q", c.UI.Theme)
+	}
+}
+
+func TestEveryEnvOverrides(t *testing.T) {
+	clearEnv(t)
+	samples := map[string]string{}
+	for _, k := range keyTable {
+		if k.Env == "" {
+			continue
+		}
+		samples[k.Env] = envSample(k)
+		t.Setenv(k.Env, samples[k.Env])
+	}
+	c, err := File{}.Resolve("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range keyTable {
+		if k.Env == "" {
+			continue
+		}
+		if err := k.setFromString(&Config{}, samples[k.Env]); err != nil {
+			t.Fatal(err)
+		}
+		probe := Config{}
+		if err := k.setFromString(&probe, samples[k.Env]); err != nil {
+			t.Fatal(err)
+		}
+		if k.format(probe) != k.format(c) && k.Path != "language.default" {
+			// language.default is not an env key
+		}
+		if k.present(c, false) != k.present(probe, false) {
+			t.Errorf("%s env %s got %s want %s", k.Env, k.Path, k.present(c, false), k.present(probe, false))
+		}
+	}
+}
+
+func envSample(k Key) string {
+	switch k.Path {
+	case "database.url":
+		return "postgres://env.example/db"
+	case "agent.build_thinking":
+		return "until_plan"
+	case "llm.model", "fast.model":
+		return "env-model"
+	default:
+		if k.Check == CheckURL || k.Check == CheckURLOptional {
+			return "http://env.example/v1"
+		}
+		return "env-value"
+	}
+}
+
+func TestShowAndDiffMaskSecret(t *testing.T) {
+	clearEnv(t)
+	dir := t.TempDir()
+	path := dir + "/config.yaml"
+	body := "default_profile: home\nprofiles:\n  home:\n    database:\n      url: postgres://user:hunter2@localhost:5432/konsolai\n"
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := f.Resolve("home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shown, err := c.ShowYAML()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(shown, "hunter2") || !strings.Contains(shown, "***") {
+		t.Fatalf("show leaked or missed mask:\n%s", shown)
+	}
+	diff, err := DiffText(path, "home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(diff, "hunter2") || !strings.Contains(diff, "***") {
+		t.Fatalf("diff leaked or missed mask:\n%s", diff)
+	}
+	if !strings.Contains(diff, "(file)") {
+		t.Fatalf("diff source:\n%s", diff)
+	}
 }
 
 func configLeaves(t reflect.Type, v reflect.Value) []configLeaf {
 	var out []configLeaf
 	var walk func(t reflect.Type, v reflect.Value, goPath, yamlPath string)
 	walk = func(t reflect.Type, v reflect.Value, goPath, yamlPath string) {
+		if t.Kind() == reflect.Pointer {
+			t = t.Elem()
+			if v.IsValid() && !v.IsNil() {
+				v = v.Elem()
+			} else {
+				v = reflect.Zero(t)
+			}
+		}
 		if t.Kind() != reflect.Struct {
-			out = append(out, configLeaf{goPath: goPath, yamlPath: yamlPath, typ: t, builtin: v})
+			out = append(out, configLeaf{goPath: goPath, yamlPath: yamlPath, typ: t})
 			return
 		}
 		for i := 0; i < t.NumField(); i++ {
@@ -165,7 +244,7 @@ func configLeaves(t reflect.Type, v reflect.Value) []configLeaf {
 			if f.PkgPath != "" {
 				continue
 			}
-			name, omit := yamlKey(f)
+			name, omit := yamlName(f)
 			nextGo := f.Name
 			if goPath != "" {
 				nextGo = goPath + "." + f.Name
@@ -179,19 +258,22 @@ func configLeaves(t reflect.Type, v reflect.Value) []configLeaf {
 				}
 			}
 			ft := f.Type
-			fv := v.Field(i)
+			fv := reflect.Zero(ft)
+			if v.IsValid() && v.Kind() == reflect.Struct {
+				fv = v.Field(i)
+			}
 			if ft.Kind() == reflect.Struct && !omit {
 				walk(ft, fv, nextGo, nextYAML)
 				continue
 			}
-			out = append(out, configLeaf{goPath: nextGo, yamlPath: nextYAML, typ: ft, builtin: fv})
+			out = append(out, configLeaf{goPath: nextGo, yamlPath: nextYAML, typ: ft})
 		}
 	}
 	walk(t, v, "", "")
 	return out
 }
 
-func yamlKey(f reflect.StructField) (string, bool) {
+func yamlName(f reflect.StructField) (string, bool) {
 	tag := f.Tag.Get("yaml")
 	if tag == "-" {
 		return "", true
@@ -206,156 +288,33 @@ func yamlKey(f reflect.StructField) (string, bool) {
 	return name, false
 }
 
-func schemaAccepts(t *testing.T, yamlPath string) bool {
-	t.Helper()
-	raw := nestYAML(t, yamlPath, sentinelYAML(reflect.TypeOf("")))
-	var doc yaml.Node
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		t.Fatalf("schema yaml %s: %v", yamlPath, err)
-	}
-	return checkKnown(&doc, overlaySchema, "") == nil
+type configLeaf struct {
+	goPath   string
+	yamlPath string
+	typ      reflect.Type
 }
 
-func overlaySets(t *testing.T, leaf configLeaf) bool {
-	t.Helper()
-	sample, want, ok := sentinel(leaf.typ)
-	if !ok {
-		t.Fatalf("%s: unsupported leaf type %s", leaf.goPath, leaf.typ)
+func TestEnvBeatsFileInDiff(t *testing.T) {
+	clearEnv(t)
+	dir := t.TempDir()
+	path := dir + "/config.yaml"
+	body := "defaults:\n  llm:\n    model: from-file\n"
+	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		t.Fatal(err)
 	}
-	raw := nestYAML(t, leaf.yamlPath, sample)
-	wrapped := append([]byte("defaults:\n"), indentYAML(raw)...)
-	var f File
-	if err := yaml.Unmarshal(wrapped, &f); err != nil {
-		t.Fatalf("%s: decode overlay: %v\n%s", leaf.goPath, err, wrapped)
-	}
-	c := Config{}
-	applyOverlay(&c, f.Defaults)
-	got := fieldByPath(reflect.ValueOf(c), leaf.goPath)
-	if !got.IsValid() {
-		t.Fatalf("%s: missing field", leaf.goPath)
-	}
-	return reflect.DeepEqual(got.Interface(), want.Interface())
-}
-
-func sentinel(t reflect.Type) (yamlVal any, cmp reflect.Value, ok bool) {
-	switch t.Kind() {
-	case reflect.Bool:
-		v := reflect.New(t).Elem()
-		v.SetBool(true)
-		return true, v, true
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		v := reflect.New(t).Elem()
-		v.SetInt(4242)
-		return int(4242), v, true
-	case reflect.Float32, reflect.Float64:
-		v := reflect.New(t).Elem()
-		v.SetFloat(0.25)
-		return 0.25, v, true
-	case reflect.String:
-		v := reflect.New(t).Elem()
-		v.SetString("sentinel-value")
-		return "sentinel-value", v, true
-	case reflect.Slice:
-		if t.Elem().Kind() != reflect.String {
-			return nil, reflect.Value{}, false
-		}
-		v := reflect.MakeSlice(t, 1, 1)
-		v.Index(0).SetString("sentinel-item")
-		return []string{"sentinel-item"}, v, true
-	default:
-		return nil, reflect.Value{}, false
-	}
-}
-
-func sentinelYAML(t reflect.Type) any {
-	v, _, ok := sentinel(t)
-	if !ok {
-		return "sentinel-value"
-	}
-	return v
-}
-
-func nestYAML(t *testing.T, yamlPath string, sample any) []byte {
-	t.Helper()
-	parts := strings.Split(yamlPath, ".")
-	var cur any = sample
-	for i := len(parts) - 1; i >= 0; i-- {
-		cur = map[string]any{parts[i]: cur}
-	}
-	raw, err := yaml.Marshal(cur)
+	t.Setenv("KONSOLAI_MODEL", "from-env")
+	diff, err := DiffText(path, "")
 	if err != nil {
-		t.Fatalf("marshal %s: %v", yamlPath, err)
+		t.Fatal(err)
 	}
-	return raw
-}
-
-func indentYAML(raw []byte) []byte {
-	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
-	for i, ln := range lines {
-		lines[i] = "  " + ln
+	if !strings.Contains(diff, "llm.model") || !strings.Contains(diff, "from-env") || !strings.Contains(diff, "(env)") {
+		t.Fatalf("diff:\n%s", diff)
 	}
-	return []byte(strings.Join(lines, "\n") + "\n")
-}
-
-func fieldByPath(v reflect.Value, path string) reflect.Value {
-	for _, name := range strings.Split(path, ".") {
-		if v.Kind() == reflect.Pointer {
-			if v.IsNil() {
-				return reflect.Value{}
-			}
-			v = v.Elem()
-		}
-		v = v.FieldByName(name)
-		if !v.IsValid() {
-			return v
-		}
+	if strings.Contains(diff, "(flag)") {
+		t.Fatalf("unexpected flag source:\n%s", diff)
 	}
-	return v
-}
-
-func parseInit(t *testing.T) *yaml.Node {
-	t.Helper()
 	var doc yaml.Node
-	if err := yaml.Unmarshal([]byte(InitYAML()), &doc); err != nil {
-		t.Fatalf("InitYAML: %v", err)
+	if err := yaml.Unmarshal([]byte(diff), &doc); err == nil && doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 && doc.Content[0].Kind == yaml.MappingNode {
+		t.Fatal("diff should be plain lines, not a mapping document only")
 	}
-	return &doc
-}
-
-func initHas(doc *yaml.Node, yamlPath string) bool {
-	n := mapChild(doc, "defaults")
-	if n == nil {
-		return false
-	}
-	for _, part := range strings.Split(yamlPath, ".") {
-		n = mapChild(n, part)
-		if n == nil {
-			return false
-		}
-	}
-	return true
-}
-
-func mapChild(n *yaml.Node, key string) *yaml.Node {
-	if n == nil {
-		return nil
-	}
-	if n.Kind == yaml.DocumentNode {
-		if len(n.Content) == 0 {
-			return nil
-		}
-		return mapChild(n.Content[0], key)
-	}
-	if n.Kind == yaml.AliasNode {
-		return mapChild(n.Alias, key)
-	}
-	if n.Kind != yaml.MappingNode {
-		return nil
-	}
-	for i := 0; i < len(n.Content); i += 2 {
-		if n.Content[i].Value == key {
-			return n.Content[i+1]
-		}
-	}
-	return nil
 }

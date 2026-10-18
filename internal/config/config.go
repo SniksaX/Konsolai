@@ -52,21 +52,6 @@ type Config struct {
 	Tools    Tools    `yaml:"tools"`
 	Store    Store    `yaml:"store"`
 	Stats    Stats    `yaml:"stats"`
-
-	DatabaseURL           string   `yaml:"-" json:"-"`
-	Endpoint              string   `yaml:"-" json:"-"`
-	Model                 string   `yaml:"-" json:"-"`
-	FastEndpoint          string   `yaml:"-" json:"-"`
-	FastModel             string   `yaml:"-" json:"-"`
-	SessionIdleMinutes    int      `yaml:"-" json:"-"`
-	RetentionDays         int      `yaml:"-" json:"-"`
-	LLMIdleTimeoutSeconds int      `yaml:"-" json:"-"`
-	BuildThinking         string   `yaml:"-" json:"-"`
-	Languages             []string `yaml:"-" json:"-"`
-	DefaultLanguage       string   `yaml:"-" json:"-"`
-	EmbedEndpoint         string   `yaml:"-" json:"-"`
-	RerankEndpoint        string   `yaml:"-" json:"-"`
-	MemoryRAG             *bool    `yaml:"-" json:"-"`
 }
 
 type LLM struct {
@@ -168,7 +153,6 @@ type UI struct {
 	PasteChipLines      int      `yaml:"paste_chip_lines"`
 	PasteChipChars      int      `yaml:"paste_chip_chars"`
 	OutputKeepKB        int      `yaml:"output_keep_kb"`
-	Palette             string   `yaml:"palette,omitempty"`
 	Banner              bool     `yaml:"banner"`
 	Welcome             string   `yaml:"welcome"`
 	Theme               string   `yaml:"theme"`
@@ -236,75 +220,8 @@ type Stats struct {
 }
 
 func Builtin() Config {
-	on := true
-	c := Config{
-		Name: builtinProfile,
-		LLM: LLM{
-			Endpoint:           defaultEndpoint,
-			IdleTimeoutSeconds: defaultLLMIdle,
-			MaxTokens:          MaxTokens{Answer: 4096, Lookup: 4096, Act: 4096, Build: 12288},
-		},
-		Fast: Fast{
-			Enabled:           true,
-			Endpoint:          defaultFastEndpoint,
-			ContextGuardRatio: 0.60,
-		},
-		Memory: Memory{
-			SessionIdleMinutes: defaultIdleMinutes,
-			RetentionDays:      defaultRetention,
-			CompactThreshold:   0.7,
-			IsolatedTimeoutMS:  2000,
-		},
-		Context: Context{ElideTrigger: 0.60, ElideTarget: 0.40},
-		Agent: Agent{
-			MaxSteps: Steps{Lookup: 10, Act: 15, Build: 60},
-			ExploreBudget: ExploreBudget{
-				Lookup: 6, LookupAnalysis: 10, Act: 6,
-				Build: 8, BuildDocs: 16, BuildAnalysis: 12,
-			},
-			BuildThinking:    "plan_step",
-			IdenticalRejects: 2,
-		},
-		RAG: RAG{
-			Enabled:        true,
-			EmbedEndpoint:  defaultEmbedEndpoint,
-			RerankEndpoint: defaultRerankEndpoint,
-			EmbedBatch:     32,
-			Chunk: RAGChunk{
-				TurnTokens: 1200, WebTokens: 600, WebOverlapTokens: 80,
-				CodeWindowLines: 60, CodeOverlapLines: 10,
-				GoMaxDeclLines: 200, GoSplitWindowLines: 120, GoSplitOverlapLines: 20,
-			},
-			Search: RAGSearch{
-				VectorTop: 30, TextTop: 30, RRFK: 60,
-				RerankTop: 20, K: 6, RerankThreshold: 0.1,
-			},
-			Index: RAGIndex{MaxFileKB: 512, ConfirmOverMinutes: 5},
-		},
-		UI: UI{
-			DisplayLines: 60, PasteChipLines: 11, PasteChipChars: 1000, OutputKeepKB: 256,
-			Banner: true, Welcome: "split", Theme: "amber", Appearance: "auto", CursorColor: true,
-			CodeHighlight: true, ClearOnStart: true, StripEmoji: true,
-			ProbeDeadlineMS: 400, ProbeTimeoutMS: 300, GitQueryMS: 200, MemoryQueryMS: 200,
-			StartupCapMS: 500, WelcomeCacheSeconds: 60, ModelRateCalls: 20, ModelSlowMS: 1000,
-			CtxWarnPct: 60, CtxHotPct: 85, CtxCells: 8, CtxNarrowCols: 90,
-			Layout: UILayout{
-				TinyHeight: 22, RecentHeight: 30, TinyWidth: 64,
-				NarrowWidth: 110, FrameWidth: 120,
-			},
-		},
-		Language: Language{Languages: []string{"en", "fr"}, Default: "en"},
-		Safety:   Safety{ExtraReadDeny: []string{}, ExtraCommandDeny: []string{}},
-		Router: Router{
-			ActionVerbs: defaultActionVerbs(),
-			Targets:     defaultTargets(),
-		},
-		Tools:     Tools{Shell: ToolShell{DefaultTimeoutSec: 120, MaxTimeoutSec: 600, WaitDelayMS: 2000}},
-		Store:     Store{QueryTimeoutMS: 2000, MigrateTimeoutMS: 15000},
-		Stats:     Stats{InsertTimeoutMS: 2000},
-		MemoryRAG: &on,
-	}
-	c.syncFlat()
+	c := Config{Name: builtinProfile}
+	ApplyKeyDefaults(&c)
 	return c
 }
 
@@ -326,41 +243,14 @@ func defaultTargets() []string {
 	}
 }
 
-func (c *Config) syncFlat() {
-	if c == nil {
-		return
-	}
-	c.DatabaseURL = c.Database.URL
-	c.Endpoint = c.LLM.Endpoint
-	c.Model = c.LLM.Model
-	c.FastEndpoint = c.Fast.Endpoint
-	c.FastModel = c.Fast.Model
-	c.SessionIdleMinutes = c.Memory.SessionIdleMinutes
-	c.RetentionDays = c.Memory.RetentionDays
-	c.LLMIdleTimeoutSeconds = c.LLM.IdleTimeoutSeconds
-	c.BuildThinking = c.Agent.BuildThinking
-	c.Languages = append([]string(nil), c.Language.Languages...)
-	c.DefaultLanguage = c.Language.Default
-	c.EmbedEndpoint = c.RAG.EmbedEndpoint
-	c.RerankEndpoint = c.RAG.RerankEndpoint
-	on := c.RAG.Enabled
-	c.MemoryRAG = &on
-}
-
 func (c Config) FastOn() bool {
-	if c.FastEndpoint == "" && c.Fast.Endpoint == "" {
+	if strings.TrimSpace(c.Fast.Endpoint) == "" {
 		return false
-	}
-	if !c.Fast.Enabled && c.Fast.Endpoint == "" && c.Fast.ContextGuardRatio == 0 {
-		return true
 	}
 	return c.Fast.Enabled
 }
 
 func (c Config) RAGEnabled() bool {
-	if c.MemoryRAG != nil {
-		return *c.MemoryRAG
-	}
 	return c.RAG.Enabled
 }
 
@@ -460,9 +350,6 @@ func (c Config) OutputKeepBytes() int {
 
 func (c Config) PaletteName() string {
 	if name, ok := ResolveTheme(c.UI.Theme); ok {
-		return name
-	}
-	if name, ok := ResolveTheme(c.UI.Palette); ok {
 		return name
 	}
 	return "amber"
@@ -622,7 +509,7 @@ func configDir() string {
 }
 
 func (p Config) Location() string {
-	host, db := hostDB(p.DatabaseURL)
+	host, db := hostDB(p.Database.URL)
 	switch {
 	case host != "" && db != "":
 		return host + "/" + db

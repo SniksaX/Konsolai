@@ -95,29 +95,29 @@ func TestResolveBuiltinDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Name != "default" || p.Endpoint != defaultEndpoint {
+	if p.Name != "default" || p.LLM.Endpoint != defaultEndpoint {
 		t.Fatalf("got %+v", p)
 	}
-	if p.SessionIdleMinutes != 30 || p.RetentionDays != 90 || p.LLMIdleTimeoutSeconds != 120 {
+	if p.Memory.SessionIdleMinutes != 30 || p.Memory.RetentionDays != 90 || p.LLM.IdleTimeoutSeconds != 120 {
 		t.Fatalf("defaults %+v", p)
 	}
-	if p.BuildThinking != "plan_step" {
-		t.Fatalf("build_thinking %q", p.BuildThinking)
+	if p.Agent.BuildThinking != "plan_step" {
+		t.Fatalf("build_thinking %q", p.Agent.BuildThinking)
 	}
-	if p.FastEndpoint != defaultFastEndpoint || p.FastModel != "" {
+	if p.Fast.Endpoint != defaultFastEndpoint || p.Fast.Model != "" {
 		t.Fatalf("fast %+v", p)
 	}
-	if p.EmbedEndpoint != defaultEmbedEndpoint || p.RerankEndpoint != defaultRerankEndpoint {
+	if p.RAG.EmbedEndpoint != defaultEmbedEndpoint || p.RAG.RerankEndpoint != defaultRerankEndpoint {
 		t.Fatalf("rag endpoints %+v", p)
 	}
 	if !p.RAGEnabled() {
 		t.Fatal("memory_rag default")
 	}
-	if len(p.Languages) != 2 || p.Languages[0] != "en" || p.Languages[1] != "fr" {
-		t.Fatalf("languages %+v", p.Languages)
+	if len(p.Language.Languages) != 2 || p.Language.Languages[0] != "en" || p.Language.Languages[1] != "fr" {
+		t.Fatalf("languages %+v", p.Language.Languages)
 	}
-	if p.DefaultLanguage != "en" {
-		t.Fatalf("default_language %q", p.DefaultLanguage)
+	if p.Language.Default != "en" {
+		t.Fatalf("default_language %q", p.Language.Default)
 	}
 	b := Builtin()
 	if p.LLM.MaxTokens.Build != b.LLM.MaxTokens.Build || p.Agent.MaxSteps.Lookup != 10 {
@@ -140,15 +140,23 @@ func TestResolveLanguageFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.DefaultLanguage != "fr" || len(p.Languages) != 2 || p.Languages[0] != "fr" {
+	if p.Language.Default != "fr" || len(p.Language.Languages) != 2 || p.Language.Languages[0] != "fr" {
 		t.Fatalf("got %+v", p)
 	}
-	p, err = File{Profiles: map[string]Overlay{"default": {Language: &LanguageOverlay{Default: strPtr("es")}}}}.Resolve("default")
+	esPath := filepath.Join(t.TempDir(), "es.yaml")
+	if err := os.WriteFile(esPath, []byte("profiles:\n  default:\n    language:\n      default: es\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	esFile, err := Load(esPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.DefaultLanguage != "en" {
-		t.Fatalf("es clamped to list, got %q", p.DefaultLanguage)
+	p, err = esFile.Resolve("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Language.Default != "en" {
+		t.Fatalf("es clamped to list, got %q", p.Language.Default)
 	}
 }
 
@@ -159,7 +167,7 @@ func TestResolveFastEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.FastEndpoint != "http://fast/v1" || p.FastModel != "mini" {
+	if p.Fast.Endpoint != "http://fast/v1" || p.Fast.Model != "mini" {
 		t.Fatalf("got %+v", p)
 	}
 }
@@ -171,15 +179,22 @@ func TestResolveEmbedRerankEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.EmbedEndpoint != "http://embed:9" || p.RerankEndpoint != "http://rerank:9" {
+	if p.RAG.EmbedEndpoint != "http://embed:9" || p.RAG.RerankEndpoint != "http://rerank:9" {
 		t.Fatalf("got %+v", p)
 	}
 }
 
 func TestResolveMemoryRAGFalse(t *testing.T) {
 	clearEnv(t)
-	off := false
-	p, err := File{Profiles: map[string]Overlay{"default": {RAG: &RAGOverlay{Enabled: &off}}}}.Resolve("default")
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("profiles:\n  default:\n    rag:\n      enabled: false\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := f.Resolve("default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,8 +209,8 @@ func TestResolveBuildThinkingEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.BuildThinking != "until_plan" {
-		t.Fatalf("got %q", p.BuildThinking)
+	if p.Agent.BuildThinking != "until_plan" {
+		t.Fatalf("got %q", p.Agent.BuildThinking)
 	}
 }
 
@@ -247,10 +262,10 @@ profiles:
 		if err != nil {
 			t.Fatal(err)
 		}
-		if p.Name != "home" || p.Model != "home-model" || p.Endpoint != "http://home/v1" {
+		if p.Name != "home" || p.LLM.Model != "home-model" || p.LLM.Endpoint != "http://home/v1" {
 			t.Fatalf("got %+v", p)
 		}
-		if p.SessionIdleMinutes != 10 || p.RetentionDays != 7 {
+		if p.Memory.SessionIdleMinutes != 10 || p.Memory.RetentionDays != 7 {
 			t.Fatalf("got %+v", p)
 		}
 		if p.LLM.IdleTimeoutSeconds != 90 {
@@ -267,11 +282,11 @@ profiles:
 		if err != nil {
 			t.Fatal(err)
 		}
-		if p.Name != "work" || p.Model != "work-model" {
+		if p.Name != "work" || p.LLM.Model != "work-model" {
 			t.Fatalf("got %+v", p)
 		}
-		if p.RetentionDays != 3 {
-			t.Fatalf("defaults retention %d", p.RetentionDays)
+		if p.Memory.RetentionDays != 3 {
+			t.Fatalf("defaults retention %d", p.Memory.RetentionDays)
 		}
 	})
 
@@ -284,7 +299,7 @@ profiles:
 		if err != nil {
 			t.Fatal(err)
 		}
-		if p.Name != "home" || p.Model != "home-model" {
+		if p.Name != "home" || p.LLM.Model != "home-model" {
 			t.Fatalf("got %+v", p)
 		}
 	})
@@ -298,7 +313,7 @@ profiles:
 		if err != nil {
 			t.Fatal(err)
 		}
-		if p.DatabaseURL != "postgres://env/db" || p.Endpoint != "http://env/v1" || p.Model != "env-model" {
+		if p.Database.URL != "postgres://env/db" || p.LLM.Endpoint != "http://env/v1" || p.LLM.Model != "env-model" {
 			t.Fatalf("got %+v", p)
 		}
 		if p.Location() != "env/db" {
@@ -436,10 +451,10 @@ func TestMigrateJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Name != "home" || p.Model != "home-model" || p.Endpoint != "http://home/v1" {
+	if p.Name != "home" || p.LLM.Model != "home-model" || p.LLM.Endpoint != "http://home/v1" {
 		t.Fatalf("got %+v", p)
 	}
-	if p.SessionIdleMinutes != 12 || p.RAGEnabled() {
+	if p.Memory.SessionIdleMinutes != 12 || p.RAGEnabled() {
 		t.Fatalf("got %+v rag=%v", p, p.RAGEnabled())
 	}
 	if _, err := os.Stat(yamlPath); err == nil {
@@ -458,7 +473,6 @@ func TestShowMasksDatabaseURL(t *testing.T) {
 	c := Builtin()
 	c.Name = "home"
 	c.Database.URL = "postgres://user:hunter2@localhost:5432/konsolai"
-	c.syncFlat()
 	got, err := c.ShowYAML()
 	if err != nil {
 		t.Fatal(err)
@@ -523,7 +537,7 @@ func TestWriteInitRefusesOverwrite(t *testing.T) {
 }
 
 func TestLocationOmitsURL(t *testing.T) {
-	p := Config{DatabaseURL: "postgres://user:secret@localhost:5432/konsolai"}
+	p := Config{Database: Database{URL: "postgres://user:secret@localhost:5432/konsolai"}}
 	loc := p.Location()
 	if strings.Contains(loc, "secret") || strings.Contains(loc, "postgres://") {
 		t.Fatalf("leaked URL: %q", loc)
