@@ -174,10 +174,10 @@ func TestFormatFooter(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := formatFooter(footerInfo{
-		Cwd: dir, Model: "org/qwen38.nvfp4", Routing: "fast",
+		Cwd: dir, Model: "org/main-model", Routing: "fast",
 		CtxPct: 12, ShowCtx: true, Down: true,
 	})
-	if !strings.Contains(s, "dev") || !strings.Contains(s, "qwen38.nvfp4") || !strings.Contains(s, "ctx 12%") {
+	if !strings.Contains(s, "dev") || !strings.Contains(s, "main-model") || !strings.Contains(s, "ctx 12%") {
 		t.Fatalf("left %q", s)
 	}
 	if strings.Contains(s, "▰") || strings.Contains(s, "▱") {
@@ -186,8 +186,8 @@ func TestFormatFooter(t *testing.T) {
 	if !strings.Contains(s, "fast") || !strings.Contains(s, "●") {
 		t.Fatalf("right %q", s)
 	}
-	sh := formatFooter(footerInfo{Cwd: dir, Model: "qwen", Routing: "main", Shell: true})
-	if !strings.Contains(sh, "shell") || strings.Contains(sh, "qwen") {
+	sh := formatFooter(footerInfo{Cwd: dir, Model: "main-model", Routing: "main", Shell: true})
+	if !strings.Contains(sh, "shell") || strings.Contains(sh, "main-model") {
 		t.Fatalf("shell footer %q", sh)
 	}
 }
@@ -282,15 +282,15 @@ func TestInputPrompt(t *testing.T) {
 }
 
 func TestShortPathAndModel(t *testing.T) {
-	t.Setenv("HOME", "/home/u")
-	if shortPath("/home/u/src/k") != "~/src/k" {
-		t.Fatalf("%q", shortPath("/home/u/src/k"))
+	t.Setenv("HOME", "/users/u")
+	if shortPath("/users/u/src/k") != "~/src/k" {
+		t.Fatalf("%q", shortPath("/users/u/src/k"))
 	}
-	if shortPath("/home/u") != "~" {
-		t.Fatalf("%q", shortPath("/home/u"))
+	if shortPath("/users/u") != "~" {
+		t.Fatalf("%q", shortPath("/users/u"))
 	}
-	if shortModel("acme/qwen38.nvfp4") != "qwen38.nvfp4" {
-		t.Fatalf("%q", shortModel("acme/qwen38.nvfp4"))
+	if shortModel("acme/main-model") != "main-model" {
+		t.Fatalf("%q", shortModel("acme/main-model"))
 	}
 }
 
