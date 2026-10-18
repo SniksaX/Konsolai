@@ -305,7 +305,7 @@ func TestHistoryWriteRedacts(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", dir)
 	h := loadFileHistory(HistoryPath())
-	if _, err := h.Write("token ghp_abcdefghijklmnopqrstuvwxyz012345"); err != nil {
+	if _, err := h.Write("token " + githubToken()); err != nil {
 		t.Fatal(err)
 	}
 	if h.Len() != 1 || strings.Contains(h.lines[0], "ghp_") {
