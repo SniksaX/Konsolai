@@ -312,14 +312,14 @@ func TestStatusWindowFromModels(t *testing.T) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data": []map[string]any{{"id": "qwen38.nvfp4", "max_model_len": 94208}},
+			"data": []map[string]any{{"id": "main-model", "max_model_len": 94208}},
 		})
 	}))
 	t.Cleanup(srv.Close)
 	env, out, _ := testEnv(t)
 	env.Profile.LLM.Endpoint = srv.URL + "/v1"
-	env.Profile.LLM.Model = "qwen38.nvfp4"
-	client := llm.New(srv.URL+"/v1", "qwen38.nvfp4")
+	env.Profile.LLM.Model = "main-model"
+	client := llm.New(srv.URL+"/v1", "main-model")
 	if client.ContextWindow() != 32768 {
 		t.Fatalf("fallback %d", client.ContextWindow())
 	}
