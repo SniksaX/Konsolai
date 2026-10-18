@@ -265,7 +265,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 	if dec == nil {
 		return 1, "", 0, true
 	}
-	dec.Language = intent.ResolveLanguage(req.Text, lastUserOf(history), dec.Language, r.Profile.DefaultLanguage, r.Profile.Languages)
+	dec.Language = intent.ResolveLanguage(req.Text, lastUserOf(history), dec.Language, r.Profile.Language.Default, r.Profile.Language.Languages)
 	lang := agent.ReplyInstruction(dec.Language)
 	if dec.Intent == intent.Answer {
 		prompt := agent.AnswerPrompt + "\n" + lang
@@ -359,7 +359,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			History:        history,
 			AutoApprove:    req.Yes,
 			Prompt:         agent.ActPrompt + "\n" + lang,
-			ThinkingPolicy: ThinkingFor(*dec, r.Profile.BuildThinking, thinkMode),
+			ThinkingPolicy: ThinkingFor(*dec, r.Profile.Agent.BuildThinking, thinkMode),
 			Trace:          req.Trace,
 			SessionID:      sessionID,
 			Intent:         string(dec.Intent),
@@ -454,7 +454,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			fmt.Fprintln(r.errw(), err.Error())
 			return 1, "", tok, true
 		}
-		fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.Endpoint, err, req.Trace))
+		fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.LLM.Endpoint, err, req.Trace))
 		return 1, "", tok, true
 	}
 	return 1, "", 0, true
@@ -527,7 +527,7 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 			fmt.Fprintln(r.errw(), streamErr.Error())
 			return 1, out, ptok, usedMain, ""
 		}
-		fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.Endpoint, streamErr, req.Trace))
+		fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.LLM.Endpoint, streamErr, req.Trace))
 		return 1, out, ptok, usedMain, ""
 	}
 	if strings.TrimSpace(out) == "" {
