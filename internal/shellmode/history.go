@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/siraj/konsolai/internal/redact"
+	"github.com/SniksaX/Konsolai/internal/redact"
 )
 
 const (

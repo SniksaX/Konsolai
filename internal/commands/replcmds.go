@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/turn"
-	"github.com/siraj/konsolai/internal/ui/theme"
+	"github.com/SniksaX/Konsolai/internal/turn"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 )
 
 func runCmd(ctx context.Context, env *Env, args []string) int {

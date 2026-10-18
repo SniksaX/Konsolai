@@ -13,7 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/siraj/konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/config"
 )
 
 //go:embed migrations/*.sql

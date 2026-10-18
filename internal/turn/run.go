@@ -13,16 +13,16 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/siraj/konsolai/internal/agent"
-	"github.com/siraj/konsolai/internal/intent"
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/memory"
-	"github.com/siraj/konsolai/internal/rag"
-	"github.com/siraj/konsolai/internal/repo"
-	"github.com/siraj/konsolai/internal/safety"
-	"github.com/siraj/konsolai/internal/sysctx"
-	"github.com/siraj/konsolai/internal/tools"
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/agent"
+	"github.com/SniksaX/Konsolai/internal/intent"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/memory"
+	"github.com/SniksaX/Konsolai/internal/rag"
+	"github.com/SniksaX/Konsolai/internal/repo"
+	"github.com/SniksaX/Konsolai/internal/safety"
+	"github.com/SniksaX/Konsolai/internal/sysctx"
+	"github.com/SniksaX/Konsolai/internal/tools"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 func (r *Runner) RunTurn(ctx context.Context, req Request) Result {

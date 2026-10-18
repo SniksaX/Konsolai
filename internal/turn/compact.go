@@ -6,10 +6,10 @@ import (
 	"io"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/memory"
-	"github.com/siraj/konsolai/internal/store"
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/memory"
+	"github.com/SniksaX/Konsolai/internal/store"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 const (

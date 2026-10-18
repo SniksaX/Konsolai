@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siraj/konsolai/internal/commands"
-	"github.com/siraj/konsolai/internal/config"
-	"github.com/siraj/konsolai/internal/turn"
-	"github.com/siraj/konsolai/internal/ui/theme"
+	"github.com/SniksaX/Konsolai/internal/commands"
+	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/turn"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 )
 
 type scriptReader struct {

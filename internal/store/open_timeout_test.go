@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/siraj/konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/config"
 )
 
 func TestResolvedOpenUsesBuiltinAndOverride(t *testing.T) {

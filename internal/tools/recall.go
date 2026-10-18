@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/rag"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/rag"
 )
 
 type RecallFunc func(ctx context.Context, query, scope string, k int) ([]rag.Hit, error)

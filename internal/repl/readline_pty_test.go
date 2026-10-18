@@ -14,9 +14,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/SniksaX/Konsolai/internal/commands"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 	"github.com/creack/pty"
-	"github.com/siraj/konsolai/internal/commands"
-	"github.com/siraj/konsolai/internal/ui/theme"
 )
 
 var ansiRe = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`)

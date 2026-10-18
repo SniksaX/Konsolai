@@ -9,14 +9,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/siraj/konsolai/internal/banner"
-	"github.com/siraj/konsolai/internal/commands"
-	"github.com/siraj/konsolai/internal/config"
-	"github.com/siraj/konsolai/internal/memory"
-	"github.com/siraj/konsolai/internal/store"
-	"github.com/siraj/konsolai/internal/ui"
-	"github.com/siraj/konsolai/internal/ui/theme"
-	"github.com/siraj/konsolai/internal/welcome"
+	"github.com/SniksaX/Konsolai/internal/banner"
+	"github.com/SniksaX/Konsolai/internal/commands"
+	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/memory"
+	"github.com/SniksaX/Konsolai/internal/store"
+	"github.com/SniksaX/Konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
+	"github.com/SniksaX/Konsolai/internal/welcome"
 	"golang.org/x/term"
 )
 

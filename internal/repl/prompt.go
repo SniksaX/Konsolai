@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/siraj/konsolai/internal/config"
-	"github.com/siraj/konsolai/internal/ui"
-	"github.com/siraj/konsolai/internal/ui/theme"
+	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 )
 
 func gitBranch(cwd string) string {

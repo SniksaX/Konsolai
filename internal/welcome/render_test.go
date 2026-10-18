@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siraj/konsolai/internal/banner"
-	"github.com/siraj/konsolai/internal/ui"
-	"github.com/siraj/konsolai/internal/ui/theme"
+	"github.com/SniksaX/Konsolai/internal/banner"
+	"github.com/SniksaX/Konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite welcome golden files")

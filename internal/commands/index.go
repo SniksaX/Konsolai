@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/siraj/konsolai/internal/rag"
-	"github.com/siraj/konsolai/internal/repo"
-	"github.com/siraj/konsolai/internal/store"
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/rag"
+	"github.com/SniksaX/Konsolai/internal/repo"
+	"github.com/SniksaX/Konsolai/internal/store"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 func runIndex(ctx context.Context, env *Env, args []string) int {

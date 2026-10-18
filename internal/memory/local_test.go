@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/siraj/konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/llm"
 )
 
 func withStateHome(t *testing.T) string {

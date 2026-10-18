@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siraj/konsolai/internal/commands"
+	"github.com/SniksaX/Konsolai/internal/commands"
 )
 
 func testMenuReg() *commands.Registry {

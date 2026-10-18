@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siraj/konsolai/internal/redact"
+	"github.com/SniksaX/Konsolai/internal/redact"
 )
 
 func TestExpandMentionsEmailNotAttach(t *testing.T) {

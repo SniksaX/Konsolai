@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/siraj/konsolai/internal/redact"
-	"github.com/siraj/konsolai/internal/store"
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/redact"
+	"github.com/SniksaX/Konsolai/internal/store"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 const (

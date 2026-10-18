@@ -3,8 +3,8 @@ package welcome
 import (
 	"strings"
 
-	"github.com/siraj/konsolai/internal/ui"
-	"github.com/siraj/konsolai/internal/ui/theme"
+	"github.com/SniksaX/Konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 )
 
 func drawBox(pal ui.Palette, width int, title, right string, rightPaint func(string) string, rows []string) []string {

@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/llm"
 )
 
 func ModelErrorLine(endpoint string, err error, trace bool) string {

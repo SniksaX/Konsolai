@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 const (

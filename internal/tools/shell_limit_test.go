@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/siraj/konsolai/internal/safety"
+	"github.com/SniksaX/Konsolai/internal/safety"
 )
 
 func TestShellDefaultSpecKeepsBuiltinNumbers(t *testing.T) {

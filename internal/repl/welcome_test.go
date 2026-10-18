@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SniksaX/Konsolai/internal/banner"
+	"github.com/SniksaX/Konsolai/internal/welcome"
 	"github.com/creack/pty"
-	"github.com/siraj/konsolai/internal/banner"
-	"github.com/siraj/konsolai/internal/welcome"
 )
 
 func TestAwaitStartupReturnsWhenReady(t *testing.T) {

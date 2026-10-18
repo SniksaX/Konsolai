@@ -6,10 +6,10 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/formatters"
 	"github.com/alecthomas/chroma/v2/lexers"
-	"github.com/siraj/konsolai/internal/ui/theme"
 )
 
 var (

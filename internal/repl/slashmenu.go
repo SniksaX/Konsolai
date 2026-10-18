@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/commands"
-	"github.com/siraj/konsolai/internal/ui"
-	"github.com/siraj/konsolai/internal/ui/theme"
+	"github.com/SniksaX/Konsolai/internal/commands"
+	"github.com/SniksaX/Konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 )
 
 const slashMenuRows = 8

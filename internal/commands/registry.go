@@ -7,14 +7,14 @@ import (
 	"os"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/agent"
-	"github.com/siraj/konsolai/internal/clip"
-	"github.com/siraj/konsolai/internal/config"
-	"github.com/siraj/konsolai/internal/embed"
-	"github.com/siraj/konsolai/internal/memory"
-	"github.com/siraj/konsolai/internal/turn"
-	"github.com/siraj/konsolai/internal/ui"
-	"github.com/siraj/konsolai/internal/ui/theme"
+	"github.com/SniksaX/Konsolai/internal/agent"
+	"github.com/SniksaX/Konsolai/internal/clip"
+	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/embed"
+	"github.com/SniksaX/Konsolai/internal/memory"
+	"github.com/SniksaX/Konsolai/internal/turn"
+	"github.com/SniksaX/Konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 )
 
 type Arg struct {

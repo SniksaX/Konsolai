@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siraj/konsolai/internal/intent"
-	"github.com/siraj/konsolai/internal/rag"
+	"github.com/SniksaX/Konsolai/internal/intent"
+	"github.com/SniksaX/Konsolai/internal/rag"
 )
 
 func TestNeedsMemoryInjection(t *testing.T) {

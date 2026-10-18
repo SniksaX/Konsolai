@@ -9,14 +9,14 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/siraj/konsolai/internal/agent"
-	"github.com/siraj/konsolai/internal/config"
-	"github.com/siraj/konsolai/internal/intent"
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/memory"
-	"github.com/siraj/konsolai/internal/repo"
-	"github.com/siraj/konsolai/internal/store"
-	"github.com/siraj/konsolai/internal/tools"
+	"github.com/SniksaX/Konsolai/internal/agent"
+	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/intent"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/memory"
+	"github.com/SniksaX/Konsolai/internal/repo"
+	"github.com/SniksaX/Konsolai/internal/store"
+	"github.com/SniksaX/Konsolai/internal/tools"
 )
 
 func UpsertProject(ctx context.Context, mem *memory.Guard, cwd string) *int64 {

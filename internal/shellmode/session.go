@@ -10,10 +10,10 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/siraj/konsolai/internal/repo"
-	"github.com/siraj/konsolai/internal/safety"
-	"github.com/siraj/konsolai/internal/ui"
-	"github.com/siraj/konsolai/internal/ui/theme"
+	"github.com/SniksaX/Konsolai/internal/repo"
+	"github.com/SniksaX/Konsolai/internal/safety"
+	"github.com/SniksaX/Konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 )
 
 type RunFunc func(ctx context.Context, cwd, line string, stdin *os.File, stdout io.Writer) (exit int, dur time.Duration, capture string, err error)

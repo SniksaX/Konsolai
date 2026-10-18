@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/siraj/konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/llm"
 )
 
 func TestClassifySchemaAndRecent(t *testing.T) {

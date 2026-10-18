@@ -8,11 +8,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/siraj/konsolai/internal/agent"
-	"github.com/siraj/konsolai/internal/config"
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/store"
-	"github.com/siraj/konsolai/internal/tools"
+	"github.com/SniksaX/Konsolai/internal/agent"
+	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/store"
+	"github.com/SniksaX/Konsolai/internal/tools"
 )
 
 type Backend interface {

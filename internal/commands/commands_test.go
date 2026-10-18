@@ -12,11 +12,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siraj/konsolai/internal/config"
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/memory"
-	"github.com/siraj/konsolai/internal/turn"
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/memory"
+	"github.com/SniksaX/Konsolai/internal/turn"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 func testEnv(t *testing.T) (*Env, *bytes.Buffer, *bytes.Buffer) {

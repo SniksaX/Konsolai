@@ -14,10 +14,10 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/siraj/konsolai/internal/diff"
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/redact"
-	"github.com/siraj/konsolai/internal/safety"
+	"github.com/SniksaX/Konsolai/internal/diff"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/redact"
+	"github.com/SniksaX/Konsolai/internal/safety"
 )
 
 const (

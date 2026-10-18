@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/siraj/konsolai/internal/repo"
-	"github.com/siraj/konsolai/internal/turn"
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/repo"
+	"github.com/SniksaX/Konsolai/internal/turn"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 func runStatus(ctx context.Context, env *Env, _ []string) int {

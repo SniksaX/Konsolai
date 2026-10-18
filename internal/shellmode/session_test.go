@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/siraj/konsolai/internal/safety"
+	"github.com/SniksaX/Konsolai/internal/safety"
 )
 
 func evalPath(t *testing.T, p string) string {

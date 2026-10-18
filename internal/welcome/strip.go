@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 type healthKind int

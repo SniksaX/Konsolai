@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/diff"
-	"github.com/siraj/konsolai/internal/docrender"
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/safety"
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/diff"
+	"github.com/SniksaX/Konsolai/internal/docrender"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/safety"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 type exportDocTool struct{ guard *safety.Guard }

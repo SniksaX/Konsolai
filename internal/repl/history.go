@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/memory"
-	"github.com/siraj/konsolai/internal/redact"
+	"github.com/SniksaX/Konsolai/internal/memory"
+	"github.com/SniksaX/Konsolai/internal/redact"
 )
 
 const histCap = 1000

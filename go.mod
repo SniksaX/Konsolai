@@ -1,4 +1,4 @@
-module github.com/siraj/konsolai
+module github.com/SniksaX/Konsolai
 
 go 1.27.1
 

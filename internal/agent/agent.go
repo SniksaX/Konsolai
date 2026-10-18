@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/safety"
-	"github.com/siraj/konsolai/internal/tools"
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/safety"
+	"github.com/SniksaX/Konsolai/internal/tools"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 type Recorder interface {

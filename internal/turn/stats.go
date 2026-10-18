@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/siraj/konsolai/internal/config"
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/store"
+	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/store"
 )
 
 // beginStats arms a best-effort recorder for model calls during this turn.

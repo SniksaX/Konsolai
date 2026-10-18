@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/siraj/konsolai/internal/docrender"
-	"github.com/siraj/konsolai/internal/safety"
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/docrender"
+	"github.com/SniksaX/Konsolai/internal/safety"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 func TestExportDocHTMLChange(t *testing.T) {

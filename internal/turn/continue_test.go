@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siraj/konsolai/internal/agent"
-	"github.com/siraj/konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/agent"
+	"github.com/SniksaX/Konsolai/internal/llm"
 )
 
 func TestContinueReusesActAfterAbort(t *testing.T) {

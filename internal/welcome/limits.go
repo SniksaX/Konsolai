@@ -1,6 +1,6 @@
 package welcome
 
-import "github.com/siraj/konsolai/internal/config"
+import "github.com/SniksaX/Konsolai/internal/config"
 
 // ResolveLimits fills zero layout cuts from the built-in profile.
 // A zero Limits paints the same screen as today's built-in cuts.

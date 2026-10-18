@@ -13,8 +13,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/safety"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/safety"
 )
 
 const outlineCap = 24 << 10

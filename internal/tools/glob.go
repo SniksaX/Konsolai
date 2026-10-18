@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/safety"
+	"github.com/SniksaX/Konsolai/internal/safety"
 )
 
 // relPrefix maps a user path (relative, absolute, or empty) to a slash-separated

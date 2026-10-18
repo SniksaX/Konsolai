@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siraj/konsolai/internal/agent"
-	"github.com/siraj/konsolai/internal/config"
-	"github.com/siraj/konsolai/internal/intent"
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/sysctx"
+	"github.com/SniksaX/Konsolai/internal/agent"
+	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/intent"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/sysctx"
 )
 
 func TestRunAnswerDiscardsPromise(t *testing.T) {

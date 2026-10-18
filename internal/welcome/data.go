@@ -19,9 +19,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/siraj/konsolai/internal/banner"
-	"github.com/siraj/konsolai/internal/config"
-	"github.com/siraj/konsolai/internal/store"
+	"github.com/SniksaX/Konsolai/internal/banner"
+	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/store"
 )
 
 type Status string

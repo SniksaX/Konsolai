@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/siraj/konsolai/internal/store"
+	"github.com/SniksaX/Konsolai/internal/store"
 )
 
 func TestGatherListsOnlyConfiguredEndpoints(t *testing.T) {

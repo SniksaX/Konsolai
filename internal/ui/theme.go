@@ -3,7 +3,7 @@ package ui
 import (
 	"strings"
 
-	"github.com/siraj/konsolai/internal/ui/theme"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 )
 
 type ColorMode = theme.ColorMode

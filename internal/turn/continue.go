@@ -3,7 +3,7 @@ package turn
 import (
 	"strings"
 
-	"github.com/siraj/konsolai/internal/intent"
+	"github.com/SniksaX/Konsolai/internal/intent"
 )
 
 const continueNote = "The previous attempt stopped before finishing; continue from where it stopped."

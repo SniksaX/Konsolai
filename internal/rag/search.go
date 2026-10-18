@@ -8,8 +8,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/siraj/konsolai/internal/embed"
-	"github.com/siraj/konsolai/internal/store"
+	"github.com/SniksaX/Konsolai/internal/embed"
+	"github.com/SniksaX/Konsolai/internal/store"
 )
 
 const (

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/llm"
 )
 
 type finishTool struct{}

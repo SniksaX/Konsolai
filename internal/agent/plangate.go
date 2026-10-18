@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/safety"
-	"github.com/siraj/konsolai/internal/tools"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/safety"
+	"github.com/SniksaX/Konsolai/internal/tools"
 )
 
 func hasProposePlan(msg llm.Message) bool {

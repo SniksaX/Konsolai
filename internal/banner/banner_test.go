@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 func TestBannerWidth100ColorOff(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siraj/konsolai/internal/safety"
+	"github.com/SniksaX/Konsolai/internal/safety"
 )
 
 // TestSearchFromSubdir reproduces search missing repo files when cwd is a

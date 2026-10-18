@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SniksaX/Konsolai/internal/commands"
 	"github.com/creack/pty"
 	"github.com/reeflective/readline/inputrc"
-	"github.com/siraj/konsolai/internal/commands"
 )
 
 func TestSlashWidgetDownSelectsHelp(t *testing.T) {

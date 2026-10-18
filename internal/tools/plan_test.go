@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siraj/konsolai/internal/safety"
+	"github.com/SniksaX/Konsolai/internal/safety"
 )
 
 func TestProposePlanPreviewOrder(t *testing.T) {

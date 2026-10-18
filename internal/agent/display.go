@@ -11,10 +11,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/redact"
-	"github.com/siraj/konsolai/internal/tools"
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/redact"
+	"github.com/SniksaX/Konsolai/internal/tools"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 func FormatTokens(n int) string {

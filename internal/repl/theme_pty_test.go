@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SniksaX/Konsolai/internal/commands"
+	"github.com/SniksaX/Konsolai/internal/config"
 	"github.com/creack/pty"
-	"github.com/siraj/konsolai/internal/commands"
-	"github.com/siraj/konsolai/internal/config"
 )
 
 func TestThemePickerEscNoExtraBanner(t *testing.T) {

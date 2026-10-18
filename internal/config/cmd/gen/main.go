@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/siraj/konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/config"
 )
 
 func main() {
