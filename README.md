@@ -212,6 +212,11 @@ The `name` cell is `Command.DisplayNames`. The `args` cell lists `Arg.Name`; opt
 | /facts | | List remembered facts |
 | /forget | scope id | Delete a fact |
 | /prune | | Prune old sessions now |
+| /stats | [window] | Show calls, tokens, and latency |
+| /doctor | | Check config, endpoints, database, and local tools |
+| /save | [file] | Write the last answer to a Markdown file |
+| /pdf | [file] | Render the last answer to a PDF |
+| /explain | | Explain the last failed shell command (set PROMPT_COMMAND="history -a") |
 
 ## Development
 
