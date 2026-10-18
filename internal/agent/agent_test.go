@@ -2559,3 +2559,75 @@ func TestAcceptedPlanAllowsShell(t *testing.T) {
 		t.Fatalf("%q", shell)
 	}
 }
+
+func TestFirstMutatingGateForcesPlan(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, rep := newReplay(t, []llm.Message{
+		assistant(call("1", "write_file", `{"path":"a.txt","content":"x"}`)),
+		assistant(call("2", "write_file", `{"path":"a.txt","content":"y"}`)),
+		assistant(call("3", "read_file", `{"path":"a.txt"}`)),
+		assistant(call("4", "finish", `{"summary":"ok"}`)),
+	})
+	err = Run(context.Background(), Config{
+		Client: client, Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		Confirmer: stubConfirm{d: ui.Approve}, Out: io.Discard,
+		RequirePlan: true, ThinkingPolicy: ThinkPlanStep,
+		ExploreBudget: 2, ExploreNote: ExploreNoteBuild,
+		MaxSteps: 8, Intent: "build",
+	}, "sys", "plan first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep.mu.Lock()
+	defer rep.mu.Unlock()
+	if len(rep.toolChoices) < 3 || len(rep.think) < 2 {
+		t.Fatalf("choices %d think %d", len(rep.toolChoices), len(rep.think))
+	}
+	if string(rep.toolChoices[0]) != `"auto"` {
+		t.Fatalf("first choice %s", rep.toolChoices[0])
+	}
+	var choice struct {
+		Type     string `json:"type"`
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(rep.toolChoices[1], &choice); err != nil || choice.Function.Name != "propose_plan" {
+		t.Fatalf("forced choice %s err=%v", rep.toolChoices[1], err)
+	}
+	if !rep.think[1] {
+		t.Fatal("plan_step should think on the forced propose_plan request")
+	}
+	if string(rep.toolChoices[2]) == "" || choiceName(rep.toolChoices[2]) == "propose_plan" {
+		t.Fatalf("later reject must not force propose_plan: %s", rep.toolChoices[2])
+	}
+	for _, msgs := range rep.reqs {
+		for _, m := range msgs {
+			if m.Role == llm.RoleTool && strings.Contains(m.Content, ExploreNoteBuild) {
+				t.Fatal("rejected mutating steps changed the explore budget")
+			}
+		}
+	}
+}
+
+func choiceName(raw json.RawMessage) string {
+	if string(raw) == `"auto"` || string(raw) == `"required"` {
+		return string(raw)
+	}
+	var choice struct {
+		Function struct {
+			Name string `json:"name"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(raw, &choice); err != nil {
+		return string(raw)
+	}
+	return choice.Function.Name
+}
