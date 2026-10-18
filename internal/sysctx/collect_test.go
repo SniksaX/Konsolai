@@ -9,7 +9,7 @@ func TestBriefOmitsRepoAndFacts(t *testing.T) {
 	s := Snapshot{
 		OS:      "Arch Linux",
 		Shell:   "bash",
-		User:    "siraj",
+		User:    "dev",
 		CWD:     "/tmp/proj",
 		GitRepo: true,
 		Entries: []string{"go.mod", "README.md"},
@@ -37,7 +37,7 @@ func TestLocationLine(t *testing.T) {
 	if got != want {
 		t.Fatalf("root: got %q want %q", got, want)
 	}
-	s := Snapshot{OS: "Arch Linux", Shell: "bash", User: "siraj", CWD: "/tmp/proj/svc", RepoRoot: "/tmp/proj"}
+	s := Snapshot{OS: "Arch Linux", Shell: "bash", User: "dev", CWD: "/tmp/proj/svc", RepoRoot: "/tmp/proj"}
 	full := s.String()
 	if !strings.Contains(full, "you are in svc/") {
 		t.Fatalf("string missing location: %q", full)
