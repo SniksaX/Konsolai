@@ -73,7 +73,7 @@ func testRunner(t *testing.T, client *llm.Client, conf agent.Confirmer) *Runner 
 		t.Setenv("XDG_STATE_HOME", t.TempDir())
 	}
 	return &Runner{
-		Profile: config.Profile{Name: "default", SessionIdleMinutes: 30, BuildThinking: "plan_step"},
+		Profile: config.Profile{Name: "default", Memory: config.Memory{SessionIdleMinutes: 30}, Agent: config.Agent{BuildThinking: "plan_step"}},
 		Client:  client,
 		Mem:     memory.NewGuard(nil, nil),
 		Out:     io.Discard,
@@ -242,8 +242,8 @@ func TestFastUnreachableFallsBack(t *testing.T) {
 	t.Cleanup(llm.ResetReachCache)
 	client := fakeLLM(t, []llm.Message{{Role: llm.RoleAssistant, Content: `{"intent":"answer","language":"en","reason":"hi","reasoning":false,"effort":"none","task":"other","continues_session":0}`}, {Role: llm.RoleAssistant, Content: "hello"}})
 	r := testRunner(t, client, autoConfirm{})
-	r.Profile.FastEndpoint = "http://127.0.0.1:1/v1"
-	r.FastClient = llm.NewFast(r.Profile.FastEndpoint, "mini")
+	r.Profile.Fast.Endpoint = "http://127.0.0.1:1/v1"
+	r.FastClient = llm.NewFast(r.Profile.Fast.Endpoint, "mini")
 	var errB strings.Builder
 	r.Err = &errB
 	res := r.RunTurn(context.Background(), Request{Text: "hi", Trace: true, Yes: true, Cwd: t.TempDir(), New: true})
