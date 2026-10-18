@@ -10,7 +10,7 @@ func TestTurnStatRateAndZeroMillis(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
 	id, err := s.CreateSession(ctx, NewSession{
-		Profile: "home", CWD: "/tmp/stats", Mode: "answer", Model: "qwen", Title: "t",
+		Profile: "home", CWD: "/tmp/stats", Mode: "answer", Model: "main-model", Title: "t",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -22,14 +22,14 @@ func TestTurnStatRateAndZeroMillis(t *testing.T) {
 		ms    int
 		at    time.Time
 	}{
-		{"qwen", 100, 0, base},
-		{"qwen", 100, 1000, base.Add(time.Minute)},
-		{"qwen", 50, 500, base.Add(2 * time.Minute)},
+		{"main-model", 100, 0, base},
+		{"main-model", 100, 1000, base.Add(time.Minute)},
+		{"main-model", 50, 500, base.Add(2 * time.Minute)},
 		{"other", 999, 1000, base.Add(3 * time.Minute)},
 	}
 	for _, r := range rows {
 		if err := s.RecordTurnStat(ctx, TurnStat{
-			SessionID: id, Intent: "answer", Model: r.model, Endpoint: "http://fatboy/v1",
+			SessionID: id, Intent: "answer", Model: r.model, Endpoint: "http://gpu-box/v1",
 			PromptTokens: 10, CompletionTokens: r.comp, ModelMS: r.ms,
 		}); err != nil {
 			t.Fatal(err)
@@ -41,7 +41,7 @@ func TestTurnStatRateAndZeroMillis(t *testing.T) {
 		}
 	}
 
-	got, err := s.ModelRate(ctx, "qwen", 20)
+	got, err := s.ModelRate(ctx, "main-model", 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestTurnStatRateAndZeroMillis(t *testing.T) {
 		t.Fatalf("rate %v", *got)
 	}
 
-	latest, err := s.ModelRate(ctx, "qwen", 1)
+	latest, err := s.ModelRate(ctx, "main-model", 1)
 	if err != nil || latest == nil {
 		t.Fatalf("latest %v err=%v", latest, err)
 	}
@@ -66,10 +66,10 @@ func TestTurnStatRateAndZeroMillis(t *testing.T) {
 		t.Fatalf("missing rate %v err=%v", none, err)
 	}
 
-	if _, err := s.pool.Exec(ctx, `DELETE FROM turn_stats WHERE model = 'qwen' AND model_ms > 0`); err != nil {
+	if _, err := s.pool.Exec(ctx, `DELETE FROM turn_stats WHERE model = 'main-model' AND model_ms > 0`); err != nil {
 		t.Fatal(err)
 	}
-	zero, err := s.ModelRate(ctx, "qwen", 20)
+	zero, err := s.ModelRate(ctx, "main-model", 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestRecordTurnStatNullSession(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
 	if err := s.RecordTurnStat(ctx, TurnStat{
-		Intent: "answer", Model: "fast", Endpoint: "http://fatboy:11435/v1",
+		Intent: "answer", Model: "fast", Endpoint: "http://gpu-box:8001/v1",
 		PromptTokens: 3, CompletionTokens: 4, ModelMS: 100,
 	}); err != nil {
 		t.Fatal(err)
