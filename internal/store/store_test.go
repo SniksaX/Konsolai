@@ -206,7 +206,7 @@ func TestSeqOrderingAndRedaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	secret := "AKIAIOSFODNN7EXAMPLE"
+	secret := awsAccessKey()
 	for i, role := range []string{"user", "assistant", "tool"} {
 		seq, err := s.NextSeq(ctx, id)
 		if err != nil {
@@ -234,7 +234,7 @@ func TestSeqOrderingAndRedaction(t *testing.T) {
 			t.Fatalf("want redaction: %q", m.Content)
 		}
 	}
-	hex := "26f789a3dde42ad6ec6a50fc258c2a59a9833069884e231b0081525ef87cbc301ba28e96d4e0f46c"
+	hex := abuseHex()
 	seq, err := s.NextSeq(ctx, id)
 	if err != nil {
 		t.Fatal(err)
@@ -256,7 +256,7 @@ func TestSeqOrderingAndRedaction(t *testing.T) {
 	}
 	if err := s.RecordAction(ctx, ActionIn{
 		SessionID: id, Seq: seq, Tool: "run_shell",
-		Args: []byte(`{"cmd":"echo","token":"sk-abcdefghijklmnopqrstuvwxyz123456"}`),
+		Args: skArgs(),
 		Kind: "mutating", Decision: "approved", Output: "token=supersecret",
 	}); err != nil {
 		t.Fatal(err)
@@ -265,7 +265,7 @@ func TestSeqOrderingAndRedaction(t *testing.T) {
 	if err := s.pool.QueryRow(ctx, `SELECT args::text, output FROM actions WHERE session_id = $1::uuid`, id).Scan(&args, &output); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(args, "sk-abcdefghijklmnopqrst") || strings.Contains(output, "supersecret") {
+	if strings.Contains(args, skPrefix()) || strings.Contains(output, "supersecret") {
 		t.Fatalf("action not redacted args=%s out=%s", args, output)
 	}
 }
