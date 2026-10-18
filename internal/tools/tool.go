@@ -162,6 +162,24 @@ func (r *Registry) Get(name string) (Tool, bool) {
 	return t, ok
 }
 
+// Without returns a registry that does not offer the named tool.
+func (r *Registry) Without(name string) *Registry {
+	if r == nil {
+		return nil
+	}
+	var list []Tool
+	byName := make(map[string]Tool, len(r.tools))
+	for _, t := range r.tools {
+		n := t.Spec().Function.Name
+		if n == name {
+			continue
+		}
+		list = append(list, t)
+		byName[n] = t
+	}
+	return &Registry{tools: list, byName: byName}
+}
+
 func (r *Registry) Named(names ...string) *Registry {
 	keep := make(map[string]bool, len(names))
 	for _, n := range names {
