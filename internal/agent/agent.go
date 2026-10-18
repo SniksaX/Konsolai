@@ -154,6 +154,8 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	}
 	explore := 0
 	noteSent := false
+	forcePropose := false
+	sawGateReject := false
 	readonlyAfterNote := 0
 	sourceReads := 0
 	toolsGone := false
@@ -233,6 +235,21 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		} else if forceMutating && planApproved {
 			stepSpecs = mutatingSpecs(specs)
 			opts.ToolChoice = "required"
+		}
+		if forcePropose && cfg.RequirePlan && !planApproved && !toolsGone {
+			forcePropose = false
+			stepSpecs = planOnlySpecs(specs)
+			if len(stepSpecs) == 0 {
+				stepSpecs = specs
+			}
+			opts.ToolChoice = "propose_plan"
+			if cfg.ThinkingPolicy == ThinkPlanStep {
+				think = true
+				opts.Thinking = true
+				label = "thinking"
+			}
+		} else if forcePropose {
+			forcePropose = false
 		}
 		_, maxTok, elide, err := cfg.prepCall(msgs, stepSpecs, &readSpans, seenRead)
 		if err != nil {
@@ -478,6 +495,11 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				msgs = append(msgs, tm)
 				_ = rec.Message(ctx, tm)
 				_ = rec.Action(ctx, ActionRecord{Tool: call.Function.Name, Args: args, Kind: kind, Decision: "gate_blocked", IsError: true, Output: tm.Content})
+				// A gate reject is not an explore step. Only the first one forces propose_plan.
+				if !sawGateReject {
+					sawGateReject = true
+					forcePropose = true
+				}
 				continue
 			}
 			if kind == tools.ReadOnly {
