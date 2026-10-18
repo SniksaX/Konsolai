@@ -47,7 +47,7 @@ func TestCapWriterLimit(t *testing.T) {
 
 func TestHistoryInjectAndCap(t *testing.T) {
 	var h History
-	h.Add("echo secret ghp_abcdefghijklmnopqrstuvwxyz012345", strings.Repeat("x", 8000))
+	h.Add("echo secret "+githubToken(), strings.Repeat("x", 8000))
 	if h.Len() != 1 {
 		t.Fatal(h.Len())
 	}
