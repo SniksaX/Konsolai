@@ -66,7 +66,7 @@ func TestThemePickerEnterRedrawsCachedWelcome(t *testing.T) {
 		t.Fatalf("banners after clear %d\n%s", n, sc.dump())
 	}
 	after := ansiRe.ReplaceAllString(strings.ReplaceAll(string(afterRaw), "\r", ""), "")
-	if !strings.Contains(after, "qwen38.nvfp4") || !strings.Contains(after, "~/src/app") || !strings.Contains(after, "dev") {
+	if !strings.Contains(after, "main-model") || !strings.Contains(after, "~/src/app") || !strings.Contains(after, "dev") {
 		t.Fatalf("card\n%s", after)
 	}
 	body, err := os.ReadFile(cfg)
@@ -82,7 +82,7 @@ func themePickerChild() {
 	dir := os.Getenv("KONSOLAI_THEME_CWD")
 	cfgPath := os.Getenv("KONSOLAI_THEME_CFG")
 	prof := config.Builtin()
-	prof.LLM.Model = "qwen38.nvfp4"
+	prof.LLM.Model = "main-model"
 	prof.LLM.Endpoint = "http://127.0.0.1:1/v1"
 	prof.Fast.Endpoint = ""
 	prof.Fast.Enabled = false
@@ -102,7 +102,7 @@ func themePickerChild() {
 		ConfigPath: cfgPath,
 	}
 	code := Run(context.Background(), Config{
-		Env: env, Reg: commands.Default(), Version: "vtest", Model: "qwen38.nvfp4",
+		Env: env, Reg: commands.Default(), Version: "vtest", Model: "main-model",
 		Out: os.Stdout, Err: os.Stderr,
 	})
 	os.Exit(code)
@@ -180,7 +180,7 @@ func driveThemePicker(t *testing.T, testName, child, keys string, waitClear bool
 		t.Fatalf("timeout waiting for %q\n%s", needle, plain)
 		return ""
 	}
-	waitPlain("qwen38.nvfp4", 3*time.Second)
+	waitPlain("main-model", 3*time.Second)
 	time.Sleep(150 * time.Millisecond)
 	if _, err := ptmx.Write([]byte("/theme\r")); err != nil {
 		t.Fatal(err)
@@ -200,7 +200,7 @@ func driveThemePicker(t *testing.T, testName, child, keys string, waitClear bool
 			idx := bytes.LastIndex(raw, seq)
 			if idx >= 0 {
 				after := ansiRe.ReplaceAllString(strings.ReplaceAll(string(raw[idx+len(seq):]), "\r", ""), "")
-				if strings.Contains(after, "qwen38.nvfp4") && strings.Contains(after, "╭") {
+				if strings.Contains(after, "main-model") && strings.Contains(after, "╭") {
 					time.Sleep(100 * time.Millisecond)
 					mu.Lock()
 					out := append([]byte(nil), buf.Bytes()...)
