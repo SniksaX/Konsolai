@@ -38,7 +38,7 @@ func UpsertProject(ctx context.Context, mem *memory.Guard, cwd string) *int64 {
 }
 
 func FindCandidates(ctx context.Context, mem *memory.Guard, prof config.Profile, projectID *int64, cwd string) []ResumeCandidate {
-	idle := time.Duration(prof.SessionIdleMinutes) * time.Minute
+	idle := time.Duration(prof.Memory.SessionIdleMinutes) * time.Minute
 	if mem.Store() == nil {
 		if sess, ok := memory.LoadLast(prof.Name, cwd, idle); ok {
 			age := time.Duration(0)
@@ -102,7 +102,7 @@ func CreateSession(ctx context.Context, mem *memory.Guard, prof config.Profile, 
 	}
 	id, err := s.CreateSession(ctx, store.NewSession{
 		Profile: prof.Name, ProjectID: projectID, CWD: cwd,
-		Mode: mode, Model: prof.Model, Title: title,
+		Mode: mode, Model: prof.LLM.Model, Title: title,
 	})
 	if err != nil {
 		mem.Fail(err)
