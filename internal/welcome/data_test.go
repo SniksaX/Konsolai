@@ -45,7 +45,7 @@ func TestGatherHonorsProbeDeadline(t *testing.T) {
 	start := time.Now()
 	_, err := Gather(context.Background(), Input{
 		Endpoint:    slow.URL + "/v1",
-		Model:       "qwen",
+		Model:       "main-model",
 		ProbeBudget: 80 * time.Millisecond,
 		CWD:         t.TempDir(),
 	})
@@ -86,7 +86,7 @@ func TestGatherProbesDeadlineAndOffline(t *testing.T) {
 	start := time.Now()
 	data, err := Gather(context.Background(), Input{
 		Endpoint:       up.URL + "/v1",
-		Model:          "qwen",
+		Model:          "main-model",
 		FastEndpoint:   slow.URL + "/v1",
 		FastModel:      "mini",
 		EmbedEndpoint:  refusedURL,
@@ -111,7 +111,7 @@ func TestGatherProbesDeadlineAndOffline(t *testing.T) {
 	for _, m := range data.Models {
 		byRole[m.Role] = m
 	}
-	if byRole["main"].Status != StatusUp || byRole["main"].Name != "qwen" {
+	if byRole["main"].Status != StatusUp || byRole["main"].Name != "main-model" {
 		t.Fatalf("main %+v", byRole["main"])
 	}
 	if !strings.HasSuffix(byRole["main"].Stat, "ms") && !strings.Contains(byRole["main"].Stat, "tokens/s") {
