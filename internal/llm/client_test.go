@@ -39,7 +39,7 @@ func TestCompleteParsesToolCallsAndSendsTools(t *testing.T) {
 		})
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL+"/v1", "qwen")
+	c := New(srv.URL+"/v1", "main-model")
 	c.SetThinkKwargs(true)
 	specs := []ToolSpec{{
 		Type: "function",
@@ -87,7 +87,7 @@ func TestNamedToolChoice(t *testing.T) {
 		})
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL+"/v1", "qwen")
+	c := New(srv.URL+"/v1", "main-model")
 	specs := []ToolSpec{{
 		Type: "function",
 		Function: FunctionSpec{
@@ -128,7 +128,7 @@ func TestCompleteOmitsToolsWhenEmpty(t *testing.T) {
 		})
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL+"/v1", "qwen")
+	c := New(srv.URL+"/v1", "main-model")
 	_, _, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -160,7 +160,7 @@ func TestCompleteHTTPError(t *testing.T) {
 		http.Error(w, "nope", http.StatusInternalServerError)
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL+"/v1", "qwen")
+	c := New(srv.URL+"/v1", "main-model")
 	_, _, err := c.Complete(context.Background(), nil, nil, ChatOptions{})
 	if err == nil || !strings.Contains(err.Error(), "500") {
 		t.Fatalf("got %v", err)
@@ -174,7 +174,7 @@ func TestCompleteErrorObject(t *testing.T) {
 		}{Message: "bad model"}})
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL+"/v1", "qwen")
+	c := New(srv.URL+"/v1", "main-model")
 	_, _, err := c.Complete(context.Background(), nil, nil, ChatOptions{})
 	if err == nil || !strings.Contains(err.Error(), "bad model") {
 		t.Fatalf("got %v", err)
@@ -186,7 +186,7 @@ func TestCompleteEmptyChoices(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(completeResponse{})
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL+"/v1", "qwen")
+	c := New(srv.URL+"/v1", "main-model")
 	_, _, err := c.Complete(context.Background(), nil, nil, ChatOptions{})
 	if err == nil || !strings.Contains(err.Error(), "no choices") {
 		t.Fatalf("got %v", err)
@@ -205,7 +205,7 @@ func TestStreamDeltasAndDone(t *testing.T) {
 		fl.Flush()
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL+"/v1", "qwen")
+	c := New(srv.URL+"/v1", "main-model")
 	var got string
 	_, err := c.Stream(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, ChatOptions{}, func(d string) error {
 		got += d
@@ -225,7 +225,7 @@ func TestStreamErrorChunk(t *testing.T) {
 		_, _ = io.WriteString(w, "data: {\"error\":{\"message\":\"boom\"}}\n\n")
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL+"/v1", "qwen")
+	c := New(srv.URL+"/v1", "main-model")
 	_, err := c.Stream(context.Background(), nil, ChatOptions{}, func(string) error { return nil })
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("got %v", err)
@@ -246,12 +246,12 @@ func TestResolveModelCaches(t *testing.T) {
 			} `json:"data"`
 		}{Data: []struct {
 			ID string `json:"id"`
-		}{{ID: "qwen38.nvfp4"}}})
+		}{{ID: "main-model"}}})
 	}))
 	t.Cleanup(srv.Close)
 	c := New(srv.URL+"/v1", "")
 	id, err := c.ResolveModel(context.Background())
-	if err != nil || id != "qwen38.nvfp4" {
+	if err != nil || id != "main-model" {
 		t.Fatalf("id=%q err=%v", id, err)
 	}
 	id2, err := c.ResolveModel(context.Background())
@@ -275,7 +275,7 @@ func TestResponseSchemaShape(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	schema := json.RawMessage(`{"type":"object","properties":{"intent":{"type":"string"}}}`)
-	c := New(srv.URL+"/v1", "qwen")
+	c := New(srv.URL+"/v1", "main-model")
 	_, _, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{
 		ResponseSchema: schema, MaxTokens: 120,
 	})
@@ -319,7 +319,7 @@ func TestCompleteUsage(t *testing.T) {
 		})
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL+"/v1", "qwen")
+	c := New(srv.URL+"/v1", "main-model")
 	_, u, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -339,7 +339,7 @@ func TestStreamUsageAndOptions(t *testing.T) {
 		_, _ = io.WriteString(w, "data: [DONE]\n\n")
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL+"/v1", "qwen")
+	c := New(srv.URL+"/v1", "main-model")
 	u, err := c.Stream(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, ChatOptions{}, func(string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
@@ -382,7 +382,7 @@ func TestCompleteSSEContentOnly(t *testing.T) {
 		)
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL+"/v1", "qwen")
+	c := New(srv.URL+"/v1", "main-model")
 	msg, _, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -404,7 +404,7 @@ func TestCompleteSSEToolCallsInterleaved(t *testing.T) {
 		)
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL+"/v1", "qwen")
+	c := New(srv.URL+"/v1", "main-model")
 	msg, _, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -428,7 +428,7 @@ func TestCompleteSSEInvalidToolArgsPassedThrough(t *testing.T) {
 		writeSSE(w, `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c","function":{"name":"x","arguments":"{not json"}}]}}]}`)
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL+"/v1", "qwen")
+	c := New(srv.URL+"/v1", "main-model")
 	msg, _, err := c.Complete(context.Background(), nil, nil, ChatOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -446,7 +446,7 @@ func TestCompleteSSEUsage(t *testing.T) {
 		)
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL+"/v1", "qwen")
+	c := New(srv.URL+"/v1", "main-model")
 	_, u, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -461,7 +461,7 @@ func TestCompleteSSETruncated(t *testing.T) {
 		writeSSE(w, `{"choices":[{"delta":{"content":"hello"},"finish_reason":"length"}]}`)
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL+"/v1", "qwen")
+	c := New(srv.URL+"/v1", "main-model")
 	msg, _, err := c.Complete(context.Background(), nil, nil, ChatOptions{})
 	if !errors.Is(err, ErrTruncated) {
 		t.Fatalf("err %v", err)
@@ -485,7 +485,7 @@ func TestCompleteSSEIdleTimeout(t *testing.T) {
 		<-r.Context().Done()
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL+"/v1", "qwen")
+	c := New(srv.URL+"/v1", "main-model")
 	c.retryWait = time.Hour
 	_, _, err := c.Complete(context.Background(), nil, nil, ChatOptions{IdleTimeout: 150 * time.Millisecond})
 	if !errors.Is(err, ErrIdleTimeout) {
@@ -507,7 +507,7 @@ func TestCompleteRetry503ThenSuccess(t *testing.T) {
 		writeSSE(w, `{"choices":[{"delta":{"content":"ok"}}]}`)
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL+"/v1", "qwen")
+	c := New(srv.URL+"/v1", "main-model")
 	c.retryWait = time.Millisecond
 	msg, _, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{})
 	if err != nil {
@@ -533,7 +533,7 @@ func TestCompleteNoRetryAfterPartialData(t *testing.T) {
 		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\n")
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL+"/v1", "qwen")
+	c := New(srv.URL+"/v1", "main-model")
 	c.retryWait = time.Millisecond
 	msg, _, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{})
 	if err != nil {
@@ -558,7 +558,7 @@ func TestCompleteNoRetry4xx(t *testing.T) {
 		http.Error(w, "bad", http.StatusBadRequest)
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL+"/v1", "qwen")
+	c := New(srv.URL+"/v1", "main-model")
 	c.retryWait = time.Millisecond
 	_, _, err := c.Complete(context.Background(), nil, nil, ChatOptions{})
 	var he *HTTPError
@@ -579,17 +579,17 @@ func TestContextWindowFromMaxModelLen(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data": []map[string]any{
 				{"id": "other", "max_model_len": 4096},
-				{"id": "qwen38.nvfp4", "max_model_len": 94208},
+				{"id": "main-model", "max_model_len": 94208},
 			},
 		})
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL+"/v1", "qwen38.nvfp4")
+	c := New(srv.URL+"/v1", "main-model")
 	if c.ContextWindow() != 32768 {
 		t.Fatalf("unset window %d", c.ContextWindow())
 	}
 	id, err := c.ResolveModel(context.Background())
-	if err != nil || id != "qwen38.nvfp4" {
+	if err != nil || id != "main-model" {
 		t.Fatalf("id=%q err=%v", id, err)
 	}
 	if c.ContextWindow() != 94208 {
@@ -669,13 +669,13 @@ func TestContextWindowFallback(t *testing.T) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data": []map[string]any{{"id": "qwen"}},
+			"data": []map[string]any{{"id": "main-model"}},
 		})
 	}))
 	t.Cleanup(srv.Close)
 	c := New(srv.URL+"/v1", "")
 	id, err := c.ResolveModel(context.Background())
-	if err != nil || id != "qwen" {
+	if err != nil || id != "main-model" {
 		t.Fatalf("id=%q err=%v", id, err)
 	}
 	if c.ContextWindow() != 32768 {
@@ -697,7 +697,7 @@ func TestTokensPerCharCalibration(t *testing.T) {
 		})
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL+"/v1", "qwen")
+	c := New(srv.URL+"/v1", "main-model")
 	if math.Abs(c.TokensPerChar()-0.30) > 1e-9 {
 		t.Fatalf("start ratio %v", c.TokensPerChar())
 	}
