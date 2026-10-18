@@ -94,7 +94,7 @@ func (s *Session) Handle(ctx context.Context, line string) (toAI bool, err error
 		run = RunPty
 	}
 	code, dur, cap, err := run(ctx, s.Cwd, line, s.Stdin, s.out())
-	s.Hist.Add(line, cap)
+	s.Hist.AddExit(line, cap, code)
 	if code != 0 || dur > 2*time.Second {
 		fmt.Fprintln(s.out(), ui.Current().Muted(fmt.Sprintf("exit %d · %.1fs", code, dur.Seconds())))
 	}
