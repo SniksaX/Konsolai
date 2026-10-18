@@ -2,6 +2,7 @@ package welcome
 
 import (
 	"bytes"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,13 @@ import (
 	"github.com/siraj/konsolai/internal/ui"
 	"github.com/siraj/konsolai/internal/ui/theme"
 )
+
+var updateGolden = flag.Bool("update", false, "rewrite welcome golden files")
+
+func TestMain(m *testing.M) {
+	flag.Parse()
+	os.Exit(m.Run())
+}
 
 func plain(t *testing.T) {
 	t.Helper()
@@ -28,17 +36,17 @@ func renderString(d Data, layout string, width, height int) string {
 
 func allUp() Data {
 	return Data{
-		Host: "fatboy",
+		Host: "gpu-box",
 		Models: []Model{
-			{Name: "qwen38.nvfp4", Role: "main", Status: StatusUp, Stat: "84 tokens/s"},
-			{Name: "qwen38-fast", Role: "fast", Status: StatusUp, Stat: "120 tokens/s"},
-			{Name: "nomic-embed", Role: "embed", Status: StatusUp, Stat: "40ms"},
-			{Name: "bge-reranker", Role: "rerank", Status: StatusUp, Stat: "18ms"},
+			{Name: "main-model", Role: "main", Status: StatusUp, Stat: "84 tokens/s"},
+			{Name: "fast-model", Role: "fast", Status: StatusUp, Stat: "120 tokens/s"},
+			{Name: "embed-model", Role: "embed", Status: StatusUp, Stat: "40ms"},
+			{Name: "rerank-model", Role: "rerank", Status: StatusUp, Stat: "18ms"},
 		},
 		Up: 4, Total: 4,
 		Session: Session{
-			Dir:     "~/proj",
-			Branch:  "dev",
+			Dir:     "~/projects/demo",
+			Branch:  "main",
 			Dirty:   true,
 			Changed: 3,
 			Ahead:   1,
@@ -64,7 +72,7 @@ func offline() Data {
 	for i := range d.Models {
 		d.Models[i].Status = StatusDown
 	}
-	d.Models[0].Stat = ":11436 unreachable"
+	d.Models[0].Stat = ":8000 unreachable"
 	d.Models[1].Stat = ":11437 unreachable"
 	d.Models[2].Stat = ":8081 unreachable"
 	d.Models[3].Stat = ":8082 unreachable"
@@ -128,7 +136,7 @@ func TestRenderGoldens(t *testing.T) {
 					}
 					name := layout + "_" + fx.name + "_w" + itoa(w) + "_h" + itoa(h) + ".golden"
 					path := filepath.Join("testdata", name)
-					if os.Getenv("UPDATE_GOLDEN") == "1" {
+					if *updateGolden || os.Getenv("UPDATE_GOLDEN") == "1" {
 						if err := os.MkdirAll("testdata", 0o755); err != nil {
 							t.Fatal(err)
 						}
@@ -154,17 +162,17 @@ func TestRenderGoldens(t *testing.T) {
 func TestWideSplitKeepsRecentBesideSession(t *testing.T) {
 	plain(t)
 	d := Data{
-		Host: "fatboy",
+		Host: "gpu-box",
 		Models: []Model{
-			{Name: "qwen38.nvfp4", Role: "main", Status: StatusUp, Stat: "126ms"},
+			{Name: "main-model", Role: "main", Status: StatusUp, Stat: "126ms"},
 			{Name: "fast", Role: "fast", Status: StatusUp, Stat: "105ms"},
 			{Name: "embed", Role: "embed", Status: StatusUp, Stat: "225ms"},
-			{Name: "rerank", Role: "rerank", Status: StatusDown, Stat: ":9501 unreachable"},
+			{Name: "rerank", Role: "rerank", Status: StatusDown, Stat: ":8003 unreachable"},
 		},
 		Up: 3, Total: 4,
 		Session: Session{
-			Dir:     "~/Desktop/other/Konsolai",
-			Branch:  "dev",
+			Dir:     "~/projects/demo",
+			Branch:  "main",
 			Dirty:   true,
 			Changed: 1,
 			Ahead:   232,
@@ -262,7 +270,7 @@ func TestMinimalMatchesBanner(t *testing.T) {
 		}
 	}
 	out := renderString(d, "minimal", 100, 40)
-	if !strings.Contains(out, "dev*") || !strings.Contains(out, "qwen38.nvfp4") || !strings.Contains(out, "/ commands") {
+	if !strings.Contains(out, "main*") || !strings.Contains(out, "main-model") || !strings.Contains(out, "/ commands") {
 		t.Fatalf("minimal card missing fields:\n%s", out)
 	}
 }
@@ -281,7 +289,7 @@ func TestHeightAndWidthFallbacks(t *testing.T) {
 	if strings.Contains(wideDrop, "fix the welcome") || strings.Contains(wideDrop, "/resume") {
 		t.Fatalf("H=26 should drop recent:\n%s", wideDrop)
 	}
-	if !strings.Contains(wideDrop, "█") || !strings.Contains(wideDrop, "/ commands") || !strings.Contains(wideDrop, "dev*") {
+	if !strings.Contains(wideDrop, "█") || !strings.Contains(wideDrop, "/ commands") || !strings.Contains(wideDrop, "main*") {
 		t.Fatalf("H=26 split:\n%s", wideDrop)
 	}
 	full := renderString(d, "split", 140, 40)
@@ -296,7 +304,7 @@ func TestHeightAndWidthFallbacks(t *testing.T) {
 		t.Fatalf("mode and age must stay visible:\n%s", medium)
 	}
 	narrow := renderString(d, "split", 90, 40)
-	if !strings.Contains(narrow, "4/4 up") || !strings.Contains(narrow, "dev*") || !strings.Contains(narrow, "3 changed") {
+	if !strings.Contains(narrow, "4/4 up") || !strings.Contains(narrow, "main*") || !strings.Contains(narrow, "3 changed") {
 		t.Fatalf("narrow strip:\n%s", narrow)
 	}
 	if !strings.Contains(narrow, "answer a short question") || strings.Contains(narrow, "wire the footer meter") {
@@ -319,11 +327,11 @@ func TestHeightAndWidthFallbacks(t *testing.T) {
 
 func TestHealthAndErrorWords(t *testing.T) {
 	plain(t)
-	if !strings.Contains(renderString(allUp(), "frame", 140, 40), "● fatboy online") {
+	if !strings.Contains(renderString(allUp(), "frame", 140, 40), "● gpu-box online") {
 		t.Fatal("all up")
 	}
 	off := renderString(offline(), "frame", 140, 40)
-	if !strings.Contains(off, "○ fatboy offline") || !strings.Contains(off, "unreachable") {
+	if !strings.Contains(off, "○ gpu-box offline") || !strings.Contains(off, "unreachable") {
 		t.Fatalf("offline frame:\n%s", off)
 	}
 	db := renderString(dbOffline(), "split", 140, 40)
@@ -347,11 +355,11 @@ func TestHealthAndErrorWords(t *testing.T) {
 	slow.Up = 2
 	slow.Total = 4
 	deg := renderString(slow, "frame", 140, 40)
-	if !strings.Contains(deg, "● fatboy degraded") {
+	if !strings.Contains(deg, "● gpu-box degraded") {
 		t.Fatalf("degraded:\n%s", deg)
 	}
 	strip := renderString(slow, "split", 90, 40)
-	if !strings.Contains(strip, "2/4 up") || !strings.Contains(strip, "bge-reranker") || !strings.Contains(strip, "qwen38-fast") {
+	if !strings.Contains(strip, "2/4 up") || !strings.Contains(strip, "rerank-model") || !strings.Contains(strip, "fast-model") {
 		t.Fatalf("degraded strip:\n%s", strip)
 	}
 
@@ -364,7 +372,7 @@ func TestHealthAndErrorWords(t *testing.T) {
 	}
 	var frameOff bytes.Buffer
 	Render(&frameOff, offline(), "frame", 140, 40)
-	if !strings.Contains(frameOff.String(), theme.Style(theme.Error, "○ fatboy offline")) {
+	if !strings.Contains(frameOff.String(), theme.Style(theme.Error, "○ gpu-box offline")) {
 		t.Fatal("offline banner not painted Error")
 	}
 	var mem bytes.Buffer
@@ -435,7 +443,7 @@ func TestDrawBoxWidth(t *testing.T) {
 	plain(t)
 	pal := ui.Current()
 	for _, w := range []int{24, 42, 52, 67, 72, 120, 140} {
-		box := drawBox(pal, w, "fatboy", "4/4 up", pal.Muted, modelRows(pal, w-2, allUp().Models))
+		box := drawBox(pal, w, "gpu-box", "4/4 up", pal.Muted, modelRows(pal, w-2, allUp().Models))
 		for _, ln := range box {
 			if got := theme.DisplayWidth(ln); got != w {
 				t.Fatalf("box width %d line %d\n%q", w, got, ln)

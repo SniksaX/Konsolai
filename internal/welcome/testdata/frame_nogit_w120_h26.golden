@@ -1,5 +1,5 @@
 
-╭─ konsolai v0.1.0 ────────────────────────────────────────────────────────────────────────────────── ● fatboy online ─╮
+╭─ konsolai v0.1.0 ───────────────────────────────────────────────────────────────────────────────── ● gpu-box online ─╮
 │                                                                                                                      │
 │   ▀▄     █  ▄▀ ▄▀▀▀▄ █▄  █ ▄▀▀▀▀ ▄▀▀▀▄ █     ▄▀▀▀▄ ▀▀█▀▀ █████  Your terminal agent, on your own models.             │
 │     ▀▄   █▄▀   █   █ █ ▀▄█ ▀▄▄▄  █   █ █     █▄▄▄█   █   █████  answer · lookup · act · build                        │
@@ -8,10 +8,10 @@
 │                                                                                                                      │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │  MODELS                                SESSION                                                                       │
-│  ● qwen38.nvfp4  main    84 tokens/s   dir      ~/proj                                                               │
-│  ● qwen38-fast   fast    120 tokens/s  branch   not a git repo                                                       │
-│  ● nomic-embed   embed   40ms          build    v0.1.0  ab12cd3                                                      │
-│  ● bge-reranker  rerank  18ms          memory   412 facts · 2 sessions                                               │
+│  ● main-model    main    84 tokens/s   dir      ~/projects/demo                                                      │
+│  ● fast-model    fast    120 tokens/s  branch   not a git repo                                                       │
+│  ● embed-model   embed   40ms          build    v0.1.0  ab12cd3                                                      │
+│  ● rerank-model  rerank  18ms          memory   412 facts · 2 sessions                                               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 
     / commands   ! shell   @ files   ? help                                       tip /undo reverts the last file change
