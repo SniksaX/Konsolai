@@ -236,7 +236,7 @@ profiles:
     database:
       url: postgres://h/home
     llm:
-      endpoint: http://home/v1
+      endpoint: http://house/v1
       model: home-model
     memory:
       session_idle_minutes: 10
@@ -262,7 +262,7 @@ profiles:
 		if err != nil {
 			t.Fatal(err)
 		}
-		if p.Name != "home" || p.LLM.Model != "home-model" || p.LLM.Endpoint != "http://home/v1" {
+		if p.Name != "home" || p.LLM.Model != "home-model" || p.LLM.Endpoint != "http://house/v1" {
 			t.Fatalf("got %+v", p)
 		}
 		if p.Memory.SessionIdleMinutes != 10 || p.Memory.RetentionDays != 7 {
@@ -413,7 +413,7 @@ func TestMigrateJSON(t *testing.T) {
 		"profiles": {
 			"home": {
 				"database_url": "postgres://u:secret@localhost:5432/k",
-				"endpoint": "http://home/v1",
+				"endpoint": "http://house/v1",
 				"model": "home-model",
 				"session_idle_minutes": 12,
 				"memory_rag": false
@@ -451,7 +451,7 @@ func TestMigrateJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Name != "home" || p.LLM.Model != "home-model" || p.LLM.Endpoint != "http://home/v1" {
+	if p.Name != "home" || p.LLM.Model != "home-model" || p.LLM.Endpoint != "http://house/v1" {
 		t.Fatalf("got %+v", p)
 	}
 	if p.Memory.SessionIdleMinutes != 12 || p.RAGEnabled() {
