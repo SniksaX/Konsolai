@@ -1,0 +1,15 @@
+stats  week
+
+models
+model       calls  prompt  completion  tok/s  p50 ms  p95 ms
+main-model      2      20         150  100.0     500    1000
+other           1      10          10   10.0    1000    1000
+
+intents
+intent  turns  avg steps  avg wall ms
+answer      2        2.0          750
+lookup      1        1.0         1000
+
+totals
+sessions  turns  tokens
+       1      2     170
