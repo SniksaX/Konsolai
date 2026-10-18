@@ -19,16 +19,7 @@ var (
 	passKV      = regexp.MustCompile(`(?i)\bpassword=\S+`)
 )
 
-const (
-	defaultEndpoint       = "http://fatboy:11436/v1"
-	defaultFastEndpoint   = "http://fatboy:11435/v1"
-	defaultEmbedEndpoint  = "http://fatboy:9502"
-	defaultRerankEndpoint = "http://fatboy:9501"
-	defaultIdleMinutes    = 30
-	defaultRetention      = 90
-	defaultLLMIdle        = 120
-	builtinProfile        = "default"
-)
+const builtinProfile = "default"
 
 // Profile is the resolved config passed down through the process.
 // Nested sections are the source of truth; flat fields stay populated
@@ -57,6 +48,7 @@ type Config struct {
 type LLM struct {
 	Endpoint           string    `yaml:"endpoint"`
 	Model              string    `yaml:"model"`
+	ThinkingKwargs     bool      `yaml:"thinking_kwargs"`
 	IdleTimeoutSeconds int       `yaml:"idle_timeout_seconds"`
 	MaxTokens          MaxTokens `yaml:"max_tokens"`
 }
@@ -72,6 +64,7 @@ type Fast struct {
 	Enabled           bool    `yaml:"enabled"`
 	Endpoint          string  `yaml:"endpoint"`
 	Model             string  `yaml:"model"`
+	ThinkingKwargs    bool    `yaml:"thinking_kwargs"`
 	ContextGuardRatio float64 `yaml:"context_guard_ratio"`
 }
 

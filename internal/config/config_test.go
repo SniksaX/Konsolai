@@ -95,8 +95,8 @@ func TestResolveBuiltinDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Name != "default" || p.LLM.Endpoint != defaultEndpoint {
-		t.Fatalf("got %+v", p)
+	if p.Name != "default" || p.LLM.Endpoint != "http://localhost:8000/v1" || p.LLM.Model != "" || p.LLM.ThinkingKwargs {
+		t.Fatalf("got %+v", p.LLM)
 	}
 	if p.Memory.SessionIdleMinutes != 30 || p.Memory.RetentionDays != 90 || p.LLM.IdleTimeoutSeconds != 120 {
 		t.Fatalf("defaults %+v", p)
@@ -104,14 +104,14 @@ func TestResolveBuiltinDefault(t *testing.T) {
 	if p.Agent.BuildThinking != "plan_step" {
 		t.Fatalf("build_thinking %q", p.Agent.BuildThinking)
 	}
-	if p.Fast.Endpoint != defaultFastEndpoint || p.Fast.Model != "" {
-		t.Fatalf("fast %+v", p)
+	if p.Fast.Enabled || p.Fast.Endpoint != "" || p.Fast.Model != "" || p.Fast.ThinkingKwargs || p.FastOn() {
+		t.Fatalf("fast %+v", p.Fast)
 	}
-	if p.RAG.EmbedEndpoint != defaultEmbedEndpoint || p.RAG.RerankEndpoint != defaultRerankEndpoint {
-		t.Fatalf("rag endpoints %+v", p)
+	if p.RAG.Enabled || p.RAG.EmbedEndpoint != "" || p.RAG.RerankEndpoint != "" || p.RAGEnabled() {
+		t.Fatalf("rag %+v", p.RAG)
 	}
-	if !p.RAGEnabled() {
-		t.Fatal("memory_rag default")
+	if p.Database.URL != "" {
+		t.Fatalf("database %q", p.Database.URL)
 	}
 	if len(p.Language.Languages) != 2 || p.Language.Languages[0] != "en" || p.Language.Languages[1] != "fr" {
 		t.Fatalf("languages %+v", p.Language.Languages)
