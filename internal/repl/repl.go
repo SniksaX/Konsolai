@@ -222,6 +222,18 @@ func Run(ctx context.Context, cfg Config) int {
 			st.mode.Hist.Clear()
 		}
 	}
+	if env != nil {
+		env.FailedShell = func() (string, int, string, bool) {
+			if st.mode == nil {
+				return "", 0, "", false
+			}
+			e, ok := st.mode.Hist.LastFailure()
+			if !ok {
+				return "", 0, "", false
+			}
+			return e.Cmd, e.Exit, e.Output, true
+		}
+	}
 
 	for {
 		select {
