@@ -14,6 +14,27 @@ import (
 	"github.com/siraj/konsolai/internal/store"
 )
 
+func TestGatherListsOnlyConfiguredEndpoints(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer up.Close()
+	data, err := Gather(context.Background(), Input{
+		Endpoint: up.URL + "/v1",
+		Model:    "main-model",
+		CWD:      t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data.Models) != 1 || data.Total != 1 || data.Models[0].Role != "main" {
+		t.Fatalf("models %+v total %d", data.Models, data.Total)
+	}
+	if data.Host == "" {
+		t.Fatal("missing host")
+	}
+}
+
 func TestGatherHonorsProbeDeadline(t *testing.T) {
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(2 * time.Second)
