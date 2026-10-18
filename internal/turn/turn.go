@@ -79,6 +79,7 @@ type Request struct {
 	Text          string
 	Stdin         string
 	Intent        string
+	Effort        string
 	Yes           bool
 	Trace         bool
 	Plain         bool
