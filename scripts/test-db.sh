@@ -9,7 +9,7 @@ usage() {
 	exit 2
 }
 
-# Never touch the user's konsolai-pg (port 55432, volume konsolai-pg).
+# Never touch the developer's own database container. Integration tests use this script.
 if [[ "${1:-}" != "up" && "${1:-}" != "down" ]]; then
 	usage
 fi
