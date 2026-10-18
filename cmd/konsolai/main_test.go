@@ -297,7 +297,7 @@ func TestResumeSessionLocalFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	mem := memory.NewGuard(nil, nil)
-	prof := config.Profile{Name: "default", SessionIdleMinutes: 30}
+	prof := config.Profile{Name: "default", Memory: config.Memory{SessionIdleMinutes: 30}}
 	cands := findCandidates(context.Background(), mem, prof, nil, cwd)
 	if len(cands) != 1 || cands[0].Title != "quel process" || len(cands[0].Messages) != 1 || cands[0].Messages[0].Content != "port 3000" {
 		t.Fatalf("%+v", cands)
