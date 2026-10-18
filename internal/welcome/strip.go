@@ -49,7 +49,7 @@ func hostName(d Data) string {
 	if h := strings.TrimSpace(d.Host); h != "" {
 		return h
 	}
-	return "fatboy"
+	return "localhost"
 }
 
 func statusStrip(pal ui.Palette, d Data, width int) string {
