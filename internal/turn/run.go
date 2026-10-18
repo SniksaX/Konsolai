@@ -112,6 +112,12 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	if thinkMode == ThinkAlways {
 		dec.Effort = intent.EffortHigh
 	}
+	if effort := intent.Effort(req.Effort); req.Effort != "" {
+		switch effort {
+		case intent.EffortNone, intent.EffortLow, intent.EffortHigh:
+			dec.Effort = effort
+		}
+	}
 	r.RouterModel = routeClient.ModelID()
 	if r.RouterModel == "" {
 		if id, err := routeClient.ResolveModel(ctx); err == nil {
