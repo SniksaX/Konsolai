@@ -350,6 +350,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			ShellMaxTimeout:     r.Profile.ShellMaxTimeout(),
 			ShellWaitDelay:      r.Profile.ShellWaitDelay(),
 		})
+		reg = registryForRAG(reg, r.Profile.RAGEnabled())
 		cfg := agent.Config{
 			Client:         client,
 			Tools:          reg,
@@ -387,7 +388,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		}
 		switch dec.Intent {
 		case intent.Lookup:
-			cfg.Tools = reg.Named("list_dir", "read_file", "outline", "search", "find_files", "web_fetch", "recall", "run_shell", "finish")
+			cfg.Tools = reg.Named(lookupToolNames(r.Profile.RAGEnabled())...)
 			cfg.Prompt = agent.LookupPrompt + "\n" + lang + sub
 			cfg.MaxSteps = r.Profile.MaxStepsFor("lookup")
 			cfg.ExploreBudget = r.Profile.ExploreBudgetFor("lookup", string(dec.Task))
@@ -686,6 +687,21 @@ func AttachMemories(user string, hits []rag.Hit) (string, int) {
 		return user, 0
 	}
 	return rag.PrependMemory(user, hits), len(hits)
+}
+
+func registryForRAG(reg *tools.Registry, rag bool) *tools.Registry {
+	if rag {
+		return reg
+	}
+	return reg.Without("recall")
+}
+
+func lookupToolNames(rag bool) []string {
+	names := []string{"list_dir", "read_file", "outline", "search", "find_files", "web_fetch"}
+	if rag {
+		names = append(names, "recall")
+	}
+	return append(names, "run_shell", "finish")
 }
 
 func inSubproject(cwd, root string) bool {
