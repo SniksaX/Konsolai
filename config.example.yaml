@@ -1,0 +1,124 @@
+# Konsolai config. CLI flags beat KONSOLAI_* env vars, then the
+# selected profile, then defaults, then these built-in values.
+# Do not put API keys or passwords in this file. database.url is a
+# connection string; /config show masks the password.
+default_profile: home   # used when --profile and KONSOLAI_PROFILE are empty
+
+defaults:
+  llm:
+    endpoint: http://localhost:8000/v1   # OpenAI-compatible API base
+    model: ""   # empty uses the server default
+    thinking_kwargs: false   # send chat_template_kwargs.enable_thinking
+    idle_timeout_seconds: 120   # stream idle limit
+    max_tokens:
+      answer: 4096   # answer intent token cap
+      lookup: 4096   # lookup intent token cap
+      act: 4096   # act intent token cap
+      build: 12288   # build intent token cap
+  fast:
+    enabled: false   # route short turns to the fast model
+    endpoint: ""   # fast model API base
+    model: ""   # empty uses the server default
+    thinking_kwargs: false   # send chat_template_kwargs.enable_thinking for the fast model
+    context_guard_ratio: 0.6   # skip fast when the prompt fills past this fraction of its window
+  database:
+    url: ""   # Postgres URL; empty disables memory
+  memory:
+    session_idle_minutes: 30   # resume a session newer than this
+    retention_days: 90   # prune facts older than this
+    compact_threshold: 0.7   # compact history past this fraction of the window
+    isolated_timeout_ms: 2000   # memory calls detached from the turn
+  context:
+    elide_trigger: 0.6   # start eliding tool output above this fraction
+    elide_target: 0.4   # elide down toward this fraction; must stay below the trigger
+  agent:
+    max_steps:
+      lookup: 10   # lookup turn step cap
+      act: 15   # act turn step cap
+      build: 60   # build turn step cap
+    explore_budget:
+      lookup: 6   # read-only steps before the lookup nudge
+      lookup_analysis: 10   # lookup analysis read budget
+      act: 6   # act read budget before the nudge
+      build: 8   # build read budget before the plan nudge
+      build_docs: 16   # docs-task read budget
+      build_analysis: 12   # build analysis read budget
+    build_thinking: plan_step   # plan_step | until_plan
+    identical_rejects: 2   # stop after this many identical rejected tool calls
+  rag:
+    enabled: false   # index and search project memory
+    embed_endpoint: ""   # embedding service
+    rerank_endpoint: ""   # rerank service
+    embed_batch: 32   # texts per embed request
+    chunk:
+      turn_tokens: 1200   # tokens per stored turn chunk
+      web_tokens: 600   # tokens per fetched-page chunk
+      web_overlap_tokens: 80   # overlap between web chunks
+      code_window_lines: 60   # lines per code chunk
+      code_overlap_lines: 10   # overlap between code chunks
+      go_max_decl_lines: 200   # keep a Go declaration whole up to this many lines
+      go_split_window_lines: 120   # window once a Go declaration is split
+      go_split_overlap_lines: 20   # overlap for a split Go declaration
+    search:
+      vector_top: 30   # vector candidates before fusion
+      text_top: 30   # text candidates before fusion
+      rrf_k: 60   # reciprocal-rank fusion constant
+      rerank_top: 20   # candidates sent to the reranker
+      k: 6   # chunks returned to the model
+      rerank_threshold: 0.1   # drop reranked chunks at or below this score
+    index:
+      max_file_kb: 512   # skip files larger than this
+      confirm_over_minutes: 5   # ask before an index expected to take longer
+  ui:
+    display_lines: 60   # tool-output lines kept on screen
+    paste_chip_lines: 11   # lines shown for a pasted chip
+    paste_chip_chars: 1000   # characters shown for a pasted chip
+    output_keep_kb: 256   # tool output retained for the model
+    theme: amber   # amber | glacier | nebula | jade | rose | mono
+    appearance: auto   # auto | dark | light
+    cursor_color: true   # color the prompt cursor
+    banner: true   # draw the wordmark at startup
+    welcome: split   # split | frame | minimal
+    code_highlight: true   # highlight fenced code
+    clear_on_start: true   # clear the terminal when the REPL starts
+    strip_emoji: true   # drop emoji from model text
+    probe_deadline_ms: 400   # welcome gather budget
+    probe_timeout_ms: 300   # one endpoint probe
+    git_query_ms: 200   # git status during welcome and in the footer
+    memory_query_ms: 200   # facts and recent sessions on the welcome screen
+    startup_cap_ms: 500   # longest wait before the prompt appears
+    welcome_cache_seconds: 60   # refresh a cached welcome in the background after this
+    model_rate_calls: 20   # recent calls used for tokens per second
+    model_slow_ms: 1000   # welcome marks a model slow at this latency
+    ctx_warn_pct: 60   # footer meter turns warn at this context percent
+    ctx_hot_pct: 85   # footer meter turns hot at this context percent
+    ctx_cells: 8   # cells in the footer context meter
+    ctx_narrow_cols: 90   # below this width the meter is text only
+    layout:
+      tiny_height: 22   # below this height the welcome is a short strip
+      recent_height: 30   # at or above this, show the recent panel
+      tiny_width: 64   # below this width, skip the wordmark
+      narrow_width: 110   # below this, stack the welcome instead of splitting it
+      frame_width: 120   # frame layout needs at least this width
+  tools:
+    shell:
+      default_timeout_sec: 120   # run_shell timeout when the model omits one
+      max_timeout_sec: 600   # longest run_shell timeout
+      wait_delay_ms: 2000   # how long a cancelled shell may take to exit
+  store:
+    query_timeout_ms: 2000   # database query limit
+    migrate_timeout_ms: 15000   # schema migration limit
+  stats:
+    insert_timeout_ms: 2000   # turn stat insert limit
+  language:
+    languages: ["en", "fr"]   # reply languages the router may pick
+    default: en   # language used when detection is unsure
+  safety:
+    extra_read_deny: []   # extra path prefixes to refuse
+    extra_command_deny: []   # extra command substrings to refuse
+  router:
+    action_verbs: ["create", "write", "make", "add", "generate", "fix", "update", "edit", "change", "refactor", "rename", "delete", "remove", "install", "run", "build", "deploy", "commit", "move", "copy", "crée", "créer", "écris", "écrire", "ajoute", "ajouter", "génère", "générer", "corrige", "corriger", "modifie", "modifier", "supprime", "supprimer", "installe", "installer", "lance", "lancer", "déplace", "renomme"]   # verbs that suggest an act or build turn
+    targets: ["file", "folder", "directory", "project", "repo", "branch", "readme", "test", "function", "endpoint", "fichier", "dossier", "projet", "branche"]   # nouns that suggest a project target
+
+profiles:
+  home: {}
