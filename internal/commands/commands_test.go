@@ -24,7 +24,7 @@ func testEnv(t *testing.T) (*Env, *bytes.Buffer, *bytes.Buffer) {
 	var out, errb bytes.Buffer
 	var copied string
 	env := &Env{
-		Profile: config.Profile{Name: "default", Model: "m", Endpoint: "http://127.0.0.1:9/v1"},
+		Profile: config.Profile{Name: "default", LLM: config.LLM{Model: "m", Endpoint: "http://127.0.0.1:9/v1"}},
 		Out:     &out,
 		Err:     &errb,
 		Cwd:     t.TempDir(),
@@ -317,8 +317,8 @@ func TestStatusWindowFromModels(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	env, out, _ := testEnv(t)
-	env.Profile.Endpoint = srv.URL + "/v1"
-	env.Profile.Model = "qwen38.nvfp4"
+	env.Profile.LLM.Endpoint = srv.URL + "/v1"
+	env.Profile.LLM.Model = "qwen38.nvfp4"
 	client := llm.New(srv.URL+"/v1", "qwen38.nvfp4")
 	if client.ContextWindow() != 32768 {
 		t.Fatalf("fallback %d", client.ContextWindow())
