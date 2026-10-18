@@ -259,10 +259,17 @@ func run() int {
 
 	client := llm.New(prof.LLM.Endpoint, prof.LLM.Model)
 	client.SetIdleTimeout(time.Duration(prof.LLM.IdleTimeoutSeconds) * time.Second)
+	client.SetThinkKwargs(prof.LLM.ThinkingKwargs)
+	var fastClient *llm.Client
+	if prof.FastOn() {
+		fastClient = llm.NewFast(prof.Fast.Endpoint, prof.Fast.Model)
+		fastClient.SetIdleTimeout(time.Duration(prof.LLM.IdleTimeoutSeconds) * time.Second)
+		fastClient.SetThinkKwargs(prof.Fast.ThinkingKwargs)
+	}
 	runner := &turn.Runner{
 		Profile:    prof,
 		Client:     client,
-		FastClient: llm.NewFast(prof.Fast.Endpoint, prof.Fast.Model),
+		FastClient: fastClient,
 		Mem:        mem,
 		Out:        os.Stdout,
 		Err:        os.Stderr,
