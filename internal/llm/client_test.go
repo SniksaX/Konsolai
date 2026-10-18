@@ -40,6 +40,7 @@ func TestCompleteParsesToolCallsAndSendsTools(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	c := New(srv.URL+"/v1", "qwen")
+	c.SetThinkKwargs(true)
 	specs := []ToolSpec{{
 		Type: "function",
 		Function: FunctionSpec{
@@ -722,6 +723,48 @@ func TestTokensPerCharCalibration(t *testing.T) {
 	want := int(float64(MessageChars(msgs))*c.TokensPerChar() + float64(ToolsSchemaChars(tools))*c.TokensPerChar())
 	if c.EstimatePromptTokens(msgs, tools) != want || want <= 0 {
 		t.Fatalf("estimate %d want %d", c.EstimatePromptTokens(msgs, tools), want)
+	}
+}
+
+func TestThinkKwargsOffByDefault(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		_ = json.NewEncoder(w).Encode(completeResponse{
+			Choices: []struct {
+				Message Message `json:"message"`
+			}{{Message: Message{Role: RoleAssistant, Content: "ok"}}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL+"/v1", "main-model")
+	if c.SendsThinkKwargs() {
+		t.Fatal("kwargs default on")
+	}
+	if _, _, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{Thinking: true}); err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(gotBody, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["chat_template_kwargs"]; ok {
+		t.Fatalf("default client sent chat_template_kwargs: %s", raw["chat_template_kwargs"])
+	}
+	c.SetThinkKwargs(true)
+	if _, _, err := c.Complete(context.Background(), []Message{{Role: RoleUser, Content: "hi"}}, nil, ChatOptions{Thinking: false}); err != nil {
+		t.Fatal(err)
+	}
+	raw = map[string]json.RawMessage{}
+	if err := json.Unmarshal(gotBody, &raw); err != nil {
+		t.Fatal(err)
+	}
+	var kwargs chatTemplateKwargs
+	if err := json.Unmarshal(raw["chat_template_kwargs"], &kwargs); err != nil {
+		t.Fatal(err)
+	}
+	if kwargs.EnableThinking {
+		t.Fatal("enable_thinking want false")
 	}
 }
 

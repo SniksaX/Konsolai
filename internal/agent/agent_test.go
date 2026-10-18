@@ -72,7 +72,9 @@ func newReplay(t *testing.T, replies []llm.Message) (*llm.Client, *replay) {
 	mux.HandleFunc("/v1/chat/completions", r.serve)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return llm.New(srv.URL+"/v1", "test"), r
+	c := llm.New(srv.URL+"/v1", "test")
+	c.SetThinkKwargs(true)
+	return c, r
 }
 
 func (r *replay) serve(w http.ResponseWriter, req *http.Request) {
