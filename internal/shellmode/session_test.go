@@ -22,6 +22,34 @@ func evalPath(t *testing.T, p string) string {
 	return got
 }
 
+func TestHandleRecordsFailedCommand(t *testing.T) {
+	root := t.TempDir()
+	var out bytes.Buffer
+	s := New(root)
+	s.Stdout = &out
+	s.Stderr = &out
+	s.Run = func(context.Context, string, string, *os.File, io.Writer) (int, time.Duration, string, error) {
+		return 2, 10 * time.Millisecond, "boom", nil
+	}
+	if _, err := s.Handle(context.Background(), "false"); err != nil {
+		t.Fatal(err)
+	}
+	e, ok := s.Hist.LastFailure()
+	if !ok || e.Exit != 2 || !strings.Contains(e.Cmd, "false") || !strings.Contains(e.Output, "boom") {
+		t.Fatalf("%+v %v", e, ok)
+	}
+	s.Run = func(context.Context, string, string, *os.File, io.Writer) (int, time.Duration, string, error) {
+		return 0, time.Millisecond, "ok", nil
+	}
+	if _, err := s.Handle(context.Background(), "true"); err != nil {
+		t.Fatal(err)
+	}
+	e, ok = s.Hist.LastFailure()
+	if !ok || e.Exit != 2 {
+		t.Fatalf("success hid the failure %+v %v", e, ok)
+	}
+}
+
 func TestCdVariantsAndGuard(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "sub")
