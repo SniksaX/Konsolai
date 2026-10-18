@@ -58,7 +58,7 @@ type Recent struct {
 }
 
 type Data struct {
-	Host        string  // main endpoint hostname only, e.g. fatboy (box title)
+	Host        string  // main endpoint hostname only, e.g. localhost (box title)
 	Models      []Model // always 4 when config has them: main, fast, embed, rerank
 	Up          int
 	Total       int
