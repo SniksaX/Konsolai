@@ -94,7 +94,7 @@ func TestFastJinjaRetriesMain(t *testing.T) {
 
 func TestModelErrorLineHidesJSON(t *testing.T) {
 	err := &llm.HTTPError{Status: 500, Body: `{"error":"jinja boom"}`}
-	s := ModelErrorLine("http://fatboy:11436/v1", err, false)
+	s := ModelErrorLine("http://gpu-box:8000/v1", err, false)
 	if strings.Contains(s, "{") || strings.Contains(s, "jinja") {
 		t.Fatalf("%q", s)
 	}
