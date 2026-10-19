@@ -97,6 +97,8 @@ func runSet(ctx context.Context, env *Env, args []string) int {
 		return setDatabase(env, rest[1:], session)
 	case "theme":
 		return setTheme(env, rest[1:], session)
+	case "default":
+		return setDefault(ctx, env, rest[1:], session)
 	case "appearance":
 		return setOne(env, "ui.appearance", rest[1:], session)
 	case "welcome":
@@ -170,6 +172,54 @@ func setEmoji(env *Env, args []string, session bool) int {
 		fmt.Fprintln(env.errw(), "emoji is a bool; allowed: on, off")
 		return 2
 	}
+}
+
+func setDefault(ctx context.Context, env *Env, args []string, session bool) int {
+	if len(args) == 0 || args[0] == "default" {
+		fmt.Fprintln(env.errw(), "usage: /set default <name|all>")
+		return 2
+	}
+	if strings.EqualFold(args[0], "all") {
+		if len(args) != 1 {
+			fmt.Fprintln(env.errw(), "usage: /set default all")
+			return 2
+		}
+		return resetAllDefaults(env, session)
+	}
+	forwarded := []string{args[0], "default"}
+	forwarded = append(forwarded, args[1:]...)
+	if session {
+		forwarded = append(forwarded, "--session")
+	}
+	return runSet(ctx, env, forwarded)
+}
+
+func resetAllDefaults(env *Env, session bool) int {
+	if env == nil {
+		return 1
+	}
+	if !session {
+		body := config.InitYAML()
+		if configURLPassword(body) {
+			fmt.Fprintln(env.errw(), "database is a string; a password is not allowed (use ~/.pgpass or KONSOLAI_DATABASE_URL)")
+			return 2
+		}
+		if err := config.WriteAtomic(configPath(env), []byte(body)); err != nil {
+			fmt.Fprintln(env.errw(), err)
+			return 1
+		}
+	}
+	c := config.Builtin()
+	env.Profile = c
+	env.Session = nil
+	if env.Runner != nil {
+		env.Runner.Profile = c
+		env.Runner.RebindNext = true
+	}
+	k, _ := config.KeyByPath("ui.theme")
+	applyLive(env, k)
+	fmt.Fprintln(env.out(), "applied now")
+	return 0
 }
 
 func setTheme(env *Env, args []string, session bool) int {
