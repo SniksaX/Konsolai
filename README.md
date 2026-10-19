@@ -1,6 +1,21 @@
 # Konsolai
 
-![Konsolai](docs/assets/konsolai-header.svg)
+<p align="center">
+  <img src="docs/assets/konsolai-header.svg" alt="Konsolai" width="100%">
+</p>
+
+<p align="center">
+  <img src="docs/assets/screens/welcome.png" alt="Konsolai welcome screen and answer" width="100%">
+</p>
+
+<p align="center">
+  <img src="docs/assets/screens/build.png" alt="A build turn: plan, approval, steps, recovery" width="100%">
+</p>
+
+<p align="center">
+  <img src="docs/assets/screens/commands.png" alt="Slash command palette" width="49%">
+  <img src="docs/assets/screens/themes.png" alt="Theme picker" width="49%">
+</p>
 
 Local coding agent. With no request, and with both stdin and stdout on a TTY, it starts a REPL. Every other invocation is one-shot and skips the welcome.
 
