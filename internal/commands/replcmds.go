@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/SniksaX/Konsolai/internal/turn"
+	"github.com/SniksaX/Konsolai/internal/ui"
 	"github.com/SniksaX/Konsolai/internal/ui/theme"
 )
 
@@ -61,6 +62,13 @@ func runCD(ctx context.Context, env *Env, args []string) int {
 
 func runYes(ctx context.Context, env *Env, args []string) int {
 	on, ok := parseOnOff(args)
+	if ok {
+		word := "ask"
+		if on {
+			word = "all_safe"
+		}
+		fmt.Fprintln(env.out(), ui.Current().Muted("now: /set approve "+word+" --session"))
+	}
 	if !ok {
 		fmt.Fprintln(env.errw(), "usage: /yes on|off")
 		return 2
@@ -79,6 +87,7 @@ func runYes(ctx context.Context, env *Env, args []string) int {
 }
 
 func runThink(ctx context.Context, env *Env, args []string) int {
+	fmt.Fprintln(env.out(), ui.Current().Muted("now: /set think --session"))
 	if len(args) != 1 {
 		fmt.Fprintln(env.errw(), "usage: /think on|off|auto")
 		return 2
@@ -96,6 +105,7 @@ func runThink(ctx context.Context, env *Env, args []string) int {
 }
 
 func runTrace(ctx context.Context, env *Env, args []string) int {
+	fmt.Fprintln(env.out(), ui.Current().Muted("now: /set trace --session"))
 	on, ok := parseOnOff(args)
 	if !ok {
 		fmt.Fprintln(env.errw(), "usage: /trace on|off")
@@ -113,9 +123,9 @@ func runTrace(ctx context.Context, env *Env, args []string) int {
 }
 
 func runModel(ctx context.Context, env *Env, _ []string) int {
-	model := env.Profile.LLM.Model
+	model := env.Profile.MainModelID()
 	win := 0
-	ep := env.Profile.LLM.Endpoint
+	ep := env.Profile.MainEndpoint()
 	if env.Runner != nil && env.Runner.Client != nil {
 		if id, err := env.Runner.Client.ResolveModel(ctx); err == nil && id != "" {
 			model = id
