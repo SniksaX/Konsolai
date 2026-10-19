@@ -6,7 +6,7 @@
          your terminal agent, on your own models                    │ ● rerank-model  rerank  18ms                     │
                                                                     ╰──────────────────────────────────────────────────╯
 
-  ╭─ session                                             ─╮  ╭─ recent ──────────────────────────────────── /resume ─╮
+  ╭─ session ─────────────────────────────────────────────╮  ╭─ recent ──────────────────────────────────── /resume ─╮
   │ dir      ~/projects/demo                              │  │ no sessions yet                                       │
   │ branch   main*                                        │  ╰───────────────────────────────────────────────────────╯
   │ changed  3                                            │

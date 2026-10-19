@@ -130,6 +130,7 @@ func TestRenderGoldens(t *testing.T) {
 			for _, h := range heights {
 				for _, layout := range layouts {
 					got := renderString(fx.data, layout, w, h)
+					assertBoxTops(t, layout+" "+fx.name, got)
 					if !widthOK(t, got, w) {
 						t.Errorf("%s %s %dx%d exceeds width", layout, fx.name, w, h)
 						continue
@@ -439,17 +440,71 @@ func TestColorIsPaintOnly(t *testing.T) {
 	}
 }
 
+func assertBoxTops(t *testing.T, label, rendered string) {
+	t.Helper()
+	for i, ln := range strings.Split(rendered, "\n") {
+		plain := theme.StripANSI(ln)
+		rest := plain
+		for {
+			start := strings.Index(rest, "╭")
+			if start < 0 {
+				break
+			}
+			rel := strings.Index(rest[start:], "╮")
+			if rel < 0 {
+				break
+			}
+			end := start + rel
+			interior := rest[start+len("╭") : end]
+			if !boxTopSolid(interior) {
+				t.Errorf("%s line %d box top has a gap %q", label, i+1, interior)
+			}
+			rest = rest[end+len("╮"):]
+		}
+	}
+}
+
+// boxTopSolid is a titled edge: dashes, the title, the optional right text,
+// and single spaces beside that text. A run of spaces is a missing border.
+func boxTopSolid(interior string) bool {
+	if interior == "" || !strings.Contains(interior, "─") {
+		return false
+	}
+	if strings.Contains(interior, "  ") {
+		return false
+	}
+	rs := []rune(interior)
+	for i, r := range rs {
+		if r != ' ' {
+			continue
+		}
+		left, right := '─', '─'
+		if i > 0 {
+			left = rs[i-1]
+		}
+		if i+1 < len(rs) {
+			right = rs[i+1]
+		}
+		if left == '─' && right == '─' {
+			return false
+		}
+	}
+	return true
+}
+
 func TestDrawBoxWidth(t *testing.T) {
 	plain(t)
 	pal := ui.Current()
 	for _, w := range []int{24, 42, 52, 67, 72, 120, 140} {
 		box := drawBox(pal, w, "gpu-box", "4/4 up", pal.Muted, modelRows(pal, w-2, allUp().Models))
+		assertBoxTops(t, "host", strings.Join(box, "\n"))
 		for _, ln := range box {
 			if got := theme.DisplayWidth(ln); got != w {
 				t.Fatalf("box width %d line %d\n%q", w, got, ln)
 			}
 		}
 		plainBox := drawBox(pal, w, "session", "", nil, sessionLines(pal, w-2, allUp().Session))
+		assertBoxTops(t, "session", strings.Join(plainBox, "\n"))
 		for _, ln := range plainBox {
 			if got := theme.DisplayWidth(ln); got != w {
 				t.Fatalf("session box width %d line %d\n%q", w, got, ln)
