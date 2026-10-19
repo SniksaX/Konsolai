@@ -267,7 +267,7 @@ func probeModel(ctx context.Context, in Input, role, name, endpoint, kind string
 	pctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	start := time.Now()
-	err := doProbe(pctx, endpoint, kind, timeout)
+	_, err := doProbe(pctx, endpoint, kind, timeout)
 	lat := time.Since(start)
 	if err != nil {
 		if timedOut(err, pctx) {
@@ -325,7 +325,31 @@ func nonNegMS(d time.Duration) int64 {
 	return ms
 }
 
-func doProbe(ctx context.Context, endpoint, kind string, timeout time.Duration) error {
+// Probe checks one endpoint the way the welcome screen does.
+// kind is "models", "embed", or "rerank". status is up, slow, down, or timeout.
+// body is the response payload, limited to 1 MiB, including on HTTP errors.
+func Probe(ctx context.Context, endpoint, role, kind string, timeout, slow time.Duration) (status string, body []byte) {
+	if strings.TrimSpace(endpoint) == "" {
+		return string(StatusDown), nil
+	}
+	if timeout <= 0 {
+		timeout = config.Builtin().ProbeTimeout()
+	}
+	pctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	start := time.Now()
+	body, err := doProbe(pctx, endpoint, kind, timeout)
+	lat := time.Since(start)
+	if err != nil {
+		if timedOut(err, pctx) {
+			return string(StatusTimeout), body
+		}
+		return string(StatusDown), body
+	}
+	return string(statusForLimit(role, lat, slow)), body
+}
+
+func doProbe(ctx context.Context, endpoint, kind string, timeout time.Duration) ([]byte, error) {
 	var (
 		req *http.Request
 		err error
@@ -345,18 +369,18 @@ func doProbe(ctx context.Context, endpoint, kind string, timeout time.Duration) 
 		req, err = http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
 	}
 	if err != nil {
-		return fmt.Errorf("welcome: probe request: %w", err)
+		return nil, fmt.Errorf("welcome: probe request: %w", err)
 	}
 	resp, err := probeHTTP(timeout).Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("welcome: probe status %d", resp.StatusCode)
+		return body, fmt.Errorf("welcome: probe status %d", resp.StatusCode)
 	}
-	return nil
+	return body, nil
 }
 
 func probeHTTP(timeout time.Duration) *http.Client {
