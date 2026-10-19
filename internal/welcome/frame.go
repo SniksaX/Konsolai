@@ -23,8 +23,15 @@ func frameLines(pal ui.Palette, d Data, width, height int) []string {
 	top := pal.Subtle("╭") + titleBar(pal, width-2, frameTitle(d), right, rightFn) + pal.Subtle("╮")
 
 	lines := []string{"", top, frameRow(pal, width, "")}
-	for _, row := range frameBanner(pal, width, lim.TinyWidth) {
-		lines = append(lines, frameRow(pal, width, row))
+	wm := wordmarkMin(width, lim.TinyWidth)
+	for len(wm) < 4 {
+		wm = append(wm, "")
+	}
+	if len(wm) > 4 {
+		wm = wm[:4]
+	}
+	for i := 0; i < 4; i++ {
+		lines = append(lines, frameRow(pal, width, " "+fitWidth(wm[i], bannerCols)))
 	}
 	lines = append(lines,
 		frameRow(pal, width, ""),
@@ -103,45 +110,4 @@ func frameRow(pal ui.Palette, width int, content string) string {
 		inner = 0
 	}
 	return pal.Subtle("│") + fitWidth(content, inner) + pal.Subtle("│")
-}
-
-func frameBanner(pal ui.Palette, width, minW int) []string {
-	wm := wordmarkMin(width, minW)
-	for len(wm) < 4 {
-		wm = append(wm, "")
-	}
-	if len(wm) > 4 {
-		wm = wm[:4]
-	}
-	sides := []string{
-		"Your terminal agent, on your own models.",
-		modeLine(pal),
-		"",
-		pal.Muted("Plans before it acts. Asks before it writes."),
-	}
-	room := width - 67
-	if room < 1 {
-		room = 1
-	}
-	out := make([]string, 4)
-	for i := 0; i < 4; i++ {
-		side := ""
-		if i < len(sides) {
-			side = clip(sides[i], room)
-		}
-		out[i] = " " + fitWidth(wm[i], bannerCols) + "  " + fitWidth(side, room)
-	}
-	return out
-}
-
-func modeLine(pal ui.Palette) string {
-	modes := []string{"answer", "lookup", "act", "build"}
-	var b strings.Builder
-	for i, mode := range modes {
-		if i > 0 {
-			b.WriteString(pal.Subtle(" · "))
-		}
-		b.WriteString(pal.Meta(mode))
-	}
-	return b.String()
 }

@@ -153,7 +153,11 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 	}
 	sh.Prompt.Primary(func() string { return r.prompt })
 	sh.SyntaxHighlighter = func(line []rune) string {
-		return echoBody(string(line))
+		var reg *commands.Registry
+		if r.menu != nil {
+			reg = r.menu.reg
+		}
+		return highlightInput(string(line), reg)
 	}
 	sh.Hint.SetProvider(func(line []rune, cursor int) []rune {
 		r.syncPlaceholder(line)
@@ -348,8 +352,17 @@ func (r *rlReader) applyMenu(res menuResult) {
 		r.applyLine(res.Line)
 	case actionSubmit:
 		r.callWidget("accept-line")
+	case actionLineSubmit:
+		r.applyLine(res.Line)
+		r.callWidget("accept-line")
 	case actionClear:
 		r.applyLine("")
+	}
+}
+
+func (r *rlReader) SetMenuEnv(env *commands.Env) {
+	if r != nil && r.menu != nil {
+		r.menu.env = env
 	}
 }
 
@@ -421,12 +434,18 @@ func (r *rlReader) pendingArrow() (up, down, ok bool) {
 
 func (r *rlReader) slashTab() {
 	r.syncMenu()
-	if r.menu != nil && r.menu.Open() {
-		res := r.menu.Tab()
-		if res.Action != actionPass {
-			r.applyMenu(res)
-			return
+	line := ""
+	if r.sh != nil && r.sh.Line() != nil {
+		line = string(*r.sh.Line())
+	}
+	if strings.HasPrefix(line, "/") || (r.menu != nil && r.menu.Open()) {
+		if r.menu != nil && r.menu.Open() {
+			res := r.menu.Tab()
+			if res.Action != actionPass {
+				r.applyMenu(res)
+			}
 		}
+		return
 	}
 	r.callWidget("complete")
 }

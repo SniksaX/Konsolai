@@ -70,15 +70,15 @@ func doctorChecks(ctx context.Context, env *Env) []doctorCheck {
 	timeout := env.Profile.ProbeTimeout()
 	file, mode := checkConfigFile(env)
 	out := []doctorCheck{file, mode}
-	out = append(out, checkModels(ctx, "main endpoint", env.Profile.LLM.Endpoint, "llm.endpoint", timeout))
+	out = append(out, checkModels(ctx, "main endpoint", env.Profile.MainEndpoint(), "roles.main", timeout))
 	if env.Profile.FastOn() {
-		out = append(out, checkModels(ctx, "fast endpoint", env.Profile.Fast.Endpoint, "fast.endpoint", timeout))
+		out = append(out, checkModels(ctx, "fast endpoint", env.Profile.FastEndpoint(), "roles.fast", timeout))
 	}
-	if strings.TrimSpace(env.Profile.RAG.EmbedEndpoint) != "" {
-		out = append(out, checkKind(ctx, "embed endpoint", env.Profile.RAG.EmbedEndpoint, "embed", "rag.embed_endpoint", timeout))
+	if strings.TrimSpace(env.Profile.EmbedURL()) != "" {
+		out = append(out, checkKind(ctx, "embed endpoint", env.Profile.EmbedURL(), "embed", "roles.embed", timeout))
 	}
-	if strings.TrimSpace(env.Profile.RAG.RerankEndpoint) != "" {
-		out = append(out, checkKind(ctx, "rerank endpoint", env.Profile.RAG.RerankEndpoint, "rerank", "rag.rerank_endpoint", timeout))
+	if strings.TrimSpace(env.Profile.RerankURL()) != "" {
+		out = append(out, checkKind(ctx, "rerank endpoint", env.Profile.RerankURL(), "rerank", "roles.rerank", timeout))
 	}
 	out = append(out,
 		checkThinking(ctx, env, timeout),
@@ -149,18 +149,18 @@ func checkKind(ctx context.Context, name, endpoint, kind, fix string, timeout ti
 }
 
 func checkThinking(ctx context.Context, env *Env, timeout time.Duration) doctorCheck {
-	if !env.Profile.LLM.ThinkingKwargs {
+	if !env.Profile.MainThinking() {
 		return doctorCheck{mark: "✓", name: "thinking kwargs", detail: "off"}
 	}
-	code, err := probeThinking(ctx, env.Profile.LLM.Endpoint, env.Profile.LLM.Model, timeout)
+	code, err := probeThinking(ctx, env.Profile.MainEndpoint(), env.Profile.MainModelID(), timeout)
 	if err != nil {
-		return doctorCheck{mark: "!", name: "thinking kwargs", detail: probeErr(err), fix: "llm.thinking_kwargs"}
+		return doctorCheck{mark: "!", name: "thinking kwargs", detail: probeErr(err), fix: "models." + env.Profile.Roles.Main + ".thinking_kwargs"}
 	}
 	if code >= 400 && code < 500 {
-		return doctorCheck{mark: "!", name: "thinking kwargs", detail: fmt.Sprintf("http %d", code), fix: "llm.thinking_kwargs"}
+		return doctorCheck{mark: "!", name: "thinking kwargs", detail: fmt.Sprintf("http %d", code), fix: "models." + env.Profile.Roles.Main + ".thinking_kwargs"}
 	}
 	if code < 200 || code >= 300 {
-		return doctorCheck{mark: "!", name: "thinking kwargs", detail: fmt.Sprintf("http %d", code), fix: "llm.thinking_kwargs"}
+		return doctorCheck{mark: "!", name: "thinking kwargs", detail: fmt.Sprintf("http %d", code), fix: "models." + env.Profile.Roles.Main + ".thinking_kwargs"}
 	}
 	return doctorCheck{mark: "✓", name: "thinking kwargs", detail: "accepted"}
 }

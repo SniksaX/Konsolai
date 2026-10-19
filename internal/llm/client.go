@@ -95,6 +95,8 @@ type Client struct {
 	tokensPerChar   float64
 	fallbackWindow  int
 	sendThinkKwargs bool
+	windowPinned    bool
+	retries         int
 	onCall          func(CallInfo)
 }
 
@@ -107,6 +109,7 @@ func New(baseURL, model string) *Client {
 		http:           &http.Client{Transport: tr},
 		idleTimeout:    defaultIdleTimeout,
 		retryWait:      defaultRetryWait,
+		retries:        1,
 		contextWindow:  defaultContextWindow,
 		tokensPerChar:  defaultTokensPerChar,
 		fallbackWindow: defaultContextWindow,
@@ -129,6 +132,32 @@ func (c *Client) SetThinkKwargs(on bool) {
 		return
 	}
 	c.sendThinkKwargs = on
+}
+
+// PinContext keeps the context window at n and skips the server probe.
+func (c *Client) PinContext(n int) {
+	if c == nil || n <= 0 {
+		return
+	}
+	c.mu.Lock()
+	c.contextWindow = n
+	c.windowReady = true
+	c.windowPinned = true
+	c.mu.Unlock()
+}
+
+// SetRetry sets extra attempts and the pause between them.
+// n < 0 keeps the current count. A zero client still retries once.
+func (c *Client) SetRetry(n int, wait time.Duration) {
+	if c == nil {
+		return
+	}
+	if n >= 0 {
+		c.retries = n
+	}
+	if wait > 0 {
+		c.retryWait = wait
+	}
 }
 
 func (c *Client) BaseURL() string { return c.baseURL }
@@ -245,6 +274,10 @@ func (c *Client) setWindow(n int) {
 		n = defaultContextWindow
 	}
 	c.mu.Lock()
+	if c.windowPinned {
+		c.mu.Unlock()
+		return
+	}
 	c.contextWindow = n
 	c.windowReady = true
 	c.mu.Unlock()
@@ -398,6 +431,7 @@ func (c *Client) propsNCtx(ctx context.Context) int {
 type ChatOptions struct {
 	Thinking       bool
 	Temperature    float64
+	TopP           float64
 	MaxTokens      int
 	ResponseSchema json.RawMessage
 	OnProgress     func(Progress)
@@ -436,6 +470,7 @@ type chatRequest struct {
 	Messages           []Message           `json:"messages"`
 	Stream             bool                `json:"stream"`
 	Temperature        float64             `json:"temperature"`
+	TopP               float64             `json:"top_p,omitempty"`
 	MaxTokens          int                 `json:"max_tokens,omitempty"`
 	ChatTemplateKwargs *chatTemplateKwargs `json:"chat_template_kwargs,omitempty"`
 	Tools              []ToolSpec          `json:"tools,omitempty"`
@@ -504,27 +539,40 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, opts ChatOptions, o
 
 func (c *Client) complete(ctx context.Context, msgs []Message, tools []ToolSpec, opts ChatOptions, onDelta func(string) error) (Message, Usage, error) {
 	msgs = Normalize(msgs)
-	t0 := time.Now()
-	msg, usage, err, gotBytes := c.completeAttempt(ctx, msgs, tools, opts, onDelta)
-	c.observeCall(usage, time.Since(t0))
-	if err == nil || !shouldRetry(err, gotBytes) {
-		c.observePrompt(msgs, usage)
-		return msg, usage, err
+	extra := 1
+	if c != nil {
+		extra = c.retries
+		if extra < 0 {
+			extra = 0
+		}
 	}
-	wait := c.retryWait
-	if wait <= 0 {
-		wait = defaultRetryWait
+	var msg Message
+	var usage Usage
+	var err error
+	var gotBytes bool
+	for attempt := 0; attempt <= extra; attempt++ {
+		if attempt > 0 {
+			wait := c.retryWait
+			if wait <= 0 {
+				wait = defaultRetryWait
+			}
+			t := time.NewTimer(wait)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				return Message{}, Usage{}, ctx.Err()
+			case <-t.C:
+				t.Stop()
+			}
+		}
+		t0 := time.Now()
+		msg, usage, err, gotBytes = c.completeAttempt(ctx, msgs, tools, opts, onDelta)
+		c.observeCall(usage, time.Since(t0))
+		if err == nil || !shouldRetry(err, gotBytes) {
+			c.observePrompt(msgs, usage)
+			return msg, usage, err
+		}
 	}
-	t := time.NewTimer(wait)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return Message{}, Usage{}, ctx.Err()
-	case <-t.C:
-	}
-	t1 := time.Now()
-	msg, usage, err, _ = c.completeAttempt(ctx, msgs, tools, opts, onDelta)
-	c.observeCall(usage, time.Since(t1))
 	c.observePrompt(msgs, usage)
 	return msg, usage, err
 }
@@ -557,6 +605,7 @@ func (c *Client) completeAttempt(ctx context.Context, msgs []Message, tools []To
 		Messages:      msgs,
 		Stream:        true,
 		Temperature:   opts.Temperature,
+		TopP:          opts.TopP,
 		MaxTokens:     opts.MaxTokens,
 		StreamOptions: &streamOptions{IncludeUsage: true},
 	}

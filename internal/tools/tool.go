@@ -95,6 +95,7 @@ type Options struct {
 	ShellDefaultTimeout time.Duration
 	ShellMaxTimeout     time.Duration
 	ShellWaitDelay      time.Duration
+	DisableWeb          bool
 }
 
 const DocsSourceReject = "docs tasks may not create or modify source files; write Markdown and use export_doc for PDF/HTML"
@@ -136,12 +137,16 @@ func NewRegistry(g *safety.Guard, out io.Writer, files FileLister, cache WebCach
 		newEditFile(g, o.DocsTask),
 		newProposePlan(o.DocsTask, o.Request),
 		newRemember(facts),
-		newWebFetch(cache, o.OnWebFetch),
+	}
+	if !o.DisableWeb {
+		list = append(list, newWebFetch(cache, o.OnWebFetch))
+	}
+	list = append(list,
 		newRecall(o.Recall),
 		newExportDoc(g),
 		newOutline(g, files),
 		newFinish(),
-	}
+	)
 	byName := make(map[string]Tool, len(list))
 	for _, t := range list {
 		byName[t.Spec().Function.Name] = t

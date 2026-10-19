@@ -59,6 +59,8 @@ type Config struct {
 	Recorder         Recorder
 	History          []llm.Message
 	AutoApprove      bool
+	Approve          string
+	TopP             float64
 	ExploreBudget    int
 	ExploreNote      string
 	Trace            bool
@@ -69,6 +71,7 @@ type Config struct {
 	Err              io.Writer
 	Stats            *Stats
 	Plain            bool
+	HideStats        bool
 	OnShell          func(output string)
 	Guard            *safety.Guard
 	ResumePlan       bool
@@ -181,7 +184,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		if cfg.Stats != nil {
 			*cfg.Stats = st
 		}
-		if skipSummary {
+		if skipSummary || cfg.HideStats {
 			return
 		}
 		if cfg.Intent != "" || cfg.Err != nil {
@@ -198,7 +201,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		if cfg.ThinkingPolicy == ThinkPlanStep && planRejected && !planApproved {
 			think = true
 		}
-		opts := llm.ChatOptions{Thinking: think, Temperature: temp}
+		opts := llm.ChatOptions{Thinking: think, Temperature: temp, TopP: cfg.TopP}
 		shellFail = false
 		forcingPlan := toolsGone && cfg.RequirePlan && !planApproved
 		if forcingPlan && cfg.ThinkingPolicy == ThinkPlanStep {
@@ -544,6 +547,15 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			if inPlanHit {
 				summary += " " + ui.Current().Muted("(in plan)")
 			}
+			if outside && cfg.Approve == "in_plan" && kind == tools.Mutating {
+				reason := "outside the plan"
+				printReject(cfg.Out, call.Function.Name, call.Function.Arguments, reason)
+				tm := llm.Message{Role: llm.RoleTool, Content: "error: " + reason, ToolCallID: call.ID}
+				msgs = append(msgs, tm)
+				_ = rec.Message(ctx, tm)
+				_ = rec.Action(ctx, ActionRecord{Tool: call.Function.Name, Args: args, Kind: kind, Decision: "rejected", IsError: true, Output: tm.Content})
+				continue
+			}
 			if !inPlanHit && kind != tools.ReadOnly && kind != tools.Final {
 				_, isCmd := commandOf(action)
 				if outside && approvedAll && isCmd && !cfg.AutoApprove {
@@ -553,7 +565,13 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					var d ui.Decision
 					var reason string
 					var err error
-					if outside && !cfg.AutoApprove {
+					forceAsk := outside && !cfg.AutoApprove
+					if outside && cfg.Approve == "all_safe" {
+						if _, ok := filePathOf(action); ok {
+							forceAsk = true
+						}
+					}
+					if forceAsk {
 						ui.BeforeOutput()
 						d, reason, err = cfg.Confirmer.ConfirmForced(summary, action.Preview())
 					} else {

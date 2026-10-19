@@ -36,6 +36,14 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 		}
 	}
 	r.escalated = false
+	if r.RebindNext {
+		r.Client = nil
+		r.FastClient = nil
+		r.RebindNext = false
+	}
+	if r.Profile.UI.Trace {
+		req.Trace = true
+	}
 	text := req.Text
 	if extra := strings.TrimRight(req.Stdin, "\n"); extra != "" {
 		if strings.TrimSpace(text) == "" {
@@ -69,6 +77,14 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 		return Result{ExitCode: 1}
 	}
 	thinkMode := r.ThinkMode
+	if thinkMode == ThinkAuto {
+		switch strings.ToLower(strings.TrimSpace(r.Profile.Agent.ThinkMode)) {
+		case "on":
+			thinkMode = ThinkAlways
+		case "off":
+			thinkMode = ThinkNever
+		}
+	}
 	if text, hard := StripThinkPrefix(req.Text); hard {
 		req.Text = text
 		thinkMode = ThinkAlways
@@ -237,7 +253,7 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 }
 
 func (r *Runner) emitBadge(req Request, name string, escalated bool) {
-	if r == nil {
+	if r == nil || !r.Profile.ShowBadge() {
 		return
 	}
 	if req.Plain {
@@ -271,7 +287,12 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 	if dec == nil {
 		return 1, "", 0, true
 	}
-	dec.Language = intent.ResolveLanguage(req.Text, lastUserOf(history), dec.Language, r.Profile.Language.Default, r.Profile.Language.Languages)
+	switch strings.ToLower(strings.TrimSpace(r.Profile.Language.Mode)) {
+	case "en", "fr":
+		dec.Language = strings.ToLower(strings.TrimSpace(r.Profile.Language.Mode))
+	default:
+		dec.Language = intent.ResolveLanguage(req.Text, lastUserOf(history), dec.Language, r.Profile.Language.Default, r.Profile.Language.Languages)
+	}
 	lang := agent.ReplyInstruction(dec.Language)
 	if dec.Intent == intent.Answer {
 		prompt := agent.AnswerPrompt + "\n" + lang
@@ -290,10 +311,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 				}
 			}
 		}
-		think := dec.EffectiveEffort() == intent.EffortHigh || thinkMode == ThinkAlways
-		if thinkMode == ThinkNever {
-			think = false
-		}
+		think := answerThink(dec, r.Profile.AnswerThinking(), thinkMode)
 		code, answer, ptok, used, esc := r.runAnswer(ctx, client, answerClient, snap, history, rec, req.Text, prompt, think, req, *dec, routerTime)
 		if esc != "" && !r.escalated {
 			r.escalated = true
@@ -355,6 +373,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			ShellDefaultTimeout: r.Profile.ShellDefaultTimeout(),
 			ShellMaxTimeout:     r.Profile.ShellMaxTimeout(),
 			ShellWaitDelay:      r.Profile.ShellWaitDelay(),
+			DisableWeb:          !r.Profile.WebOn(),
 		})
 		reg = registryForRAG(reg, r.Profile.RAGEnabled())
 		cfg := agent.Config{
@@ -364,15 +383,17 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			Out:            r.out(),
 			Recorder:       rec,
 			History:        history,
-			AutoApprove:    req.Yes,
+			AutoApprove:    req.Yes || r.Profile.Agent.Approve == "all_safe",
+			Approve:        r.Profile.Agent.Approve,
 			Prompt:         agent.ActPrompt + "\n" + lang,
-			ThinkingPolicy: ThinkingFor(*dec, r.Profile.Agent.BuildThinking, thinkMode),
+			ThinkingPolicy: policyFor(*dec, r.Profile, thinkMode),
 			Trace:          req.Trace,
 			SessionID:      sessionID,
 			Intent:         string(dec.Intent),
 			RouterTime:     routerTime,
 			Err:            r.errw(),
 			Plain:          req.Plain,
+			HideStats:      !r.Profile.ShowStatsLine(),
 			Task:           string(dec.Task),
 			Stats:          &agent.Stats{},
 			OnShell:        r.RememberShell,
@@ -401,21 +422,20 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			cfg.ExploreNote = agent.ExploreNoteLookup
 		case intent.Build:
 			cfg.Prompt = agent.CodePrompt + "\n" + lang + "\n" + agent.ScopeRule + sub
-			cfg.Temperature = 0.3
 			cfg.MaxSteps = r.Profile.MaxStepsFor("build")
-			cfg.RequirePlan = true
+			cfg.RequirePlan = r.Profile.NeedPlan("build", false)
 			cfg.ExploreBudget = r.Profile.ExploreBudgetFor("build", string(dec.Task))
 			cfg.ExploreNote = agent.ExploreNoteBuild
 			sys = codeContext(ctx, snap, root) + facts
 		default:
 			cfg.Prompt = agent.ActPrompt + "\n" + lang + "\n" + agent.ScopeRule + sub
-			if dec.EffectiveEffort() == intent.EffortHigh {
-				cfg.RequirePlan = true
-			}
+			cfg.RequirePlan = r.Profile.NeedPlan("act", dec.EffectiveEffort() == intent.EffortHigh)
 			cfg.MaxSteps = r.Profile.MaxStepsFor("act")
 			cfg.ExploreBudget = r.Profile.ExploreBudgetFor("act", string(dec.Task))
 			cfg.ExploreNote = agent.ExploreNoteLookup
 		}
+		cfg.Temperature = r.Profile.TemperatureFor(string(dec.Intent))
+		cfg.TopP = r.Profile.LLM.TopP
 		cfg.TokenCap = r.Profile.TokenCap(string(dec.Intent))
 		cfg.ElideTrigger = r.Profile.ElideTrigger()
 		cfg.ElideTarget = r.Profile.ElideTarget()
@@ -461,7 +481,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			fmt.Fprintln(r.errw(), err.Error())
 			return 1, "", tok, true
 		}
-		fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.LLM.Endpoint, err, req.Trace))
+		fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.MainEndpoint(), err, req.Trace))
 		return 1, "", tok, true
 	}
 	return 1, "", 0, true
@@ -507,7 +527,7 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 	usedMain := client == main
 	t0 := time.Now()
 	var buf bytes.Buffer
-	out, usage, streamErr := StreamAnswer(ctx, client, msgs, think, req.Plain, &buf, r.errw())
+	out, usage, streamErr := StreamAnswer(ctx, client, msgs, think, req.Plain, &buf, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP)
 	if streamErr != nil && !usedMain {
 		if req.Trace {
 			fmt.Fprintln(r.errw(), "fast model failed; retrying on main")
@@ -515,11 +535,11 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 		client = main
 		usedMain = true
 		buf.Reset()
-		out, usage, streamErr = StreamAnswer(ctx, client, msgs, think, req.Plain, &buf, r.errw())
+		out, usage, streamErr = StreamAnswer(ctx, client, msgs, think, req.Plain, &buf, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP)
 	}
 	if streamErr == nil && strings.TrimSpace(out) == "" {
 		buf.Reset()
-		out, usage, streamErr = StreamAnswer(ctx, client, []llm.Message{system, user}, think, req.Plain, &buf, r.errw())
+		out, usage, streamErr = StreamAnswer(ctx, client, []llm.Message{system, user}, think, req.Plain, &buf, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP)
 	}
 	modelTime := time.Since(t0)
 	ptok := 0
@@ -534,7 +554,7 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 			fmt.Fprintln(r.errw(), streamErr.Error())
 			return 1, out, ptok, usedMain, ""
 		}
-		fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.LLM.Endpoint, streamErr, req.Trace))
+		fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.MainEndpoint(), streamErr, req.Trace))
 		return 1, out, ptok, usedMain, ""
 	}
 	if strings.TrimSpace(out) == "" {
@@ -558,7 +578,9 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 	if req.Trace {
 		agent.PrintTrace(r.errw(), 1, think, modelTime, usage.PromptTokens, usage.CompletionTokens, main.ContextWindow(), nil)
 	}
-	agent.PrintSummary(r.errw(), string(dec.Intent), st)
+	if r.Profile.ShowStatsLine() {
+		agent.PrintSummary(r.errw(), string(dec.Intent), st)
+	}
 	return 0, out, ptok, usedMain, ""
 }
 
@@ -583,7 +605,7 @@ func SanitizeAnswerHistory(hist []llm.Message) []llm.Message {
 	return keep
 }
 
-func StreamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, think, plain bool, outw, errw io.Writer) (string, llm.Usage, error) {
+func StreamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, think, plain bool, outw, errw io.Writer, temp, topP float64) (string, llm.Usage, error) {
 	if outw == nil {
 		outw = os.Stdout
 	}
@@ -609,8 +631,11 @@ func StreamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 	if elide.Count > 0 {
 		fmt.Fprintln(errw, agent.FormatElide(elide, client.ContextWindow()))
 	}
+	if temp <= 0 {
+		temp = 0.3
+	}
 	usage, err := client.Stream(ctx, msgs, llm.ChatOptions{
-		Thinking: think, Temperature: 0.3, MaxTokens: maxTok,
+		Thinking: think, Temperature: temp, TopP: topP, MaxTokens: maxTok,
 		OnProgress: func(p llm.Progress) { live.SetLabel(agent.ProgressLabel("thinking", p)) },
 	}, func(delta string) error {
 		s := filter.Write(delta)

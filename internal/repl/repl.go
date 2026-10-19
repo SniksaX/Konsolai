@@ -124,7 +124,7 @@ func Run(ctx context.Context, cfg Config) int {
 	p := ui.Current()
 	model := cfg.Model
 	if model == "" && env != nil {
-		model = env.Profile.LLM.Model
+		model = env.Profile.MainModelID()
 	}
 	if model == "" {
 		model = "-"
@@ -134,7 +134,7 @@ func Run(ctx context.Context, cfg Config) int {
 		Branch: gitBranch(cwd),
 	}
 	if env != nil {
-		info.Host = banner.HostOf(env.Profile.LLM.Endpoint)
+		info.Host = banner.HostOf(env.Profile.MainEndpoint())
 	}
 	if info.Model == "-" {
 		info.Model = ""
@@ -185,7 +185,10 @@ func Run(ctx context.Context, cfg Config) int {
 			return 1
 		}
 	}
-	bindWelcome(env, welcome, rd)
+	if s, ok := rd.(interface{ SetMenuEnv(*commands.Env) }); ok {
+		s.SetMenuEnv(env)
+	}
+	bindWelcome(welcome, rd)
 	if kr, ok := rd.(interface{ ReadKey() (byte, error) }); ok {
 		ui.SetKeyReader(kr.ReadKey)
 		defer ui.SetKeyReader(nil)
@@ -434,12 +437,12 @@ func sessionFooter(st *session, cfg Config) string {
 	routing := "main"
 	if cfg.Runner != nil && cfg.Runner.RouterSource != "" {
 		routing = cfg.Runner.RouterSource
-	} else if cfg.Env != nil && cfg.Env.Profile.Fast.Endpoint != "" {
+	} else if cfg.Env != nil && cfg.Env.Profile.FastEndpoint() != "" {
 		routing = "fast"
 	}
 	model := cfg.Model
 	if model == "" && cfg.Env != nil {
-		model = cfg.Env.Profile.LLM.Model
+		model = cfg.Env.Profile.MainModelID()
 	}
 	info := footerInfo{
 		Cwd: cwd, Model: model, Routing: routing,
@@ -558,13 +561,13 @@ func probeBackground(ctx context.Context, prof config.Profile, errw io.Writer, s
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		if prof.LLM.Endpoint == "" {
+		if prof.MainEndpoint() == "" {
 			markDown(st, p.Warn("endpoint unreachable"))
 			return
 		}
 		cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
-		req, err := http.NewRequestWithContext(cctx, http.MethodGet, strings.TrimRight(prof.LLM.Endpoint, "/")+"/models", nil)
+		req, err := http.NewRequestWithContext(cctx, http.MethodGet, strings.TrimRight(prof.MainEndpoint(), "/")+"/models", nil)
 		if err != nil {
 			markDown(st, p.Warn("endpoint unreachable"))
 			return

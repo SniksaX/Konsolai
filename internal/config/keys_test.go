@@ -49,7 +49,7 @@ func TestConfigKeysComplete(t *testing.T) {
 func (k Key) touchesField() error {
 	c := Config{}
 	switch k.Kind {
-	case KindString:
+	case KindString, KindEnum:
 		if k.SetStr == nil || k.GetStr == nil {
 			return errKey(k.Path, "missing string accessor")
 		}
@@ -258,6 +258,9 @@ func configLeaves(t reflect.Type, v reflect.Value) []configLeaf {
 				}
 			}
 			ft := f.Type
+			if ft.Kind() == reflect.Map {
+				continue
+			}
 			fv := reflect.Zero(ft)
 			if v.IsValid() && v.Kind() == reflect.Struct {
 				fv = v.Field(i)
@@ -307,7 +310,7 @@ func TestEnvBeatsFileInDiff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(diff, "llm.model") || !strings.Contains(diff, "from-env") || !strings.Contains(diff, "(env)") {
+	if !strings.Contains(diff, "from-env") || !strings.Contains(diff, "(env)") {
 		t.Fatalf("diff:\n%s", diff)
 	}
 	if strings.Contains(diff, "(flag)") {

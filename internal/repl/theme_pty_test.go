@@ -24,7 +24,7 @@ func TestThemePickerEscNoExtraBanner(t *testing.T) {
 	if _, err := os.Stat("/dev/ptmx"); err != nil {
 		t.Skip("no /dev/ptmx")
 	}
-	raw, cfg := driveThemePicker(t, "TestThemePickerEscNoExtraBanner", "theme-esc", "\x1b[B\x1b[B\x1b", false)
+	raw, cfg := driveThemePicker(t, "TestThemePickerEscNoExtraBanner", "theme-esc", "\x1b[B\x1b[B\x1b")
 	if bytes.Contains(raw, []byte("\x1b[3J")) {
 		t.Fatalf("esc cleared the screen:\n%s", ansiRe.ReplaceAll(raw, nil))
 	}
@@ -45,7 +45,7 @@ func TestThemePickerEscNoExtraBanner(t *testing.T) {
 	}
 }
 
-func TestThemePickerEnterRedrawsCachedWelcome(t *testing.T) {
+func TestThemePickerEnterAppliesInPlace(t *testing.T) {
 	if os.Getenv("KONSOLAI_PTY_CHILD") == "theme-enter" {
 		themePickerChild()
 		return
@@ -53,21 +53,21 @@ func TestThemePickerEnterRedrawsCachedWelcome(t *testing.T) {
 	if _, err := os.Stat("/dev/ptmx"); err != nil {
 		t.Skip("no /dev/ptmx")
 	}
-	raw, cfg := driveThemePicker(t, "TestThemePickerEnterRedrawsCachedWelcome", "theme-enter", "\x1b[B\r", true)
-	seq := []byte("\x1b[H\x1b[2J\x1b[3J")
-	idx := bytes.LastIndex(raw, seq)
-	if idx < 0 {
-		t.Fatalf("missing clear\n%s", ansiRe.ReplaceAll(raw, nil))
+	raw, cfg := driveThemePicker(t, "TestThemePickerEnterAppliesInPlace", "theme-enter", "\x1b[B\r")
+	if n := bytes.Count(raw, []byte("\x1b[H\x1b[2J")); n != 1 || bytes.Contains(raw, []byte("\x1b[3J")) {
+		t.Fatalf("enter cleared the screen (%d home-clears):\n%s", n, ansiRe.ReplaceAll(raw, nil))
 	}
-	afterRaw := raw[idx+len(seq):]
 	sc := newScreen(48, 120)
-	sc.feed(afterRaw)
+	sc.feed(raw)
 	if n := blockLines(sc); n < 1 || n > 5 {
-		t.Fatalf("banners after clear %d\n%s", n, sc.dump())
+		t.Fatalf("wordmark rows %d (welcome was redrawn)\n%s", n, sc.dump())
 	}
-	after := ansiRe.ReplaceAllString(strings.ReplaceAll(string(afterRaw), "\r", ""), "")
-	if !strings.Contains(after, "main-model") || !strings.Contains(after, "~/src/app") || !strings.Contains(after, "dev") {
-		t.Fatalf("card\n%s", after)
+	plain := sc.dump()
+	if strings.Contains(plain, "◆ build") || strings.Contains(plain, "glacier") {
+		t.Fatalf("picker still on screen:\n%s", plain)
+	}
+	if !strings.Contains(plain, "main-model") {
+		t.Fatalf("welcome left the screen:\n%s", plain)
 	}
 	body, err := os.ReadFile(cfg)
 	if err != nil {
@@ -82,12 +82,10 @@ func themePickerChild() {
 	dir := os.Getenv("KONSOLAI_THEME_CWD")
 	cfgPath := os.Getenv("KONSOLAI_THEME_CFG")
 	prof := config.Builtin()
-	prof.LLM.Model = "main-model"
-	prof.LLM.Endpoint = "http://127.0.0.1:1/v1"
-	prof.Fast.Endpoint = ""
-	prof.Fast.Enabled = false
-	prof.RAG.EmbedEndpoint = ""
-	prof.RAG.RerankEndpoint = ""
+	prof.SetMain("http://127.0.0.1:1/v1", "main-model", false)
+	prof.Roles.Fast = ""
+	prof.Roles.Embed = ""
+	prof.Roles.Rerank = ""
 	prof.RAG.Enabled = false
 	prof.Database.URL = ""
 	prof.UI.ClearOnStart = false
@@ -108,7 +106,7 @@ func themePickerChild() {
 	os.Exit(code)
 }
 
-func driveThemePicker(t *testing.T, testName, child, keys string, waitClear bool) ([]byte, string) {
+func driveThemePicker(t *testing.T, testName, child, keys string) ([]byte, string) {
 	t.Helper()
 	home := t.TempDir()
 	dir := filepath.Join(home, "src", "app")
@@ -190,32 +188,10 @@ func driveThemePicker(t *testing.T, testName, child, keys string, waitClear bool
 	if _, err := ptmx.Write([]byte(keys)); err != nil {
 		t.Fatal(err)
 	}
-	if waitClear {
-		deadline := time.Now().Add(3 * time.Second)
-		seq := []byte("\x1b[H\x1b[2J\x1b[3J")
-		for time.Now().Before(deadline) {
-			mu.Lock()
-			raw := append([]byte(nil), buf.Bytes()...)
-			mu.Unlock()
-			idx := bytes.LastIndex(raw, seq)
-			if idx >= 0 {
-				after := ansiRe.ReplaceAllString(strings.ReplaceAll(string(raw[idx+len(seq):]), "\r", ""), "")
-				if strings.Contains(after, "main-model") && strings.Contains(after, "╭") {
-					time.Sleep(100 * time.Millisecond)
-					mu.Lock()
-					out := append([]byte(nil), buf.Bytes()...)
-					mu.Unlock()
-					return out, cfg
-				}
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-		mu.Lock()
-		plain := ansiRe.ReplaceAllString(buf.String(), "")
-		mu.Unlock()
-		t.Fatalf("timeout waiting for redraw\n%s", plain)
+	if strings.Contains(keys, "\r") {
+		waitPlain("applied now", 3*time.Second)
 	}
-	time.Sleep(400 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 	mu.Lock()
 	out := append([]byte(nil), buf.Bytes()...)
 	mu.Unlock()

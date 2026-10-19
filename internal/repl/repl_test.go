@@ -32,10 +32,16 @@ func (s *scriptReader) ReadLine(context.Context, string) (string, error) {
 
 func (s *scriptReader) Close() error { return nil }
 
+func namedMain(name, endpoint, model string) config.Profile {
+	p := config.WithMain(endpoint, model)
+	p.Name = name
+	return p
+}
+
 func TestReplCommandsAndExit(t *testing.T) {
 	var out, errb bytes.Buffer
 	env := &commands.Env{
-		Profile: config.Profile{Name: "default", LLM: config.LLM{Model: "m", Endpoint: "http://127.0.0.1:9/v1"}},
+		Profile: config.WithMain("http://127.0.0.1:9/v1", "m"),
 		Out:     &out,
 		Err:     &errb,
 		Cwd:     t.TempDir(),
@@ -66,7 +72,7 @@ func TestReplBannerOffUsesMutedLine(t *testing.T) {
 	var out, errb bytes.Buffer
 	prof := config.Builtin()
 	prof.UI.Banner = false
-	prof.LLM.Model = "m"
+	prof.SetMain(prof.MainEndpoint(), "m", false)
 	env := &commands.Env{Profile: prof, Out: &out, Err: &errb, Cwd: t.TempDir()}
 	code := Run(context.Background(), Config{
 		Env: env, Reg: commands.Default(), Reader: &scriptReader{lines: []string{"/exit"}},
@@ -254,7 +260,7 @@ func TestEchoPrimaryBoldNotLink(t *testing.T) {
 func TestClearDrawsCompactHeader(t *testing.T) {
 	var out, errb bytes.Buffer
 	env := &commands.Env{
-		Profile: config.Profile{Name: "p", LLM: config.LLM{Model: "m", Endpoint: "http://127.0.0.1:9/v1"}},
+		Profile: namedMain("p", "http://127.0.0.1:9/v1", "m"),
 		Out:     &out, Err: &errb, Cwd: t.TempDir(), Version: "vtest",
 	}
 	code := Run(context.Background(), Config{
@@ -330,7 +336,7 @@ func TestCompleterSlashAndAt(t *testing.T) {
 func TestReadLineSeesTrailingNewline(t *testing.T) {
 	var out, errb bytes.Buffer
 	env := &commands.Env{
-		Profile: config.Profile{Name: "p", LLM: config.LLM{Model: "m", Endpoint: "http://127.0.0.1:9/v1"}},
+		Profile: namedMain("p", "http://127.0.0.1:9/v1", "m"),
 		Out:     &out,
 		Err:     &errb,
 		Cwd:     t.TempDir(),
@@ -408,7 +414,7 @@ func TestShellCtrlDReturnsToAI(t *testing.T) {
 func TestSubmittedInputNotEchoed(t *testing.T) {
 	var out, errb bytes.Buffer
 	env := &commands.Env{
-		Profile: config.Profile{Name: "p", LLM: config.LLM{Model: "m", Endpoint: "http://127.0.0.1:9/v1"}},
+		Profile: namedMain("p", "http://127.0.0.1:9/v1", "m"),
 		Out:     &out,
 		Err:     &errb,
 		Cwd:     t.TempDir(),

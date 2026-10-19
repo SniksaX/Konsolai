@@ -1,6 +1,21 @@
 # Konsolai
 
-![Konsolai](docs/assets/konsolai-header.svg)
+<p align="center">
+  <img src="docs/assets/konsolai-header.svg" alt="Konsolai" width="100%">
+</p>
+
+<p align="center">
+  <img src="docs/assets/screens/welcome.png" alt="Konsolai welcome screen and answer" width="100%">
+</p>
+
+<p align="center">
+  <img src="docs/assets/screens/build.png" alt="A build turn: plan, approval, steps, recovery" width="100%">
+</p>
+
+<p align="center">
+  <img src="docs/assets/screens/commands.png" alt="Slash command palette" width="49%">
+  <img src="docs/assets/screens/themes.png" alt="Theme picker" width="49%">
+</p>
 
 Local coding agent. With no request, and with both stdin and stdout on a TTY, it starts a REPL. Every other invocation is one-shot and skips the welcome.
 
@@ -55,46 +70,98 @@ Stamp the version yourself with `-ldflags "-X main.version=..."`.
 
 ## Configuration
 
-Every key, with its default and a one-line comment, is in [config.example.yaml](config.example.yaml). That file is generated from `internal/config/keys.go`.
+Every change goes through `/set`. A new setting is one entry in `internal/config/keys.go`.
 
 ```sh
-konsolai /config init
-konsolai /config init --from-current
-konsolai /config diff
+konsolai /set
+konsolai /set theme glacier
+konsolai /set steps 20
+konsolai /set steps default
 ```
 
-`/config init` writes the defaults, mode `0600`, and refuses to replace an existing file without `--force`. `/config init --from-current` writes the effective config (file, then environment). `/config diff` lists only the keys that differ from the defaults, and where each value came from: file, env, or flag.
+`/set` with no arguments lists every setting, grouped by section. On a TTY inside the REPL it is a menu (↑/↓, Enter, Esc, `?`). `/set <name>` shows the value, its source, the default, the allowed values, and the doc. `/set <name> <value>` checks the value, writes the active config with comments and order kept, and prints `applied now`, `from the next turn`, or `after restart`. `/set <name> default` and `/set default <name>` remove that key. `/set default all` rewrites the active file from the factory document. `--session` keeps the change in this REPL and does not write the file. A full key path works (`/set agent.max_steps.act 20`). A unique suffix works. An ambiguous name lists the candidates. Tab completes names, then arguments, then allowed values.
 
-Inside the REPL the same subcommands are `/config init`, `/config init --from-current`, and `/config diff`.
+Secrets are refused. A database password belongs in `~/.pgpass` or `KONSOLAI_DATABASE_URL`, not in the file. If the shell already sets the key's environment variable, the file is still written and `/set` warns that the variable overrides it.
 
-The path is `$XDG_CONFIG_HOME/konsolai/config.yaml`, or `~/.config/konsolai/config.yaml` when `XDG_CONFIG_HOME` is unset. A missing file loads built-in defaults.
+`/theme`, `/think`, `/yes`, `/trace`, and `/models` remain for one release. Each prints `now: /set ...`. `/think`, `/yes`, and `/trace` stay session-only.
 
-The file has `default_profile`, a `defaults` block, and a `profiles` map. Each profile overlays `defaults`, which overlay the built-in values. `/config show` prints the resolved profile and masks a password in `database.url`. `/config path` prints the path. `/config validate` checks it.
+The active file is `--config`, then `KONSOLAI_CONFIG`, then `$XDG_CONFIG_HOME/konsolai/config.yaml` or `~/.config/konsolai/config.yaml`. A checkout may point that path at `config.yaml` in the repo (mode `0600`, gitignored). `/config path` prints the configured path and the path after symlinks are resolved. Writes go to the real file. [config.example.yaml](config.example.yaml) and [config.default.yaml](config.default.yaml) are the commented factory defaults, generated from the key table. `/set default all` writes that document. [.env.example](.env.example) lists the environment overrides.
+
+`/config init` writes the defaults, mode `0600`, and refuses to replace an existing file without `--force`. `/config init --from-current` writes the effective config. `/config diff` lists keys that differ from the defaults. `/config show` masks a password in `database.url`. `/config validate` checks the file.
 
 `--profile NAME` selects the profile. If that flag is empty, `KONSOLAI_PROFILE` is used, then `default_profile`, then the built-in name `default`.
-
-These variables override fields after the profile is chosen. A copy with generic values is [.env.example](.env.example). Put a database password in `~/.pgpass`, not in the URL. Set a variable only when you want the override:
 
 | Variable | Field |
 | --- | --- |
 | `KONSOLAI_DATABASE_URL` | `database.url` |
-| `KONSOLAI_ENDPOINT` | `llm.endpoint` |
-| `KONSOLAI_MODEL` | `llm.model` |
-| `KONSOLAI_FAST_ENDPOINT` | `fast.endpoint` |
-| `KONSOLAI_FAST_MODEL` | `fast.model` |
+| `KONSOLAI_ENDPOINT` | main model endpoint |
+| `KONSOLAI_MODEL` | main model id |
+| `KONSOLAI_FAST_ENDPOINT` | fast model endpoint |
+| `KONSOLAI_FAST_MODEL` | fast model id |
 | `KONSOLAI_BUILD_THINKING` | `agent.build_thinking` |
-| `KONSOLAI_EMBED_ENDPOINT` | `rag.embed_endpoint` |
-| `KONSOLAI_RERANK_ENDPOINT` | `rag.rerank_endpoint` |
+| `KONSOLAI_EMBED_ENDPOINT` | `roles.embed` |
+| `KONSOLAI_RERANK_ENDPOINT` | `roles.rerank` |
 | `KONSOLAI_PROFILE` | profile name, when `--profile` is empty |
+| `KONSOLAI_CONFIG` | config file, when `--config` is empty |
 
-`llm.endpoint` is an OpenAI-compatible base such as `http://localhost:8000/v1`. Leave `llm.model` empty to use the first model from `<endpoint>/models`. `fast` is a second base of the same kind, and an empty `fast.model` is resolved the same way. When it is enabled and reachable, the router uses it. An answer at effort `none` uses it too, unless the prompt is past `fast.context_guard_ratio` of that model's window. If that stream fails, the turn retries on `llm`.
+Friendly names:
 
-`rag.embed_endpoint` and `rag.rerank_endpoint` are bases. The client appends `/embed` and `/rerank`.
+| name | values | keys |
+| --- | --- | --- |
+| model | main \<name\> \| fast \<name\>\|off \| add \<name\> \<endpoint\> [id] \| remove \<name\> \| discover | models, roles.main, roles.fast |
+| embed | \<url\>\|off | roles.embed |
+| rerank | \<url\>\|off | roles.rerank |
+| database | \<url\>\|off | database.url |
+| theme | amber \| glacier \| nebula \| jade \| rose \| mono | ui.theme |
+| appearance | auto \| dark \| light | ui.appearance |
+| welcome | split \| frame \| minimal | ui.welcome |
+| banner | on \| off | ui.banner |
+| emoji | on \| off | ui.strip_emoji |
+| highlight | on \| off | ui.code_highlight |
+| cursor | on \| off | ui.cursor_color |
+| steps | \<n\> \| lookup\|act\|build \<n\> | agent.max_steps.lookup, agent.max_steps.act, agent.max_steps.build |
+| budget | \<intent\> \<n\> | agent.explore_budget.* |
+| think | on\|off\|auto \| \<intent\> on\|off\|plan_step\|until_plan | agent.think_mode, agent.think_answer, agent.think_lookup, agent.think_act, agent.build_thinking |
+| temperature | \<x\> [intent] | llm.temperature.answer, llm.temperature.lookup, llm.temperature.act, llm.temperature.build |
+| top_p | \<x\> | llm.top_p |
+| approve | ask \| in_plan \| all_safe | agent.approve |
+| plan | act_low\|act_high\|build on\|off | agent.plan.act_low, agent.plan.act_high, agent.plan.build |
+| trace | on \| off | ui.trace |
+| stats | on \| off | ui.stats |
+| badge | on \| off | ui.badge |
+| language | auto \| en \| fr | language.mode |
+| languages | \<list\> | language.languages |
+| web | on\|off \| results \<n\> | tools.web.enabled, tools.web.results |
+| memory | on \| off | memory.enabled |
+| rag | on \| off | rag.enabled |
+| idle | \<minutes\> | memory.session_idle_minutes |
+| retention | \<days\> | memory.retention_days |
+| elide | \<trigger\> \<target\> | context.elide_trigger, context.elide_target |
+| ctx | warn\|hot \<pct\> | ui.ctx_warn_pct, ui.ctx_hot_pct |
+| timeout | shell \<sec\> \| model \<sec\> | tools.shell.default_timeout_sec, llm.idle_timeout_seconds |
+
+## Models
+
+Named models live under `models`. `roles.main` selects the chat model. `roles.fast` is a name or empty. An empty fast role uses the main model and says nothing. `roles.embed` and `roles.rerank` are URLs or empty. `chat_template_kwargs.enable_thinking` is sent only when that model's `thinking_kwargs` is true. A role change applies on the next turn.
+
+The built-in model is `default` at `http://localhost:8000/v1`, with an empty id and thinking off. Leave the id empty to use the first model from `<endpoint>/models`. When the fast role is set and reachable, the router uses it. An answer at effort `none` uses it too, unless the prompt is past `fast.context_guard_ratio` of that model's window. If that stream fails, the turn retries on main.
+
+```sh
+konsolai /set model
+konsolai /set model main default
+konsolai /set model fast off
+konsolai /set model add local http://localhost:8000/v1
+konsolai /set model discover
+konsolai /set embed off
+konsolai /set rerank off
+```
+
+`/set model` prints name, roles, host, id, context, and status. The current main and fast rows are marked. `/set model discover` lists ids on each endpoint that are not configured yet, each with the `/set model add` line. Embed and rerank URLs are optional. The client appends `/embed` and `/rerank`. With `rag.enabled` false there is no ingestion, no recall tool, and no warning. `/status` prints `not configured` for a role that is off.
 
 ## Usage
 
 ```
-konsolai [--yes] [--profile NAME] [--intent answer|lookup|act|build] [--trace] [--plain] [--version] [new] ["<request>"]
+konsolai [--yes] [--profile NAME] [--config FILE] [--intent answer|lookup|act|build] [--trace] [--plain] [--version] [new] ["<request>"]
 konsolai /<command> [args]
 ```
 
@@ -110,7 +177,7 @@ The request is one argument. `new` closes resumable sessions so the next request
 
 A paste of at least `ui.paste_chip_lines` lines (default 11) or `ui.paste_chip_chars` characters (default 1000) is shown as `[pasted #N · L lines]` and expanded before the turn.
 
-`/theme` with no argument opens a picker on a TTY. Esc leaves it with the current theme. Enter applies the highlighted palette and redraws the welcome. `/theme glacier` applies that palette and writes it to the config file. Names: `amber`, `glacier`, `nebula`, `jade`, `rose`, `mono`.
+`/theme` with no argument opens a picker on a TTY. Esc leaves it with the current theme. Enter saves the highlighted palette, erases the picker, and leaves the screen in place. `/theme glacier` is `/set theme glacier`: it writes the palette and prints `applied now`. Names: `amber`, `glacier`, `nebula`, `jade`, `rose`, `mono`.
 
 These commands exist only in the REPL: `exit`, `clear`, `cd`, `cmd`, `yes`, `trace`, `think`, `model`, `compact`.
 
@@ -205,6 +272,8 @@ The `name` cell is `Command.DisplayNames`. The `args` cell lists `Arg.Name`; opt
 | /output | [n] | Reprint the full output of a recent command |
 | /status | | Show version, model, database and environment |
 | /config | action | Show or write the YAML config |
+| /set | [name] [value] | Show or change a setting |
+| /models | | Show configured models |
 | /theme | [name] | List palettes or apply one |
 | /index | [action] | Index the project for recall |
 | /recall | query | Search indexed memory without calling the model |

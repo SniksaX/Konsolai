@@ -39,18 +39,31 @@ func titleBar(pal ui.Palette, inner int, title, right string, rightPaint func(st
 		title = "konsolai"
 	}
 	if right == "" {
-		title = truncatePad(title, max(1, inner-4))
+		// ─ title ─…─ fills the inner width. Padding the title with spaces
+		// left a hole between the title and the right corner.
+		maxTitle := inner - 4
+		if maxTitle < 1 {
+			maxTitle = 1
+		}
+		if theme.DisplayWidth(title) > maxTitle {
+			title = theme.Truncate(title, maxTitle)
+		}
 		tw := theme.DisplayWidth(title)
 		dashes := inner - (2 + tw + 1)
-		if dashes < 1 {
-			title = theme.Truncate(title, max(1, inner-3))
+		for dashes < 1 && tw > 1 {
+			title = theme.Truncate(title, tw-1)
 			tw = theme.DisplayWidth(title)
 			dashes = inner - (2 + tw + 1)
 		}
-		if dashes < 0 {
-			dashes = 0
+		if dashes < 1 {
+			dashes = 1
 		}
-		return pal.Subtle("─ ") + pal.Heading(title) + pal.Subtle(" "+strings.Repeat("─", dashes))
+		line := pal.Subtle("─ ") + pal.Heading(title) + pal.Subtle(" "+strings.Repeat("─", dashes))
+		if got := theme.DisplayWidth(line); got < inner {
+			dashes += inner - got
+			line = pal.Subtle("─ ") + pal.Heading(title) + pal.Subtle(" "+strings.Repeat("─", dashes))
+		}
+		return clip(line, inner)
 	}
 	// "─ " + title + " " + dashes + " " + right + " ─" == inner
 	title = theme.Truncate(title, max(1, inner-8))

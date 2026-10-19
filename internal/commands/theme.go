@@ -6,83 +6,17 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/SniksaX/Konsolai/internal/config"
 	"github.com/SniksaX/Konsolai/internal/ui"
 	"github.com/SniksaX/Konsolai/internal/ui/theme"
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
 
-var welcomeRedraw sync.Map
-
-// SetWelcomeRedraw installs the REPL hook that paints the cached welcome
-// after /theme Enter. A nil fn clears it.
-func SetWelcomeRedraw(env *Env, fn func()) {
-	if env == nil {
-		return
-	}
-	if fn == nil {
-		welcomeRedraw.Delete(env)
-		return
-	}
-	welcomeRedraw.Store(env, fn)
-}
-
-func takeWelcomeRedraw(env *Env) func() {
-	if env == nil {
-		return nil
-	}
-	v, ok := welcomeRedraw.Load(env)
-	if !ok {
-		return nil
-	}
-	fn, _ := v.(func())
-	return fn
-}
-
 func runTheme(ctx context.Context, env *Env, args []string) int {
-	if len(args) == 0 {
-		if env != nil && env.InRepl && pickerInteractive() {
-			return runThemePicker(env)
-		}
-		printThemeRows(env, envTheme(env), -1)
-		return 0
-	}
-	if len(args) != 1 {
-		fmt.Fprintln(env.errw(), "usage: /theme [name]")
-		return 2
-	}
-	return applyTheme(env, args[0], true, true)
-}
-
-func applyTheme(env *Env, raw string, save, announce bool) int {
-	name, ok := theme.KnownPalette(raw)
-	if !ok {
-		fmt.Fprintf(env.errw(), "unknown theme %q; use /theme\n", raw)
-		return 2
-	}
-	setLiveTheme(env, name)
-	if !save {
-		return 0
-	}
-	path := config.DefaultPath()
-	if env != nil && env.ConfigPath != "" {
-		path = env.ConfigPath
-	}
-	if err := config.SetTheme(path, name); err != nil {
-		fmt.Fprintln(env.errw(), "konsolai:", err)
-		return 1
-	}
-	if env != nil {
-		env.Profile.UI.Theme = name
-	}
-	if announce {
-		fmt.Fprintln(env.out(), "theme "+name)
-	}
-	return 0
+	fmt.Fprintln(env.out(), ui.Current().Muted("now: /set theme"))
+	return runSet(ctx, env, append([]string{"theme"}, args...))
 }
 
 func setLiveTheme(env *Env, name string) {
@@ -156,16 +90,11 @@ func runThemePicker(env *Env) int {
 				paint()
 			}
 		case "enter":
-			code := applyTheme(env, names[sel], true, false)
-			if code != 0 {
-				return code
+			if painted {
+				fmt.Fprint(env.out(), theme.CursorUp(rows))
+				fmt.Fprint(env.out(), theme.ClearBelow)
 			}
-			fmt.Fprint(env.out(), theme.ClearScroll)
-			if fn := takeWelcomeRedraw(env); fn != nil {
-				fn()
-			}
-			fmt.Fprintln(env.out(), "theme "+names[sel])
-			return 0
+			return setOne(env, "ui.theme", []string{names[sel]}, false)
 		case "esc":
 			setLiveTheme(env, prev)
 			if painted {

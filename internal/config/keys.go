@@ -19,6 +19,16 @@ const (
 	KindFloat
 	KindDurationMS
 	KindList
+	KindEnum
+)
+
+// Apply says when a /set change takes effect.
+type Apply int
+
+const (
+	ApplyNow Apply = iota
+	ApplyNext
+	ApplyRestart
 )
 
 // Check is the per-key constraint generated into validation.
@@ -35,6 +45,9 @@ const (
 	CheckTheme
 	CheckAppearance
 	CheckWarnPct
+	CheckTemp
+	CheckTopP
+	CheckNonNeg
 )
 
 // Key is one leaf of the config. The table in this file is the only declaration.
@@ -45,6 +58,9 @@ type Key struct {
 	Env      string
 	Secret   bool
 	Aliases  []string
+	Name     string
+	Apply    Apply
+	Allowed  []string
 	Check    Check
 	Str      string
 	Bool     bool
@@ -76,6 +92,21 @@ func (k Key) alias(paths ...string) Key {
 	k.Aliases = append([]string(nil), paths...)
 	return k
 }
+func (k Key) named(name string) Key {
+	k.Name = name
+	return k
+}
+func (k Key) when(a Apply) Key {
+	k.Apply = a
+	return k
+}
+func (k Key) allowed(v ...string) Key {
+	k.Allowed = append([]string(nil), v...)
+	if k.Kind == KindString {
+		k.Kind = KindEnum
+	}
+	return k
+}
 
 func ks(path, doc, env, def string, set func(*Config, string), get func(Config) string) Key {
 	return Key{Path: path, Kind: KindString, Doc: doc, Env: env, Str: def, SetStr: set, GetStr: get}
@@ -103,6 +134,14 @@ func kli(path, doc string, def []string, set func(*Config, []string), get func(C
 	return Key{Path: path, Kind: KindList, Doc: doc, List: copyList(def), SetList: set, GetList: get}
 }
 
+func ktemp(path, doc string, def float64, set func(*Config, float64), get func(Config) float64) Key {
+	return Key{Path: path, Kind: KindFloat, Doc: doc, Float: def, Check: CheckTemp, SetFloat: set, GetFloat: get}
+}
+
+func knn(path, doc string, def int, set func(*Config, int), get func(Config) int) Key {
+	return Key{Path: path, Kind: KindInt, Doc: doc, Int: def, Check: CheckNonNeg, SetInt: set, GetInt: get}
+}
+
 func copyList(v []string) []string {
 	out := make([]string, len(v))
 	copy(out, v)
@@ -110,14 +149,17 @@ func copyList(v []string) []string {
 }
 
 var keyTable = []Key{
-	ks("llm.endpoint", "OpenAI-compatible API base", "KONSOLAI_ENDPOINT", "http://localhost:8000/v1",
-		func(c *Config, v string) { c.LLM.Endpoint = v }, func(c Config) string { return c.LLM.Endpoint }).chk(CheckURL),
-	ks("llm.model", "empty uses the server default", "KONSOLAI_MODEL", "",
-		func(c *Config, v string) { c.LLM.Model = v }, func(c Config) string { return c.LLM.Model }),
-	kb("llm.thinking_kwargs", "send chat_template_kwargs.enable_thinking", false,
-		func(c *Config, v bool) { c.LLM.ThinkingKwargs = v }, func(c Config) bool { return c.LLM.ThinkingKwargs }),
+	ks("roles.main", "name of the main chat model", "", "default",
+		func(c *Config, v string) { c.Roles.Main = v }, func(c Config) string { return c.Roles.Main }).named("model").when(ApplyNext),
+	ks("roles.fast", "name of the fast model, or empty", "", "",
+		func(c *Config, v string) { c.Roles.Fast = v }, func(c Config) string { return c.Roles.Fast }).when(ApplyNext),
+	ks("roles.embed", "embedding service URL, or empty", "", "",
+		func(c *Config, v string) { c.Roles.Embed = v }, func(c Config) string { return c.Roles.Embed }).chk(CheckURLOptional).named("embed").when(ApplyNext),
+	ks("roles.rerank", "rerank service URL, or empty", "", "",
+		func(c *Config, v string) { c.Roles.Rerank = v }, func(c Config) string { return c.Roles.Rerank }).chk(CheckURLOptional).named("rerank").when(ApplyNext),
+
 	ki("llm.idle_timeout_seconds", "stream idle limit", 120,
-		func(c *Config, v int) { c.LLM.IdleTimeoutSeconds = v }, func(c Config) int { return c.LLM.IdleTimeoutSeconds }),
+		func(c *Config, v int) { c.LLM.IdleTimeoutSeconds = v }, func(c Config) int { return c.LLM.IdleTimeoutSeconds }).named("timeout").when(ApplyNext),
 	ki("llm.max_tokens.answer", "answer intent token cap", 4096,
 		func(c *Config, v int) { c.LLM.MaxTokens.Answer = v }, func(c Config) int { return c.LLM.MaxTokens.Answer }),
 	ki("llm.max_tokens.lookup", "lookup intent token cap", 4096,
@@ -126,43 +168,51 @@ var keyTable = []Key{
 		func(c *Config, v int) { c.LLM.MaxTokens.Act = v }, func(c Config) int { return c.LLM.MaxTokens.Act }),
 	ki("llm.max_tokens.build", "build intent token cap", 12288,
 		func(c *Config, v int) { c.LLM.MaxTokens.Build = v }, func(c Config) int { return c.LLM.MaxTokens.Build }),
+	ktemp("llm.temperature.answer", "answer sampling temperature", 0.3,
+		func(c *Config, v float64) { c.LLM.Temperature.Answer = v }, func(c Config) float64 { return c.LLM.Temperature.Answer }).named("temperature").when(ApplyNext),
+	ktemp("llm.temperature.lookup", "lookup sampling temperature", 0.2,
+		func(c *Config, v float64) { c.LLM.Temperature.Lookup = v }, func(c Config) float64 { return c.LLM.Temperature.Lookup }).when(ApplyNext),
+	ktemp("llm.temperature.act", "act sampling temperature", 0.2,
+		func(c *Config, v float64) { c.LLM.Temperature.Act = v }, func(c Config) float64 { return c.LLM.Temperature.Act }).when(ApplyNext),
+	ktemp("llm.temperature.build", "build sampling temperature", 0.3,
+		func(c *Config, v float64) { c.LLM.Temperature.Build = v }, func(c Config) float64 { return c.LLM.Temperature.Build }).when(ApplyNext),
+	kf("llm.top_p", "nucleus sampling; 0 omits the field", 0,
+		func(c *Config, v float64) { c.LLM.TopP = v }, func(c Config) float64 { return c.LLM.TopP }).chk(CheckTopP).named("top_p").when(ApplyNext),
+	ki("llm.retries", "extra attempts after a retriable model error", 1,
+		func(c *Config, v int) { c.LLM.Retries = v }, func(c Config) int { return c.LLM.Retries }).when(ApplyNext),
+	km("llm.retry_wait_ms", "pause before a model retry", 2000,
+		func(c *Config, v int) { c.LLM.RetryWaitMS = v }, func(c Config) int { return c.LLM.RetryWaitMS }).when(ApplyNext),
 
-	kb("fast.enabled", "route short turns to the fast model", false,
-		func(c *Config, v bool) { c.Fast.Enabled = v }, func(c Config) bool { return c.Fast.Enabled }),
-	ks("fast.endpoint", "fast model API base", "KONSOLAI_FAST_ENDPOINT", "",
-		func(c *Config, v string) { c.Fast.Endpoint = v }, func(c Config) string { return c.Fast.Endpoint }).chk(CheckURLOptional),
-	ks("fast.model", "empty uses the server default", "KONSOLAI_FAST_MODEL", "",
-		func(c *Config, v string) { c.Fast.Model = v }, func(c Config) string { return c.Fast.Model }),
-	kb("fast.thinking_kwargs", "send chat_template_kwargs.enable_thinking for the fast model", false,
-		func(c *Config, v bool) { c.Fast.ThinkingKwargs = v }, func(c Config) bool { return c.Fast.ThinkingKwargs }),
 	kf("fast.context_guard_ratio", "skip fast when the prompt fills past this fraction of its window", 0.60,
 		func(c *Config, v float64) { c.Fast.ContextGuardRatio = v }, func(c Config) float64 { return c.Fast.ContextGuardRatio }),
 
 	ks("database.url", "Postgres URL; empty disables memory", "KONSOLAI_DATABASE_URL", "",
-		func(c *Config, v string) { c.Database.URL = v }, func(c Config) string { return c.Database.URL }).chk(CheckDBURL).sec(),
+		func(c *Config, v string) { c.Database.URL = v }, func(c Config) string { return c.Database.URL }).chk(CheckDBURL).sec().named("database").when(ApplyRestart),
 
+	kb("memory.enabled", "use the database when a URL is set", true,
+		func(c *Config, v bool) { c.Memory.Enabled = v }, func(c Config) bool { return c.Memory.Enabled }).named("memory").when(ApplyRestart),
 	ki("memory.session_idle_minutes", "resume a session newer than this", 30,
-		func(c *Config, v int) { c.Memory.SessionIdleMinutes = v }, func(c Config) int { return c.Memory.SessionIdleMinutes }),
+		func(c *Config, v int) { c.Memory.SessionIdleMinutes = v }, func(c Config) int { return c.Memory.SessionIdleMinutes }).named("idle").when(ApplyNext),
 	ki("memory.retention_days", "prune facts older than this", 90,
-		func(c *Config, v int) { c.Memory.RetentionDays = v }, func(c Config) int { return c.Memory.RetentionDays }),
+		func(c *Config, v int) { c.Memory.RetentionDays = v }, func(c Config) int { return c.Memory.RetentionDays }).named("retention").when(ApplyNext),
 	kf("memory.compact_threshold", "compact history past this fraction of the window", 0.7,
 		func(c *Config, v float64) { c.Memory.CompactThreshold = v }, func(c Config) float64 { return c.Memory.CompactThreshold }),
 	km("memory.isolated_timeout_ms", "memory calls detached from the turn", 2000,
 		func(c *Config, v int) { c.Memory.IsolatedTimeoutMS = v }, func(c Config) int { return c.Memory.IsolatedTimeoutMS }),
 
 	kf("context.elide_trigger", "start eliding tool output above this fraction", 0.60,
-		func(c *Config, v float64) { c.Context.ElideTrigger = v }, func(c Config) float64 { return c.Context.ElideTrigger }),
+		func(c *Config, v float64) { c.Context.ElideTrigger = v }, func(c Config) float64 { return c.Context.ElideTrigger }).named("elide").when(ApplyNext),
 	kf("context.elide_target", "elide down toward this fraction; must stay below the trigger", 0.40,
-		func(c *Config, v float64) { c.Context.ElideTarget = v }, func(c Config) float64 { return c.Context.ElideTarget }),
+		func(c *Config, v float64) { c.Context.ElideTarget = v }, func(c Config) float64 { return c.Context.ElideTarget }).when(ApplyNext),
 
 	ki("agent.max_steps.lookup", "lookup turn step cap", 10,
 		func(c *Config, v int) { c.Agent.MaxSteps.Lookup = v }, func(c Config) int { return c.Agent.MaxSteps.Lookup }),
 	ki("agent.max_steps.act", "act turn step cap", 15,
-		func(c *Config, v int) { c.Agent.MaxSteps.Act = v }, func(c Config) int { return c.Agent.MaxSteps.Act }),
+		func(c *Config, v int) { c.Agent.MaxSteps.Act = v }, func(c Config) int { return c.Agent.MaxSteps.Act }).named("steps").when(ApplyNext),
 	ki("agent.max_steps.build", "build turn step cap", 60,
 		func(c *Config, v int) { c.Agent.MaxSteps.Build = v }, func(c Config) int { return c.Agent.MaxSteps.Build }),
 	ki("agent.explore_budget.lookup", "read-only steps before the lookup nudge", 6,
-		func(c *Config, v int) { c.Agent.ExploreBudget.Lookup = v }, func(c Config) int { return c.Agent.ExploreBudget.Lookup }),
+		func(c *Config, v int) { c.Agent.ExploreBudget.Lookup = v }, func(c Config) int { return c.Agent.ExploreBudget.Lookup }).named("budget").when(ApplyNext),
 	ki("agent.explore_budget.lookup_analysis", "lookup analysis read budget", 10,
 		func(c *Config, v int) { c.Agent.ExploreBudget.LookupAnalysis = v }, func(c Config) int { return c.Agent.ExploreBudget.LookupAnalysis }),
 	ki("agent.explore_budget.act", "act read budget before the nudge", 6,
@@ -174,16 +224,28 @@ var keyTable = []Key{
 	ki("agent.explore_budget.build_analysis", "build analysis read budget", 12,
 		func(c *Config, v int) { c.Agent.ExploreBudget.BuildAnalysis = v }, func(c Config) int { return c.Agent.ExploreBudget.BuildAnalysis }),
 	ks("agent.build_thinking", "plan_step | until_plan", "KONSOLAI_BUILD_THINKING", "plan_step",
-		func(c *Config, v string) { c.Agent.BuildThinking = v }, func(c Config) string { return c.Agent.BuildThinking }),
+		func(c *Config, v string) { c.Agent.BuildThinking = v }, func(c Config) string { return c.Agent.BuildThinking }).allowed("plan_step", "until_plan").when(ApplyNext),
+	ks("agent.think_mode", "auto | on | off", "", "auto",
+		func(c *Config, v string) { c.Agent.ThinkMode = v }, func(c Config) string { return c.Agent.ThinkMode }).allowed("auto", "on", "off").named("think").when(ApplyNow),
+	ks("agent.think_answer", "auto | on | off", "", "auto",
+		func(c *Config, v string) { c.Agent.ThinkAnswer = v }, func(c Config) string { return c.Agent.ThinkAnswer }).allowed("auto", "on", "off").when(ApplyNext),
+	ks("agent.think_lookup", "auto | on | off | plan_step | until_plan", "", "auto",
+		func(c *Config, v string) { c.Agent.ThinkLookup = v }, func(c Config) string { return c.Agent.ThinkLookup }).allowed("auto", "on", "off", "plan_step", "until_plan").when(ApplyNext),
+	ks("agent.think_act", "on | off | plan_step | until_plan", "", "plan_step",
+		func(c *Config, v string) { c.Agent.ThinkAct = v }, func(c Config) string { return c.Agent.ThinkAct }).allowed("on", "off", "plan_step", "until_plan").when(ApplyNext),
+	ks("agent.approve", "ask | in_plan | all_safe", "", "ask",
+		func(c *Config, v string) { c.Agent.Approve = v }, func(c Config) string { return c.Agent.Approve }).allowed("ask", "in_plan", "all_safe").named("approve").when(ApplyNow),
+	kb("agent.plan.act_low", "require a plan for a low-effort act turn", false,
+		func(c *Config, v bool) { c.Agent.Plan.ActLow = v }, func(c Config) bool { return c.Agent.Plan.ActLow }).named("plan").when(ApplyNext),
+	kb("agent.plan.act_high", "require a plan for a high-effort act turn", true,
+		func(c *Config, v bool) { c.Agent.Plan.ActHigh = v }, func(c Config) bool { return c.Agent.Plan.ActHigh }).when(ApplyNext),
+	kb("agent.plan.build", "require a plan for a build turn", true,
+		func(c *Config, v bool) { c.Agent.Plan.Build = v }, func(c Config) bool { return c.Agent.Plan.Build }).when(ApplyNext),
 	ki("agent.identical_rejects", "stop after this many identical rejected tool calls", 2,
 		func(c *Config, v int) { c.Agent.IdenticalRejects = v }, func(c Config) int { return c.Agent.IdenticalRejects }),
 
 	kb("rag.enabled", "index and search project memory", false,
-		func(c *Config, v bool) { c.RAG.Enabled = v }, func(c Config) bool { return c.RAG.Enabled }),
-	ks("rag.embed_endpoint", "embedding service", "KONSOLAI_EMBED_ENDPOINT", "",
-		func(c *Config, v string) { c.RAG.EmbedEndpoint = v }, func(c Config) string { return c.RAG.EmbedEndpoint }).chk(CheckURLOptional),
-	ks("rag.rerank_endpoint", "rerank service", "KONSOLAI_RERANK_ENDPOINT", "",
-		func(c *Config, v string) { c.RAG.RerankEndpoint = v }, func(c Config) string { return c.RAG.RerankEndpoint }).chk(CheckURLOptional),
+		func(c *Config, v bool) { c.RAG.Enabled = v }, func(c Config) bool { return c.RAG.Enabled }).named("rag").when(ApplyNext),
 	ki("rag.embed_batch", "texts per embed request", 32,
 		func(c *Config, v int) { c.RAG.EmbedBatch = v }, func(c Config) int { return c.RAG.EmbedBatch }),
 	ki("rag.chunk.turn_tokens", "tokens per stored turn chunk", 1200,
@@ -228,21 +290,21 @@ var keyTable = []Key{
 	ki("ui.output_keep_kb", "tool output retained for the model", 256,
 		func(c *Config, v int) { c.UI.OutputKeepKB = v }, func(c Config) int { return c.UI.OutputKeepKB }),
 	ks("ui.theme", "amber | glacier | nebula | jade | rose | mono", "", "amber",
-		func(c *Config, v string) { c.UI.Theme = v }, func(c Config) string { return c.UI.Theme }).chk(CheckTheme).alias("ui.palette"),
+		func(c *Config, v string) { c.UI.Theme = v }, func(c Config) string { return c.UI.Theme }).chk(CheckTheme).alias("ui.palette").named("theme").when(ApplyNow),
 	ks("ui.appearance", "auto | dark | light", "", "auto",
-		func(c *Config, v string) { c.UI.Appearance = v }, func(c Config) string { return c.UI.Appearance }).chk(CheckAppearance),
+		func(c *Config, v string) { c.UI.Appearance = v }, func(c Config) string { return c.UI.Appearance }).chk(CheckAppearance).allowed("auto", "dark", "light").named("appearance").when(ApplyNow),
 	kb("ui.cursor_color", "color the prompt cursor", true,
-		func(c *Config, v bool) { c.UI.CursorColor = v }, func(c Config) bool { return c.UI.CursorColor }),
+		func(c *Config, v bool) { c.UI.CursorColor = v }, func(c Config) bool { return c.UI.CursorColor }).named("cursor").when(ApplyNow),
 	kb("ui.banner", "draw the wordmark at startup", true,
-		func(c *Config, v bool) { c.UI.Banner = v }, func(c Config) bool { return c.UI.Banner }),
+		func(c *Config, v bool) { c.UI.Banner = v }, func(c Config) bool { return c.UI.Banner }).named("banner").when(ApplyNext),
 	ks("ui.welcome", "split | frame | minimal", "", "split",
-		func(c *Config, v string) { c.UI.Welcome = v }, func(c Config) string { return c.UI.Welcome }),
+		func(c *Config, v string) { c.UI.Welcome = v }, func(c Config) string { return c.UI.Welcome }).allowed("split", "frame", "minimal").named("welcome").when(ApplyNext),
 	kb("ui.code_highlight", "highlight fenced code", true,
-		func(c *Config, v bool) { c.UI.CodeHighlight = v }, func(c Config) bool { return c.UI.CodeHighlight }),
+		func(c *Config, v bool) { c.UI.CodeHighlight = v }, func(c Config) bool { return c.UI.CodeHighlight }).named("highlight").when(ApplyNow),
 	kb("ui.clear_on_start", "clear the terminal when the REPL starts", true,
 		func(c *Config, v bool) { c.UI.ClearOnStart = v }, func(c Config) bool { return c.UI.ClearOnStart }),
 	kb("ui.strip_emoji", "drop emoji from model text", true,
-		func(c *Config, v bool) { c.UI.StripEmoji = v }, func(c Config) bool { return c.UI.StripEmoji }),
+		func(c *Config, v bool) { c.UI.StripEmoji = v }, func(c Config) bool { return c.UI.StripEmoji }).named("emoji").when(ApplyNow),
 	km("ui.probe_deadline_ms", "welcome gather budget", 400,
 		func(c *Config, v int) { c.UI.ProbeDeadlineMS = v }, func(c Config) int { return c.UI.ProbeDeadlineMS }),
 	km("ui.probe_timeout_ms", "one endpoint probe", 300,
@@ -260,7 +322,13 @@ var keyTable = []Key{
 	km("ui.model_slow_ms", "welcome marks a model slow at this latency", 1000,
 		func(c *Config, v int) { c.UI.ModelSlowMS = v }, func(c Config) int { return c.UI.ModelSlowMS }),
 	ki("ui.ctx_warn_pct", "footer meter turns warn at this context percent", 60,
-		func(c *Config, v int) { c.UI.CtxWarnPct = v }, func(c Config) int { return c.UI.CtxWarnPct }).chk(CheckWarnPct),
+		func(c *Config, v int) { c.UI.CtxWarnPct = v }, func(c Config) int { return c.UI.CtxWarnPct }).chk(CheckWarnPct).named("ctx").when(ApplyNow),
+	kb("ui.trace", "print per-call traces", false,
+		func(c *Config, v bool) { c.UI.Trace = v }, func(c Config) bool { return c.UI.Trace }).named("trace").when(ApplyNow),
+	kb("ui.stats", "print the end-of-turn stats line", true,
+		func(c *Config, v bool) { c.UI.Stats = v }, func(c Config) bool { return c.UI.Stats }).named("stats").when(ApplyNow),
+	kb("ui.badge", "print the intent badge", true,
+		func(c *Config, v bool) { c.UI.Badge = v }, func(c Config) bool { return c.UI.Badge }).named("badge").when(ApplyNow),
 	ki("ui.ctx_hot_pct", "footer meter turns hot at this context percent", 85,
 		func(c *Config, v int) { c.UI.CtxHotPct = v }, func(c Config) int { return c.UI.CtxHotPct }),
 	ki("ui.ctx_cells", "cells in the footer context meter", 8,
@@ -279,11 +347,15 @@ var keyTable = []Key{
 		func(c *Config, v int) { c.UI.Layout.FrameWidth = v }, func(c Config) int { return c.UI.Layout.FrameWidth }),
 
 	ki("tools.shell.default_timeout_sec", "run_shell timeout when the model omits one", 120,
-		func(c *Config, v int) { c.Tools.Shell.DefaultTimeoutSec = v }, func(c Config) int { return c.Tools.Shell.DefaultTimeoutSec }),
+		func(c *Config, v int) { c.Tools.Shell.DefaultTimeoutSec = v }, func(c Config) int { return c.Tools.Shell.DefaultTimeoutSec }).named("timeout").when(ApplyNext),
 	ki("tools.shell.max_timeout_sec", "longest run_shell timeout", 600,
 		func(c *Config, v int) { c.Tools.Shell.MaxTimeoutSec = v }, func(c Config) int { return c.Tools.Shell.MaxTimeoutSec }),
 	km("tools.shell.wait_delay_ms", "how long a cancelled shell may take to exit", 2000,
 		func(c *Config, v int) { c.Tools.Shell.WaitDelayMS = v }, func(c Config) int { return c.Tools.Shell.WaitDelayMS }),
+	kb("tools.web.enabled", "offer the web_fetch tool", true,
+		func(c *Config, v bool) { c.Tools.Web.Enabled = v }, func(c Config) bool { return c.Tools.Web.Enabled }).named("web").when(ApplyNext),
+	knn("tools.web.results", "web result cap; 0 means no cap", 0,
+		func(c *Config, v int) { c.Tools.Web.Results = v }, func(c Config) int { return c.Tools.Web.Results }).when(ApplyNext),
 
 	km("store.query_timeout_ms", "database query limit", 2000,
 		func(c *Config, v int) { c.Store.QueryTimeoutMS = v }, func(c Config) int { return c.Store.QueryTimeoutMS }),
@@ -292,8 +364,10 @@ var keyTable = []Key{
 	km("stats.insert_timeout_ms", "turn stat insert limit", 2000,
 		func(c *Config, v int) { c.Stats.InsertTimeoutMS = v }, func(c Config) int { return c.Stats.InsertTimeoutMS }),
 
+	ks("language.mode", "auto | en | fr", "", "auto",
+		func(c *Config, v string) { c.Language.Mode = v }, func(c Config) string { return c.Language.Mode }).allowed("auto", "en", "fr").named("language").when(ApplyNext),
 	kli("language.languages", "reply languages the router may pick", []string{"en", "fr"},
-		func(c *Config, v []string) { c.Language.Languages = copyList(v) }, func(c Config) []string { return c.Language.Languages }),
+		func(c *Config, v []string) { c.Language.Languages = copyList(v) }, func(c Config) []string { return c.Language.Languages }).named("languages").when(ApplyNext),
 	ks("language.default", "language used when detection is unsure", "", "en",
 		func(c *Config, v string) { c.Language.Default = v }, func(c Config) string { return c.Language.Default }),
 
@@ -376,7 +450,7 @@ func ApplyKeyDefaults(c *Config) {
 	for i := range keyTable {
 		k := &keyTable[i]
 		switch k.Kind {
-		case KindString:
+		case KindString, KindEnum:
 			k.SetStr(c, k.Str)
 		case KindBool:
 			k.SetBool(c, k.Bool)
@@ -391,10 +465,12 @@ func ApplyKeyDefaults(c *Config) {
 }
 
 type walkState struct {
-	c      *Config
-	apply  bool
-	src    map[string]string
-	source string
+	c         *Config
+	apply     bool
+	src       map[string]string
+	source    string
+	mentioned map[string]bool
+	sawModels bool
 }
 
 func checkOverlay(n *yaml.Node, full string) error {
@@ -432,6 +508,24 @@ func walkOverlay(n *yaml.Node, t *trieNode, rel, full string, st *walkState) err
 		if full != "" {
 			childFull = full + "." + name
 		}
+		if name == "models" && rel == "" {
+			if st != nil {
+				st.sawModels = true
+				if st.mentioned == nil {
+					st.mentioned = map[string]bool{}
+				}
+			}
+			var mentioned map[string]bool
+			var target *Config
+			if st != nil && st.apply {
+				target = st.c
+				mentioned = st.mentioned
+			}
+			if err := applyModelMap(target, vn, childFull, mentioned); err != nil {
+				return err
+			}
+			continue
+		}
 		if t == nil || t.kids[name] == nil {
 			return fmt.Errorf("unknown key %q at line %d", childFull, kn.Line)
 		}
@@ -468,7 +562,7 @@ func applyValue(st *walkState, k *Key, n *yaml.Node, full string) error {
 		return applyValue(st, k, n.Alias, full)
 	}
 	switch k.Kind {
-	case KindString:
+	case KindString, KindEnum:
 		if n.Kind != yaml.ScalarNode {
 			return fmt.Errorf("config: %s must be a string (line %d)", full, n.Line)
 		}
@@ -594,7 +688,7 @@ func applyKeyEnv(c *Config, src map[string]string) error {
 
 func (k Key) setFromString(c *Config, raw string) error {
 	switch k.Kind {
-	case KindString:
+	case KindString, KindEnum:
 		k.SetStr(c, raw)
 	case KindBool:
 		b, err := strconv.ParseBool(raw)
@@ -643,8 +737,8 @@ func validateConfig(c Config) error {
 	if c.UI.CtxHotPct <= c.UI.CtxWarnPct || c.UI.CtxHotPct > 100 {
 		return fmt.Errorf("config: ui.ctx_hot_pct must be greater than ui.ctx_warn_pct and at most 100, got %d", c.UI.CtxHotPct)
 	}
-	if c.LLM.Model != "" && strings.TrimSpace(c.LLM.Model) == "" {
-		return fmt.Errorf("config: llm.model is empty")
+	if err := validateModels(c); err != nil {
+		return err
 	}
 	return nil
 }
@@ -702,6 +796,40 @@ func (k Key) validate(c Config) error {
 		if n <= 0 || n >= 100 {
 			return fmt.Errorf("config: %s must be in (0,100), got %d", k.Path, n)
 		}
+	case CheckTemp:
+		v := k.GetFloat(c)
+		if v <= 0 || v > 2 {
+			return fmt.Errorf("config: %s must be in (0,2], got %g", k.Path, v)
+		}
+	case CheckTopP:
+		v := k.GetFloat(c)
+		if v == 0 {
+			return nil
+		}
+		if v <= 0 || v > 1 {
+			return fmt.Errorf("config: %s must be 0 or in (0,1], got %g", k.Path, v)
+		}
+	case CheckNonNeg:
+		n := k.GetInt(c)
+		if n < 0 {
+			return fmt.Errorf("config: %s must be >= 0, got %d", k.Path, n)
+		}
+	}
+	if len(k.Allowed) > 0 && k.GetStr != nil {
+		v := strings.ToLower(strings.TrimSpace(k.GetStr(c)))
+		if v == "" {
+			return nil
+		}
+		ok := false
+		for _, a := range k.Allowed {
+			if v == a {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return fmt.Errorf("config: %s must be %s, got %q", k.Path, strings.Join(k.Allowed, ", "), k.GetStr(c))
+		}
 	}
 	return nil
 }
@@ -712,7 +840,7 @@ func (k Key) format(c Config) string {
 
 func (k Key) present(c Config, mask bool) string {
 	switch k.Kind {
-	case KindString:
+	case KindString, KindEnum:
 		raw := k.GetStr(c)
 		if mask && k.Secret {
 			raw = MaskURL(raw)
@@ -785,6 +913,7 @@ func renderDoc(c Config, profile string, mask bool) string {
 	b.WriteString(initHeader)
 	fmt.Fprintf(&b, "default_profile: %s   # used when --profile and KONSOLAI_PROFILE are empty\n\n", yamlScalar(profile))
 	b.WriteString("defaults:\n")
+	writeModels(&b, c, 1)
 	writeKeys(&b, c, mask, 1)
 	b.WriteString("\nprofiles:\n")
 	fmt.Fprintf(&b, "  %s: {}\n", yamlScalar(profile))
@@ -829,6 +958,7 @@ func DiffText(path, profile string) (string, error) {
 		return "", err
 	}
 	var b strings.Builder
+	writeModelDiff(&b, base, fileCfg, full)
 	for i := range keyTable {
 		k := &keyTable[i]
 		dv := k.present(base, true)
@@ -854,6 +984,7 @@ func EnvExample() string {
 	var b strings.Builder
 	b.WriteString("# Konsolai environment overrides. Unset variables keep the config file or built-in default.\n")
 	b.WriteString("# A database password belongs in ~/.pgpass, not in the URL.\n")
+	b.WriteString(modelEnvLines())
 	for i := range keyTable {
 		k := &keyTable[i]
 		if k.Env == "" {
@@ -871,7 +1002,7 @@ func exampleEnvValue(k Key) string {
 	}
 	c := Builtin()
 	switch k.Kind {
-	case KindString:
+	case KindString, KindEnum:
 		return k.GetStr(c)
 	case KindBool:
 		return strconv.FormatBool(k.GetBool(c))

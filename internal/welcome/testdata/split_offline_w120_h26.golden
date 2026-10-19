@@ -6,7 +6,7 @@
          your terminal agent, on your own models                    │ ○ rerank-model  rerank  :8082 unreachable        │
                                                                     ╰──────────────────────────────────────────────────╯
 
-  ╭─ session                                             ─╮
+  ╭─ session ─────────────────────────────────────────────╮
   │ dir      ~/projects/demo                              │
   │ branch   main*                                        │
   │ changed  3                                            │

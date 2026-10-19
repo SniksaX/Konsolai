@@ -179,12 +179,12 @@ func welcomeInput(env *commands.Env, info banner.Info) welcome.Input {
 	if env == nil {
 		return in
 	}
-	in.Endpoint = env.Profile.LLM.Endpoint
-	in.Model = firstNonEmpty(info.Model, env.Profile.LLM.Model)
-	in.FastEndpoint = env.Profile.Fast.Endpoint
-	in.FastModel = env.Profile.Fast.Model
-	in.EmbedEndpoint = env.Profile.RAG.EmbedEndpoint
-	in.RerankEndpoint = env.Profile.RAG.RerankEndpoint
+	in.Endpoint = env.Profile.MainEndpoint()
+	in.Model = firstNonEmpty(info.Model, env.Profile.MainModelID())
+	in.FastEndpoint = env.Profile.FastEndpoint()
+	in.FastModel = env.Profile.FastModelID()
+	in.EmbedEndpoint = env.Profile.EmbedURL()
+	in.RerankEndpoint = env.Profile.RerankURL()
 	in.Profile = env.Profile.Name
 	in.ProjectID = env.ProjectID
 	in.CWD = env.Cwd
@@ -410,7 +410,7 @@ func (s *welcomeState) refresh() {
 	}
 }
 
-func bindWelcome(env *commands.Env, st *welcomeState, rd LineReader) {
+func bindWelcome(st *welcomeState, rd LineReader) {
 	if st == nil {
 		return
 	}
@@ -423,8 +423,4 @@ func bindWelcome(env *commands.Env, st *welcomeState, rd LineReader) {
 	st.mu.Lock()
 	st.onPlaceholder = setPH
 	st.mu.Unlock()
-	if env == nil {
-		return
-	}
-	commands.SetWelcomeRedraw(env, func() { st.redraw(env.Out) })
 }

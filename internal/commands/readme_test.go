@@ -8,11 +8,33 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/SniksaX/Konsolai/internal/config"
 )
 
 // TestReadmeSlashTable keeps the README slash table aligned with Default().
 // Columns are DisplayNames, formatted Args, and Summary, in registry order.
 // A required Arg is its name. An optional Arg is [name].
+func TestReadmeFriendlyTable(t *testing.T) {
+	text := readReadme(t)
+	if !strings.Contains(text, "| name | values | keys |") {
+		t.Fatal("readme missing friendly table")
+	}
+	for _, line := range strings.Split(strings.TrimSpace(config.FriendlyTable()), "\n") {
+		fields := strings.Split(line, "|")
+		if len(fields) < 3 {
+			continue
+		}
+		name := strings.TrimSpace(fields[1])
+		if name == "" || name == "name" || name == "---" {
+			continue
+		}
+		if !strings.Contains(text, "| "+name+" |") {
+			t.Errorf("readme missing friendly name %s", name)
+		}
+	}
+}
+
 func TestReadmeSlashTable(t *testing.T) {
 	text := readReadme(t)
 	got, err := slashRows(text)

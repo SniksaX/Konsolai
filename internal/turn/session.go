@@ -102,7 +102,7 @@ func CreateSession(ctx context.Context, mem *memory.Guard, prof config.Profile, 
 	}
 	id, err := s.CreateSession(ctx, store.NewSession{
 		Profile: prof.Name, ProjectID: projectID, CWD: cwd,
-		Mode: mode, Model: prof.LLM.Model, Title: title,
+		Mode: mode, Model: prof.MainModelID(), Title: title,
 	})
 	if err != nil {
 		mem.Fail(err)

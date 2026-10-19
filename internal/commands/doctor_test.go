@@ -40,7 +40,7 @@ func doctorEnv(t *testing.T, endpoint string) (*Env, *strings.Builder, string) {
 	env.Out = &out
 	env.ConfigPath = path
 	env.Profile.Name = "default"
-	env.Profile.LLM.Endpoint = endpoint
+	env.Profile.SetMain(endpoint, env.Profile.MainModelID(), env.Profile.MainThinking())
 	env.Profile.UI.ProbeTimeoutMS = 300
 	return env, &out, dir
 }
@@ -58,10 +58,9 @@ func TestDoctorUp(t *testing.T) {
 	defer srv.Close()
 	env, out, home := doctorEnv(t, srv.URL+"/v1")
 	doctorHome = func() (string, error) { return home, nil }
-	env.Profile.Fast.Enabled = true
-	env.Profile.Fast.Endpoint = srv.URL + "/v1"
-	env.Profile.RAG.EmbedEndpoint = srv.URL
-	env.Profile.RAG.RerankEndpoint = srv.URL
+	env.Profile.SetFast("fast", srv.URL+"/v1", "", false)
+	env.Profile.Roles.Embed = srv.URL
+	env.Profile.Roles.Rerank = srv.URL
 	if code := runDoctor(context.Background(), env, nil); code != 0 {
 		t.Fatalf("exit %d\n%s", code, out.String())
 	}
@@ -90,12 +89,12 @@ func TestDoctorSlowAndDown(t *testing.T) {
 	if code := runDoctor(context.Background(), env, nil); code != 1 {
 		t.Fatalf("slow exit %d\n%s", code, out.String())
 	}
-	if !strings.Contains(out.String(), "timeout") || !strings.Contains(out.String(), "fix: llm.endpoint") {
+	if !strings.Contains(out.String(), "timeout") || !strings.Contains(out.String(), "fix: roles.main") {
 		t.Fatalf("slow\n%s", out.String())
 	}
 
 	out.Reset()
-	env.Profile.LLM.Endpoint = "http://127.0.0.1:1/v1"
+	env.Profile.SetMain("http://127.0.0.1:1/v1", env.Profile.MainModelID(), env.Profile.MainThinking())
 	env.Profile.UI.ProbeTimeoutMS = 200
 	if code := runDoctor(context.Background(), env, nil); code != 1 {
 		t.Fatalf("down exit %d\n%s", code, out.String())
@@ -118,12 +117,11 @@ func TestDoctorThinkingReject(t *testing.T) {
 	defer srv.Close()
 	env, out, home := doctorEnv(t, srv.URL+"/v1")
 	doctorHome = func() (string, error) { return home, nil }
-	env.Profile.LLM.ThinkingKwargs = true
-	env.Profile.LLM.Model = "alpha"
+	env.Profile.SetMain(env.Profile.MainEndpoint(), "alpha", true)
 	if code := runDoctor(context.Background(), env, nil); code != 0 {
 		t.Fatalf("exit %d\n%s", code, out.String())
 	}
-	if !strings.Contains(out.String(), "!") || !strings.Contains(out.String(), "http 400") || !strings.Contains(out.String(), "fix: llm.thinking_kwargs") {
+	if !strings.Contains(out.String(), "!") || !strings.Contains(out.String(), "http 400") || !strings.Contains(out.String(), "thinking_kwargs") {
 		t.Fatalf("%s", out.String())
 	}
 }

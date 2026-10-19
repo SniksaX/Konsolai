@@ -2,3 +2,4 @@
 !.env.example
 .env
 .cursor/
+/config.yaml

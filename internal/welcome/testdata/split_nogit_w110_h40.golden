@@ -6,7 +6,7 @@
          your terminal agent, on your own models                    │ ● rerank-model  rerank  18ms           │
                                                                     ╰────────────────────────────────────────╯
 
-  ╭─ session                                        ─╮  ╭─ recent ─────────────────────────────── /resume ─╮
+  ╭─ session ────────────────────────────────────────╮  ╭─ recent ─────────────────────────────── /resume ─╮
   │ dir      ~/projects/demo                         │  │ › fix the welcome screen before the... build  5m │
   │ branch   not a git repo                          │  │ › lookup theme roles                  lookup  2h │
   │ build    v0.1.0  ab12cd3                         │  │ › answer a short question             answer  1d │

@@ -95,7 +95,7 @@ func TestResolveBuiltinDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Name != "default" || p.LLM.Endpoint != "http://localhost:8000/v1" || p.LLM.Model != "" || p.LLM.ThinkingKwargs {
+	if p.Name != "default" || p.MainEndpoint() != "http://localhost:8000/v1" || p.MainModelID() != "" || p.MainThinking() {
 		t.Fatalf("got %+v", p.LLM)
 	}
 	if p.Memory.SessionIdleMinutes != 30 || p.Memory.RetentionDays != 90 || p.LLM.IdleTimeoutSeconds != 120 {
@@ -104,10 +104,10 @@ func TestResolveBuiltinDefault(t *testing.T) {
 	if p.Agent.BuildThinking != "plan_step" {
 		t.Fatalf("build_thinking %q", p.Agent.BuildThinking)
 	}
-	if p.Fast.Enabled || p.Fast.Endpoint != "" || p.Fast.Model != "" || p.Fast.ThinkingKwargs || p.FastOn() {
+	if p.FastEndpoint() != "" || p.FastModelID() != "" || p.FastThinking() || p.FastOn() {
 		t.Fatalf("fast %+v", p.Fast)
 	}
-	if p.RAG.Enabled || p.RAG.EmbedEndpoint != "" || p.RAG.RerankEndpoint != "" || p.RAGEnabled() {
+	if p.RAG.Enabled || p.EmbedURL() != "" || p.RerankURL() != "" || p.RAGEnabled() {
 		t.Fatalf("rag %+v", p.RAG)
 	}
 	if p.Database.URL != "" {
@@ -167,7 +167,7 @@ func TestResolveFastEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Fast.Endpoint != "http://fast/v1" || p.Fast.Model != "mini" {
+	if p.Models["fast"].Endpoint != "http://fast/v1" || p.Models["fast"].Model != "mini" || p.FastOn() {
 		t.Fatalf("got %+v", p)
 	}
 }
@@ -179,7 +179,7 @@ func TestResolveEmbedRerankEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.RAG.EmbedEndpoint != "http://embed:9" || p.RAG.RerankEndpoint != "http://rerank:9" {
+	if p.EmbedURL() != "http://embed:9" || p.RerankURL() != "http://rerank:9" {
 		t.Fatalf("got %+v", p)
 	}
 }
@@ -262,7 +262,7 @@ profiles:
 		if err != nil {
 			t.Fatal(err)
 		}
-		if p.Name != "home" || p.LLM.Model != "home-model" || p.LLM.Endpoint != "http://house/v1" {
+		if p.Name != "home" || p.MainModelID() != "home-model" || p.MainEndpoint() != "http://house/v1" {
 			t.Fatalf("got %+v", p)
 		}
 		if p.Memory.SessionIdleMinutes != 10 || p.Memory.RetentionDays != 7 {
@@ -282,7 +282,7 @@ profiles:
 		if err != nil {
 			t.Fatal(err)
 		}
-		if p.Name != "work" || p.LLM.Model != "work-model" {
+		if p.Name != "work" || p.MainModelID() != "work-model" {
 			t.Fatalf("got %+v", p)
 		}
 		if p.Memory.RetentionDays != 3 {
@@ -299,7 +299,7 @@ profiles:
 		if err != nil {
 			t.Fatal(err)
 		}
-		if p.Name != "home" || p.LLM.Model != "home-model" {
+		if p.Name != "home" || p.MainModelID() != "home-model" {
 			t.Fatalf("got %+v", p)
 		}
 	})
@@ -313,7 +313,7 @@ profiles:
 		if err != nil {
 			t.Fatal(err)
 		}
-		if p.Database.URL != "postgres://env/db" || p.LLM.Endpoint != "http://env/v1" || p.LLM.Model != "env-model" {
+		if p.Database.URL != "postgres://env/db" || p.MainEndpoint() != "http://env/v1" || p.MainModelID() != "env-model" {
 			t.Fatalf("got %+v", p)
 		}
 		if p.Location() != "env/db" {
@@ -369,7 +369,7 @@ func TestValidateRatiosAndElide(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = f.Resolve("")
-	if err == nil || !strings.Contains(err.Error(), "llm.endpoint") {
+	if err == nil || !strings.Contains(err.Error(), "endpoint") {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -451,7 +451,7 @@ func TestMigrateJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Name != "home" || p.LLM.Model != "home-model" || p.LLM.Endpoint != "http://house/v1" {
+	if p.Name != "home" || p.MainModelID() != "home-model" || p.MainEndpoint() != "http://house/v1" {
 		t.Fatalf("got %+v", p)
 	}
 	if p.Memory.SessionIdleMinutes != 12 || p.RAGEnabled() {

@@ -19,7 +19,13 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 	}
 	switch sub {
 	case "path":
+		real, err := config.RealPath(path)
+		if err != nil {
+			fmt.Fprintln(env.errw(), err)
+			return 1
+		}
 		fmt.Fprintln(env.out(), path)
+		fmt.Fprintln(env.out(), real)
 		return 0
 	case "show":
 		if env == nil {

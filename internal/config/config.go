@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,28 +30,56 @@ type Profile = Config
 type Config struct {
 	Name string `yaml:"-" json:"-"`
 
-	LLM      LLM      `yaml:"llm"`
-	Fast     Fast     `yaml:"fast"`
-	Database Database `yaml:"database"`
-	Memory   Memory   `yaml:"memory"`
-	Context  Context  `yaml:"context"`
-	Agent    Agent    `yaml:"agent"`
-	RAG      RAG      `yaml:"rag"`
-	UI       UI       `yaml:"ui"`
-	Language Language `yaml:"language"`
-	Safety   Safety   `yaml:"safety"`
-	Router   Router   `yaml:"router"`
-	Tools    Tools    `yaml:"tools"`
-	Store    Store    `yaml:"store"`
-	Stats    Stats    `yaml:"stats"`
+	Models   map[string]Model `yaml:"models"`
+	Roles    Roles            `yaml:"roles"`
+	LLM      LLM              `yaml:"llm"`
+	Fast     Fast             `yaml:"fast"`
+	Database Database         `yaml:"database"`
+	Memory   Memory           `yaml:"memory"`
+	Context  Context          `yaml:"context"`
+	Agent    Agent            `yaml:"agent"`
+	RAG      RAG              `yaml:"rag"`
+	UI       UI               `yaml:"ui"`
+	Language Language         `yaml:"language"`
+	Safety   Safety           `yaml:"safety"`
+	Router   Router           `yaml:"router"`
+	Tools    Tools            `yaml:"tools"`
+	Store    Store            `yaml:"store"`
+	Stats    Stats            `yaml:"stats"`
+}
+
+// Model is one named chat endpoint. Context 0 means the server reports the window.
+type Model struct {
+	Endpoint       string `yaml:"endpoint"`
+	Model          string `yaml:"model"`
+	ThinkingKwargs bool   `yaml:"thinking_kwargs"`
+	Context        int    `yaml:"context"`
+	Notes          string `yaml:"notes"`
+}
+
+// Roles selects named models and optional embed/rerank URLs.
+type Roles struct {
+	Main   string `yaml:"main"`
+	Fast   string `yaml:"fast"`
+	Embed  string `yaml:"embed"`
+	Rerank string `yaml:"rerank"`
 }
 
 type LLM struct {
-	Endpoint           string    `yaml:"endpoint"`
-	Model              string    `yaml:"model"`
-	ThinkingKwargs     bool      `yaml:"thinking_kwargs"`
-	IdleTimeoutSeconds int       `yaml:"idle_timeout_seconds"`
-	MaxTokens          MaxTokens `yaml:"max_tokens"`
+	IdleTimeoutSeconds int          `yaml:"idle_timeout_seconds"`
+	MaxTokens          MaxTokens    `yaml:"max_tokens"`
+	Temperature        Temperatures `yaml:"temperature"`
+	TopP               float64      `yaml:"top_p"`
+	Retries            int          `yaml:"retries"`
+	RetryWaitMS        int          `yaml:"retry_wait_ms"`
+}
+
+// Temperatures are sampling temperatures per intent.
+type Temperatures struct {
+	Answer float64 `yaml:"answer"`
+	Lookup float64 `yaml:"lookup"`
+	Act    float64 `yaml:"act"`
+	Build  float64 `yaml:"build"`
 }
 
 type MaxTokens struct {
@@ -61,10 +90,6 @@ type MaxTokens struct {
 }
 
 type Fast struct {
-	Enabled           bool    `yaml:"enabled"`
-	Endpoint          string  `yaml:"endpoint"`
-	Model             string  `yaml:"model"`
-	ThinkingKwargs    bool    `yaml:"thinking_kwargs"`
 	ContextGuardRatio float64 `yaml:"context_guard_ratio"`
 }
 
@@ -73,6 +98,7 @@ type Database struct {
 }
 
 type Memory struct {
+	Enabled            bool    `yaml:"enabled"`
 	SessionIdleMinutes int     `yaml:"session_idle_minutes"`
 	RetentionDays      int     `yaml:"retention_days"`
 	CompactThreshold   float64 `yaml:"compact_threshold"`
@@ -88,7 +114,20 @@ type Agent struct {
 	MaxSteps         Steps         `yaml:"max_steps"`
 	ExploreBudget    ExploreBudget `yaml:"explore_budget"`
 	BuildThinking    string        `yaml:"build_thinking"`
+	ThinkMode        string        `yaml:"think_mode"`
+	ThinkAnswer      string        `yaml:"think_answer"`
+	ThinkLookup      string        `yaml:"think_lookup"`
+	ThinkAct         string        `yaml:"think_act"`
+	Approve          string        `yaml:"approve"`
+	Plan             PlanGate      `yaml:"plan"`
 	IdenticalRejects int           `yaml:"identical_rejects"`
+}
+
+// PlanGate says when a turn must propose a plan before it writes.
+type PlanGate struct {
+	ActLow  bool `yaml:"act_low"`
+	ActHigh bool `yaml:"act_high"`
+	Build   bool `yaml:"build"`
 }
 
 type Steps struct {
@@ -107,13 +146,11 @@ type ExploreBudget struct {
 }
 
 type RAG struct {
-	Enabled        bool      `yaml:"enabled"`
-	EmbedEndpoint  string    `yaml:"embed_endpoint"`
-	RerankEndpoint string    `yaml:"rerank_endpoint"`
-	EmbedBatch     int       `yaml:"embed_batch"`
-	Chunk          RAGChunk  `yaml:"chunk"`
-	Search         RAGSearch `yaml:"search"`
-	Index          RAGIndex  `yaml:"index"`
+	Enabled    bool      `yaml:"enabled"`
+	EmbedBatch int       `yaml:"embed_batch"`
+	Chunk      RAGChunk  `yaml:"chunk"`
+	Search     RAGSearch `yaml:"search"`
+	Index      RAGIndex  `yaml:"index"`
 }
 
 type RAGChunk struct {
@@ -167,6 +204,9 @@ type UI struct {
 	CtxCells            int      `yaml:"ctx_cells"`
 	CtxNarrowCols       int      `yaml:"ctx_narrow_cols"`
 	Layout              UILayout `yaml:"layout"`
+	Trace               bool     `yaml:"trace"`
+	Stats               bool     `yaml:"stats"`
+	Badge               bool     `yaml:"badge"`
 }
 
 // UILayout is the welcome size cuts. Zero fields keep the built-in cuts.
@@ -179,6 +219,7 @@ type UILayout struct {
 }
 
 type Language struct {
+	Mode      string   `yaml:"mode"`
 	Languages []string `yaml:"languages"`
 	Default   string   `yaml:"default"`
 }
@@ -195,6 +236,12 @@ type Router struct {
 
 type Tools struct {
 	Shell ToolShell `yaml:"shell"`
+	Web   ToolWeb   `yaml:"web"`
+}
+
+type ToolWeb struct {
+	Enabled bool `yaml:"enabled"`
+	Results int  `yaml:"results"`
 }
 
 type ToolShell struct {
@@ -215,6 +262,14 @@ type Stats struct {
 func Builtin() Config {
 	c := Config{Name: builtinProfile}
 	ApplyKeyDefaults(&c)
+	c.Models = map[string]Model{
+		"default": {
+			Endpoint: "http://localhost:8000/v1",
+		},
+	}
+	if strings.TrimSpace(c.Roles.Main) == "" {
+		c.Roles.Main = "default"
+	}
 	return c
 }
 
@@ -237,10 +292,247 @@ func defaultTargets() []string {
 }
 
 func (c Config) FastOn() bool {
-	if strings.TrimSpace(c.Fast.Endpoint) == "" {
+	m, ok := c.FastModel()
+	return ok && strings.TrimSpace(m.Endpoint) != ""
+}
+
+// Main returns the chat model selected by roles.main.
+func (c Config) Main() Model {
+	name := strings.TrimSpace(c.Roles.Main)
+	if name == "" {
+		name = "default"
+	}
+	if c.Models == nil {
+		return Model{}
+	}
+	return c.Models[name]
+}
+
+// MainEndpoint is the OpenAI-compatible base for the main role.
+func (c Config) MainEndpoint() string { return c.Main().Endpoint }
+
+// MainModelID is the model id for the main role. Empty uses the server default.
+func (c Config) MainModelID() string { return c.Main().Model }
+
+// MainThinking reports whether the main model sends enable_thinking.
+func (c Config) MainThinking() bool { return c.Main().ThinkingKwargs }
+
+// FastModel returns the fast role when it names a configured model.
+func (c Config) FastModel() (Model, bool) {
+	name := strings.TrimSpace(c.Roles.Fast)
+	if name == "" || c.Models == nil {
+		return Model{}, false
+	}
+	m, ok := c.Models[name]
+	return m, ok
+}
+
+// FastEndpoint is empty when the fast role is unconfigured.
+func (c Config) FastEndpoint() string {
+	m, ok := c.FastModel()
+	if !ok {
+		return ""
+	}
+	return m.Endpoint
+}
+
+// FastModelID is the fast role's model id.
+func (c Config) FastModelID() string {
+	m, ok := c.FastModel()
+	if !ok {
+		return ""
+	}
+	return m.Model
+}
+
+// FastThinking reports enable_thinking for the fast role.
+func (c Config) FastThinking() bool {
+	m, ok := c.FastModel()
+	return ok && m.ThinkingKwargs
+}
+
+// EmbedURL is roles.embed. Empty means embed is not configured.
+func (c Config) EmbedURL() string { return strings.TrimSpace(c.Roles.Embed) }
+
+// RerankURL is roles.rerank. Empty means rerank is not configured.
+func (c Config) RerankURL() string { return strings.TrimSpace(c.Roles.Rerank) }
+
+// ModelNames returns configured model names in sorted order.
+func (c Config) ModelNames() []string {
+	names := make([]string, 0, len(c.Models))
+	for name := range c.Models {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// WithMain returns the built-in config with the main model endpoint and id set.
+func WithMain(endpoint, model string) Config {
+	c := Builtin()
+	c.SetMain(endpoint, model, false)
+	return c
+}
+
+// SetMain ensures roles.main names a model and sets its endpoint, id, and thinking flag.
+func (c *Config) SetMain(endpoint, model string, think bool) {
+	if c.Models == nil {
+		c.Models = map[string]Model{}
+	}
+	name := strings.TrimSpace(c.Roles.Main)
+	if name == "" {
+		name = "default"
+		c.Roles.Main = name
+	}
+	m := c.Models[name]
+	m.Endpoint = endpoint
+	m.Model = model
+	m.ThinkingKwargs = think
+	c.Models[name] = m
+}
+
+// SetFast ensures a model named name and points roles.fast at it.
+// An empty endpoint clears the fast role.
+func (c *Config) SetFast(name, endpoint, model string, think bool) {
+	if strings.TrimSpace(endpoint) == "" {
+		c.Roles.Fast = ""
+		return
+	}
+	if c.Models == nil {
+		c.Models = map[string]Model{}
+	}
+	if strings.TrimSpace(name) == "" {
+		name = "fast"
+	}
+	m := c.Models[name]
+	m.Endpoint = endpoint
+	m.Model = model
+	m.ThinkingKwargs = think
+	c.Models[name] = m
+	c.Roles.Fast = name
+}
+
+// TemperatureFor returns the sampling temperature for an intent.
+// A zero profile keeps the temperatures used before the key existed.
+func (c Config) TemperatureFor(intent string) float64 {
+	var v float64
+	fallback := 0.2
+	switch intent {
+	case "build":
+		v = c.LLM.Temperature.Build
+		fallback = 0.3
+	case "lookup":
+		v = c.LLM.Temperature.Lookup
+	case "act":
+		v = c.LLM.Temperature.Act
+	default:
+		v = c.LLM.Temperature.Answer
+		fallback = 0.3
+	}
+	if v > 0 {
+		return v
+	}
+	return fallback
+}
+
+// NeedPlan reports whether intent must pass the plan gate.
+// A zero profile keeps today's rule: build always, act only at high effort.
+func (c Config) NeedPlan(intent string, high bool) bool {
+	if c.planUnset() {
+		if intent == "build" {
+			return true
+		}
+		return intent == "act" && high
+	}
+	switch intent {
+	case "build":
+		return c.Agent.Plan.Build
+	case "act":
+		if high {
+			return c.Agent.Plan.ActHigh
+		}
+		return c.Agent.Plan.ActLow
+	default:
 		return false
 	}
-	return c.Fast.Enabled
+}
+
+func (c Config) planUnset() bool {
+	return !c.Agent.Plan.ActLow && !c.Agent.Plan.ActHigh && !c.Agent.Plan.Build
+}
+
+// ShowStatsLine is the end-of-turn stats line. An unset UI block keeps it on.
+func (c Config) ShowStatsLine() bool {
+	if c.UI.Stats {
+		return true
+	}
+	return c.uiUnset()
+}
+
+// ShowBadge is the intent badge. An unset UI block keeps it on.
+func (c Config) ShowBadge() bool {
+	if c.UI.Badge {
+		return true
+	}
+	return c.uiUnset()
+}
+
+func (c Config) uiUnset() bool {
+	return c.UI.DisplayLines == 0 && strings.TrimSpace(c.UI.Theme) == "" && !c.UI.Banner
+}
+
+// WebOn reports whether web_fetch is offered. An unset tools block keeps it on.
+func (c Config) WebOn() bool {
+	if c.Tools.Web.Enabled {
+		return true
+	}
+	return c.Tools.Shell.DefaultTimeoutSec == 0 && c.Tools.Web.Results == 0
+}
+
+// ActThinking is the act-intent thinking policy.
+func (c Config) ActThinking() string {
+	if s := strings.TrimSpace(c.Agent.ThinkAct); s != "" {
+		return s
+	}
+	if s := strings.TrimSpace(c.Agent.BuildThinking); s != "" {
+		return s
+	}
+	return "plan_step"
+}
+
+// BuildThink is the build-intent thinking policy.
+func (c Config) BuildThink() string {
+	if s := strings.TrimSpace(c.Agent.BuildThinking); s != "" {
+		return s
+	}
+	return "plan_step"
+}
+
+// AnswerThinking is auto, on, or off. Empty means auto (high effort only).
+func (c Config) AnswerThinking() string {
+	s := strings.TrimSpace(c.Agent.ThinkAnswer)
+	if s == "" {
+		return "auto"
+	}
+	return s
+}
+
+// LookupThinking is auto (after two failures), on, off, plan_step, or until_plan.
+func (c Config) LookupThinking() string {
+	s := strings.TrimSpace(c.Agent.ThinkLookup)
+	if s == "" {
+		return "auto"
+	}
+	return s
+}
+
+// MemoryOn is false only when memory.enabled was set off.
+// An unset memory block stays on so an empty URL is still the only switch.
+func (c Config) MemoryOn() bool {
+	if c.Memory.Enabled {
+		return true
+	}
+	return c.Memory.SessionIdleMinutes == 0 && c.Memory.RetentionDays == 0
 }
 
 func (c Config) RAGEnabled() bool {
