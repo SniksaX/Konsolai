@@ -109,6 +109,7 @@ func fileFromDoc(doc *yaml.Node) (File, error) {
 			}
 			f.DefaultProfile = v.Value
 		case "defaults":
+			migrateLegacyShape(v)
 			if err := checkOverlay(v, "defaults"); err != nil {
 				return File{}, err
 			}
@@ -124,6 +125,7 @@ func fileFromDoc(doc *yaml.Node) (File, error) {
 				pk := v.Content[j]
 				pv := v.Content[j+1]
 				full := "profiles." + pk.Value
+				migrateLegacyShape(pv)
 				if err := checkOverlay(pv, full); err != nil {
 					return File{}, err
 				}
@@ -151,18 +153,25 @@ func (f File) resolve(name string, useEnv bool) (Config, error) {
 	}
 	c := Builtin()
 	c.Name = name
+	st := &walkState{c: &c, apply: true, mentioned: map[string]bool{}}
 	if f.defaults != nil {
-		if err := applyOverlayNode(&c, f.defaults, "defaults", "file", nil); err != nil {
+		st.source = "file"
+		if err := walkOverlay(f.defaults, rootTrie, "", "defaults", st); err != nil {
 			return Config{}, err
 		}
 	}
 	if n := f.profileNodes[name]; n != nil {
-		if err := applyOverlayNode(&c, n, "profiles."+name, "file", nil); err != nil {
+		st.source = "file"
+		if err := walkOverlay(n, rootTrie, "", "profiles."+name, st); err != nil {
 			return Config{}, err
 		}
 	}
+	pruneBuiltinModel(&c, st.mentioned, st.sawModels)
 	if useEnv {
 		if err := applyKeyEnv(&c, nil); err != nil {
+			return Config{}, err
+		}
+		if err := applyModelEnv(&c, nil); err != nil {
 			return Config{}, err
 		}
 	}
