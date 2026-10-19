@@ -83,6 +83,7 @@ type Env struct {
 	ProjectID    *int64
 	ConfigPath   string
 	Session      map[string]string
+	seen         *serverSeen
 }
 
 func (e *Env) out() io.Writer {
