@@ -317,7 +317,7 @@ func TestSlashMenuRenderWindowAndDetail(t *testing.T) {
 		t.Fatalf("detail example\n%s", plain)
 	}
 	foot := stripANSI(m.HintFooter())
-	for _, w := range []string{"select", "details", "complete", "run", "cancel", "↑↓", "tab", "enter", "esc", "?"} {
+	for _, w := range []string{"select", "details", "complete", "run", "back", "↑↓", "tab", "enter", "esc", "?"} {
 		if !strings.Contains(foot, w) {
 			t.Fatalf("footer missing %q in %q", w, foot)
 		}
