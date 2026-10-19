@@ -22,10 +22,10 @@ func runStatus(ctx context.Context, env *Env, _ []string) int {
 	}
 	fmt.Fprintf(env.out(), "version        %s\n", ver)
 	fmt.Fprintf(env.out(), "profile        %s\n", env.Profile.Name)
-	ep := env.Profile.LLM.Endpoint
+	ep := env.Profile.MainEndpoint()
 	reach, probeModel := modelsProbe(ctx, ep)
 	fmt.Fprintf(env.out(), "endpoint       %s  %s\n", turn.EndpointHost(ep), reach)
-	model := env.Profile.LLM.Model
+	model := env.Profile.MainModelID()
 	win := 0
 	if env.Runner != nil && env.Runner.Client != nil {
 		if id, err := env.Runner.Client.ResolveModel(ctx); err == nil {
@@ -52,7 +52,7 @@ func runStatus(ctx context.Context, env *Env, _ []string) int {
 		fmt.Fprintf(env.out(), "fast_endpoint  %s\n", ui.Current().Muted("not configured"))
 		fmt.Fprintf(env.out(), "fast_model     %s\n", ui.Current().Muted("not configured"))
 	} else {
-		fastEp := env.Profile.Fast.Endpoint
+		fastEp := env.Profile.FastEndpoint()
 		var fastModel string
 		fastReach, fastModel = modelsProbe(ctx, fastEp)
 		if env.Runner != nil && env.Runner.FastClient != nil {
@@ -60,8 +60,8 @@ func runStatus(ctx context.Context, env *Env, _ []string) int {
 				fastModel = id
 			}
 		}
-		if env.Profile.Fast.Model != "" && fastModel == "" {
-			fastModel = env.Profile.Fast.Model
+		if env.Profile.FastModelID() != "" && fastModel == "" {
+			fastModel = env.Profile.FastModelID()
 		}
 		if fastModel == "" {
 			fastModel = "-"
@@ -89,15 +89,15 @@ func runStatus(ctx context.Context, env *Env, _ []string) int {
 		pol = "plan_step"
 	}
 	fmt.Fprintf(env.out(), "build_thinking %s\n", pol)
-	if env.Profile.RAG.EmbedEndpoint == "" {
+	if env.Profile.EmbedURL() == "" {
 		fmt.Fprintf(env.out(), "embed          %s\n", ui.Current().Muted("not configured"))
 	} else {
-		fmt.Fprintf(env.out(), "embed          %s  %s\n", turn.EndpointHost(env.Profile.RAG.EmbedEndpoint), httpReach(ctx, env.Profile.RAG.EmbedEndpoint))
+		fmt.Fprintf(env.out(), "embed          %s  %s\n", turn.EndpointHost(env.Profile.EmbedURL()), httpReach(ctx, env.Profile.EmbedURL()))
 	}
-	if env.Profile.RAG.RerankEndpoint == "" {
+	if env.Profile.RerankURL() == "" {
 		fmt.Fprintf(env.out(), "rerank         %s\n", ui.Current().Muted("not configured"))
 	} else {
-		fmt.Fprintf(env.out(), "rerank         %s  %s\n", turn.EndpointHost(env.Profile.RAG.RerankEndpoint), httpReach(ctx, env.Profile.RAG.RerankEndpoint))
+		fmt.Fprintf(env.out(), "rerank         %s  %s\n", turn.EndpointHost(env.Profile.RerankURL()), httpReach(ctx, env.Profile.RerankURL()))
 	}
 	if env.Mem != nil && env.Mem.Store() != nil && env.Mem.Store().RAGAvailable(ctx) {
 		pid := env.ProjectID
