@@ -81,6 +81,7 @@ type Env struct {
 	Embed        *embed.Client
 	ProjectID    *int64
 	ConfigPath   string
+	Session      map[string]string
 }
 
 func (e *Env) out() io.Writer {
@@ -284,6 +285,9 @@ func Default() *Registry {
 		Command{Name: "status", Usage: "status", Summary: "Show version, model, database and environment", Example: "/status", Run: runStatus},
 		Command{Name: "config", Usage: "config path|show|validate|diff|init [--force|--from-current]", Summary: "Show or write the YAML config",
 			Args: []Arg{{Name: "action", Help: "path, show, validate, diff or init", Required: true}}, Example: "/config validate", Run: runConfig},
+		Command{Name: "set", Usage: "set [name] [value] [--session]", Summary: "Show or change a setting",
+			Args: []Arg{{Name: "name", Help: "setting name or path"}, {Name: "value", Help: "value, or default"}}, Example: "/set theme glacier", Run: runSet},
+		Command{Name: "models", Usage: "models", Summary: "Show configured models", Example: "/models", Run: runModels},
 		Command{Name: "theme", Usage: "theme [name]", Summary: "List palettes or apply one",
 			Args: []Arg{{Name: "name", Help: "theme name"}}, Example: "/theme glacier", Run: runTheme},
 		Command{Name: "index", Usage: "index [path]|status|clear", Summary: "Index the project for recall",
