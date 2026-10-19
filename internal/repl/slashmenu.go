@@ -115,6 +115,15 @@ func (m *slashMenu) Sync(line string) {
 		}
 		m.hold = ""
 	}
+	// Arrowing through command names must stay on that list. An exact
+	// typed command such as /set still opens its argument level below.
+	if !m.arg && m.sel >= 0 && m.sel < len(m.items) {
+		want := "/" + m.items[m.sel].Name
+		if line == want || line == m.typed {
+			m.open = true
+			return
+		}
+	}
 	arg, base, partial, level, ok := m.argLevel(line)
 	if arg {
 		if !ok {
