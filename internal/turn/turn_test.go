@@ -268,8 +268,8 @@ func TestFastUnreachableFallsBack(t *testing.T) {
 	t.Cleanup(llm.ResetReachCache)
 	client := fakeLLM(t, []llm.Message{{Role: llm.RoleAssistant, Content: `{"intent":"answer","language":"en","reason":"hi","reasoning":false,"effort":"none","task":"other","continues_session":0}`}, {Role: llm.RoleAssistant, Content: "hello"}})
 	r := testRunner(t, client, autoConfirm{})
-	r.Profile.Fast.Endpoint = "http://127.0.0.1:1/v1"
-	r.FastClient = llm.NewFast(r.Profile.Fast.Endpoint, "mini")
+	r.Profile.SetFast("fast", "http://127.0.0.1:1/v1", "mini", false)
+	r.FastClient = llm.NewFast(r.Profile.FastEndpoint(), "mini")
 	var errB strings.Builder
 	r.Err = &errB
 	res := r.RunTurn(context.Background(), Request{Text: "hi", Trace: true, Yes: true, Cwd: t.TempDir(), New: true})
