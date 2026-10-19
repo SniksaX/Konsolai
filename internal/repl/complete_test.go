@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/SniksaX/Konsolai/internal/commands"
 	"github.com/reeflective/readline"
-	"github.com/siraj/konsolai/internal/commands"
 )
 
 func TestSlashItemsFilterAndArgs(t *testing.T) {

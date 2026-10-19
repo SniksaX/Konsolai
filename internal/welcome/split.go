@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/siraj/konsolai/internal/banner"
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/banner"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 func renderSplit(w io.Writer, d Data, width, height int) {

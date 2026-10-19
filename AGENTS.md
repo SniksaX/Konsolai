@@ -12,19 +12,20 @@ The architect writes lettered tasks. The IDE agent implements. The user tests an
 Commits go to `dev` only. Never commit to `prod`. One commit per file. MOVE exception: a split of one file into siblings may be one commit so every commit builds.
 Message: `[TYPE|SIZE] Title` in imperative mood, title max 72 characters. TYPE is ADD, UPDATE, FIX, DELETE, MOVE, or REFACTOR. SIZE is MINOR (under 20 lines), MEDIUM (20–100), or MAJOR (over 100, or a public API or behavior change). Keep the body short. Use `git commit -F`.
 After each phase: `gofmt -l .`, `go vet ./...`, `go test ./... -count=1` (with the test DB when store is involved), `go build -o ~/.local/bin/konsolai ./cmd/konsolai`.
-Test DB: `scripts/test-db.sh up|down`, image `pgvector/pgvector:pg17-trixie`, localhost:55433, database `konsolai_test`. The password lives in `.cursor/rules/konsolai.mdc`, not here. NEVER start, stop, restart, or remove the user's container `konsolai-pg` (port 55432, volume `konsolai-pg`).
+Test DB: `scripts/test-db.sh up|down`. Never touch the developer's own database container; integration tests use `scripts/test-db.sh`.
 UI changes are verified on a real PTY (`/dev/ptmx`, `creack/pty`), not a pipe.
 Code: strict types; no `interface{}` or `any` unless unavoidable; wrap errors as `pkg: context: %w`; no debug logging; no new packages unless the architect specifies them; no new dependencies unless approved.
-Approved in `go.mod`: jackc/pgx/v5, alecthomas/chroma/v2, yuin/goldmark, reeflective/readline, rivo/uniseg, go.yaml.in/yaml/v3, golang.org/x/term, golang.org/x/sys, and test-only creack/pty. Go 1.27.1. Module `github.com/siraj/konsolai`.
+Approved in `go.mod`: jackc/pgx/v5, alecthomas/chroma/v2, yuin/goldmark, reeflective/readline, rivo/uniseg, go.yaml.in/yaml/v3, golang.org/x/term, golang.org/x/sys, and test-only creack/pty. Go 1.27.1. Module `github.com/SniksaX/Konsolai`.
 
-## Infrastructure
+## Reference setup (example)
 
-Main chat is `http://fatboy:11436/v1`: vLLM, model `qwen38.nvfp4`, `max_model_len` 94208. Thinking is `chat_template_kwargs.enable_thinking`. Reasoning arrives in `delta.reasoning`. `Builtin` leaves `llm.model` empty so the server default is used.
-Fast chat is `http://fatboy:11435/v1`, OpenAI-compatible. `Builtin` leaves `fast.model` empty. The router uses it when it is reachable. An answer stream retries on main if the fast call fails.
-Embed is `http://fatboy:9502` (`POST /embed`). Rerank is `http://fatboy:9501`.
-The user's Postgres is container `konsolai-pg` on port 55432, volume `konsolai-pg`. Tests use `scripts/test-db.sh` on port 55433, database `konsolai_test`, image `pgvector/pgvector:pg17-trixie`.
-Config path is `$XDG_CONFIG_HOME/konsolai/config.yaml`, or `~/.config/konsolai/config.yaml`. `konsolai init` writes it mode 0600 and does not overwrite it unless `--force`.
-Env overrides: `KONSOLAI_DATABASE_URL`, `KONSOLAI_ENDPOINT`, `KONSOLAI_MODEL`, `KONSOLAI_FAST_ENDPOINT`, `KONSOLAI_FAST_MODEL`, `KONSOLAI_BUILD_THINKING`, `KONSOLAI_EMBED_ENDPOINT`, `KONSOLAI_RERANK_ENDPOINT`, `KONSOLAI_PROFILE`. `--profile` beats `KONSOLAI_PROFILE` beats `default_profile` beats built-in `default`.
+Chat is any OpenAI-compatible server. The built-in default is `http://localhost:8000/v1`. Leave `llm.model` empty to use the server default. `llm.thinking_kwargs` sends `chat_template_kwargs.enable_thinking` only when it is true. Reasoning may arrive in `delta.reasoning`.
+Fast is optional. When `fast.enabled` is false or `fast.endpoint` is empty, the fast role uses the main model. An answer stream retries on main if the fast call fails.
+Embed and rerank are optional. When `rag.enabled` is false, Konsolai does not ingest and does not offer the recall tool.
+Never touch the developer's own database container. Integration tests use `scripts/test-db.sh`.
+Config path is `$XDG_CONFIG_HOME/konsolai/config.yaml`, or `~/.config/konsolai/config.yaml`. `/config init` writes mode 0600 and does not overwrite unless `--force`. `/config init --from-current` writes the effective config. `/config diff` lists keys that differ from the defaults.
+A new key is ONE entry in `internal/config/keys.go`.
+Env overrides are the `Env` column of that table, plus `KONSOLAI_PROFILE` for the profile name. `--profile` beats `KONSOLAI_PROFILE` beats `default_profile` beats built-in `default`.
 
 ## Architecture
 
@@ -67,10 +68,9 @@ The plan gate is always on for build. Act requires a plan only at high effort.
 
 ## Config
 
-A new key is added in all six places: the `Config` struct in `internal/config/config.go`, `overlaySchema` and `checkKnown` in `schema.go`, the `Overlay` types in `load.go`, `applyOverlay` in `apply.go` plus `Validate` in `load.go`, `Builtin()`, and `InitYAML` in `show.go`.
+A new key is ONE entry in `internal/config/keys.go`. That entry supplies the default, validation, docs, sample file, env override, and `/config` output.
 Accessors are the only `<= 0` means default logic (`nonzero` and the ratio accessors).
-`TestConfigKeysComplete` walks every leaf of `Config` by reflection and fails if a field is missing from the schema, the loader round-trip, `Builtin` (non-zero), or `InitYAML`.
-Flat-mirror fields copied by `syncFlat` are skipped by that test: `DatabaseURL` mirrors `database.url`, `Endpoint` mirrors `llm.endpoint`, and the rest of that allowlist (`Model`, `FastEndpoint`, `FastModel`, idle and retention mirrors, `BuildThinking`, languages, embed and rerank, `MemoryRAG`).
+`TestConfigKeysComplete` walks every leaf of `Config` by reflection and fails if a field has no table entry, or a table entry has no field.
 
 ## Design decisions that must not regress
 
@@ -100,7 +100,7 @@ Flat-mirror fields copied by `syncFlat` are skipped by that test: `DatabaseURL` 
 
 ## Current status
 
-HEAD `529d451` on `dev`. `dev` is 304 commits ahead of `origin/prod` (`f7172a5`, same as local `prod`). 47 of those are not on `origin/dev`. Unmerged themes: welcome v2, turn stats, the theme picker, command-only `propose_plan`, config tunables, agent/safety/welcome file splits, the README, and this file.
+Work lands on `dev`. Config keys are the single table in `internal/config/keys.go`. Flat mirrors are removed. Defaults target any OpenAI-compatible server.
 
 - REPL welcome: `split`, `frame`, and `minimal`. Paint once after probes. Height from the wrapped TTY.
 - `turn_stats`: best-effort token and timing rows. Welcome rates use `ModelRate`.
@@ -108,21 +108,25 @@ HEAD `529d451` on `dev`. `dev` is 304 commits ahead of `origin/prod` (`f7172a5`,
 - Placeholder: inline suggestion only. Enter does not submit it.
 - Footer context meter: last prompt tokens against the window (`ctx_warn_pct`, `ctx_hot_pct`, `ctx_cells`).
 - `propose_plan`: a command-only plan may omit `files` when the plan does not write or edit files.
-- Config tunables are in `Builtin` and `InitYAML`. `TestConfigKeysComplete` walks every leaf.
+- Config keys are one table in `internal/config/keys.go`. Flat mirrors and `syncFlat` are gone. `TestConfigKeysComplete` walks every leaf.
 - File splits: agent helpers, safety plan rules and segments, welcome paint helpers.
 - README at the repo root. Header image `docs/assets/konsolai-header.svg`. No screenshots in the tree. `TestReadmeSlashTable` locks the slash-command table to `commands.Default()`.
+- `/stats [today|week|all]` (default week) reads `turn_stats` and sessions. Per model: calls, tokens, average tok/s, and p50/p95 of `model_ms`. Per intent: turns, average steps (mean `turn_stats` rows per session), and average wall time (mean `model_ms`; there is no separate wall-clock column). With memory off: `stats need the database (memory is not configured)`.
+- `/doctor` prints one line per check (`✓`, `!`, or `✗`) and a fix for every line that is not `✓`. Exit 1 only when a line is `✗`. Network probes use the welcome probe timeout.
+- `/save [file]` writes the last answer as Markdown. `/pdf [file]` renders it through `docrender`, the same pipeline as `export_doc`. The default name is a slug of the session title. Overwrite needs `--force`. Paths go through the Guard. `konsolai new "<request>"` is one turn; `/save` then reads that answer from the session store, or from the local last-session file when the database is off.
+- `/explain` runs an answer turn at high effort for the latest failed shell-mode command and does not re-run it. With no capture, a readable `$HISTFILE` is explained after `no captured output; explaining the command only`. The help text documents `PROMPT_COMMAND="history -a"`.
+- The first mutating call rejected by the plan gate forces the next request to `propose_plan` (thinking follows `plan_step`) and does not spend the explore budget. Later gate rejects are unchanged. `run_shell` still needs an accepted plan.
+- `scripts/changelog.sh` groups commits after the latest `v*` tag. With no `v*` tag it uses `prod`, or else the root commit and the whole history. `CHANGELOG.md` is titled `## v0.2.0 (unreleased)`. The tag is not created.
+- Secret-shaped test literals are assembled at runtime in each package's `fixtures_test.go`.
 
 ## Known issues and backlog
 
 - Task X animations: not done. The banner is static (`banner.Startup` writes the wordmark once). Do not implement animations unless a task says so.
-- `Run`'s shared locals: `confirm.go` was not created. The confirm flow, plan-gate loop, and explore-budget counter live inside `agent.Run` and share locals (`planApproved`, `planFiles`, `planCmds`, `planText`, `explore`, `prepRejectKey`, `prepRejects`, `seenFail`, `approvedAll`, `shellFail`, `consecFail`, `planRejected`, `postPlanReads`, `docsExportNoted`, `docsExportWait`, `forceMutating`, `forceExport`). This needs a state-struct refactor. Do not split `Run` by changing control flow.
-- Flat config mirrors (`syncFlat`) are known debt.
+- `Run`'s shared locals: `confirm.go` was not created. The confirm flow, plan-gate loop, and explore-budget counter live inside `agent.Run` and share locals (`planApproved`, `planFiles`, `planCmds`, `planText`, `explore`, `prepRejectKey`, `prepRejects`, `seenFail`, `approvedAll`, `shellFail`, `consecFail`, `planRejected`, `postPlanReads`, `docsExportNoted`, `docsExportWait`, `forceMutating`, `forceExport`, `forcePropose`, `sawGateReject`). This needs a state-struct refactor. Do not split `Run` by changing control flow.
 - Placeholder color is fixed by readline: `github.com/reeflective/readline@v1.3.0/internal/display/refresh.go` lines 277 and 282 paint `color.Dim` plus Fg 242. The public API is only `SetInlineSuggestion(string)`. Do not fork the library.
-- CPU embeddings make `/index` slow (`http://fatboy:9502`).
-- The reranker on `:9501` is often unreachable.
+- CPU embeddings can make `/index` slow when an embed service is configured.
+- A configured reranker is often unreachable.
 - Symbol index: not built.
-- Slash commands not built: `/doctor`, `/stats`, `/explain`, `/save`, `/pdf`.
-- Scanner-safe test fixtures.
 - README screenshots are not in the tree: `welcome.png`, `slash-menu.png`, `theme.png`, `build.png`, `act-plan.png`, `pdf.png`.
 - Tag `v0.2.0`. `version` in `cmd/konsolai` is still `"dev"` unless ldflags stamp it.
 

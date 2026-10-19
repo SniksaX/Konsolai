@@ -17,44 +17,44 @@ func TestStringRules(t *testing.T) {
 	}{
 		{
 			name:    "pem",
-			in:      "x\n-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQ\n-----END RSA PRIVATE KEY-----\ny",
+			in:      pemSample(),
 			want:    "[REDACTED:pem]",
 			neg:     "-----BEGIN CERTIFICATE-----\nMII\n-----END CERTIFICATE-----",
 			negKeep: "BEGIN CERTIFICATE",
 		},
 		{
 			name:    "aws",
-			in:      "id AKIAIOSFODNN7EXAMPLE ASIAIOSFODNN7EXAMPLE extra",
+			in:      awsPair(),
 			want:    "[REDACTED:aws]",
 			neg:     "AKIASHORT",
 			negKeep: "AKIASHORT",
 		},
 		{
 			name:    "github",
-			in:      "tok ghp_abcdefghijklmnopqrstuvwxyz123456 github_pat_abcdefghijklmnopqrstuvwxyz extra",
+			in:      githubPair(),
 			want:    "[REDACTED:github]",
 			neg:     "ghp_short",
 			negKeep: "ghp_short",
 		},
 		{
 			name:    "slack",
-			in:      "xoxb-1234567890-abcdefghij",
+			in:      slackToken(),
 			want:    "[REDACTED:slack]",
-			neg:     "xoxb-short",
-			negKeep: "xoxb-short",
+			neg:     slackShort(),
+			negKeep: slackShort(),
 		},
 		{
 			name:    "sk",
-			in:      "sk-abcdefghijklmnopqrstuvwxyz123456",
+			in:      skKey(),
 			want:    "[REDACTED:sk]",
 			neg:     "sk-shortkey",
 			negKeep: "sk-shortkey",
 		},
 		{
 			name:    "jwt",
-			in:      "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc_def-ghi",
+			in:      jwtSample(),
 			want:    "[REDACTED:jwt]",
-			neg:     "eyJhbGciOiJIUzI1NiJ9.notajwt",
+			neg:     jwtShort(),
 			negKeep: "notajwt",
 		},
 		{
@@ -121,7 +121,7 @@ func TestKVVariantsAndCode(t *testing.T) {
 	if got := String(code); got != code {
 		t.Fatalf("code redacted: %q", got)
 	}
-	hex := "26f789a3dde42ad6ec6a50fc258c2a59a9833069884e231b0081525ef87cbc301ba28e96d4e0f46c"
+	hex := abuseHex()
 	got := String("ABUSEIPDB_KEY=" + hex)
 	if strings.Contains(got, hex) {
 		t.Fatalf("ABUSEIPDB_KEY leaked: %q", got)
@@ -145,12 +145,12 @@ func TestKVVariantsAndCode(t *testing.T) {
 
 func TestIdempotent(t *testing.T) {
 	in := strings.Join([]string{
-		"-----BEGIN RSA PRIVATE KEY-----\nMII\n-----END RSA PRIVATE KEY-----",
-		"AKIAIOSFODNN7EXAMPLE",
-		"ghp_abcdefghijklmnopqrstuvwxyz123456",
-		"xoxb-1234567890-abcdefghij",
-		"sk-abcdefghijklmnopqrstuvwxyz123456",
-		"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc_def-ghi",
+		pemShort(),
+		awsAccessKey(),
+		githubClassic(),
+		slackToken(),
+		skKey(),
+		jwtSample(),
 		"Bearer abc.def",
 		"https://u:p@h/x",
 		"token=shh",
@@ -163,9 +163,9 @@ func TestIdempotent(t *testing.T) {
 }
 
 func TestJSONRedactsStrings(t *testing.T) {
-	in := []byte(`{"cmd":"echo","token":"sk-abcdefghijklmnopqrstuvwxyz123456","nested":{"url":"https://u:p@h/x"},"n":1}`)
+	in := skJSON()
 	got := JSON(in)
-	if bytes.Contains(got, []byte("sk-abcdefghijklmnopqrst")) {
+	if bytes.Contains(got, []byte(skPrefix())) {
 		t.Fatalf("sk leaked: %s", got)
 	}
 	if bytes.Contains(got, []byte("u:p@")) {
@@ -202,7 +202,7 @@ func TestSensitivePath(t *testing.T) {
 }
 
 func TestMaskValues(t *testing.T) {
-	hex := "26f789a3dde42ad6ec6a50fc258c2a59a9833069884e231b0081525ef87cbc301ba28e96d4e0f46c"
+	hex := abuseHex()
 	in := "ABUSEIPDB_KEY=" + hex + "\n# comment\nEMPTY=\n"
 	got, n := MaskValues(in)
 	if n != 1 {

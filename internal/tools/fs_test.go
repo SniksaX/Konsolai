@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siraj/konsolai/internal/safety"
+	"github.com/SniksaX/Konsolai/internal/safety"
 )
 
 func fsRegistry(t *testing.T) (*safety.Guard, *Registry, string) {
@@ -146,7 +146,7 @@ func TestListDirSuffixAndSort(t *testing.T) {
 
 func TestReadFileMasksEnvExample(t *testing.T) {
 	_, reg, root := fsRegistry(t)
-	hex := "26f789a3dde42ad6ec6a50fc258c2a59a9833069884e231b0081525ef87cbc301ba28e96d4e0f46c"
+	hex := abuseHex()
 	if err := os.WriteFile(filepath.Join(root, ".env.example"), []byte("ABUSEIPDB_KEY="+hex+"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestReadFileMasksEnvExample(t *testing.T) {
 
 func TestSearchMasksEnv(t *testing.T) {
 	root := t.TempDir()
-	hex := "26f789a3dde42ad6ec6a50fc258c2a59a9833069884e231b0081525ef87cbc301ba28e96d4e0f46c"
+	hex := abuseHex()
 	if err := os.WriteFile(filepath.Join(root, ".env.example"), []byte("ABUSEIPDB_KEY="+hex+"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}

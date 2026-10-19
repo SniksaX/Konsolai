@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/diff"
-	"github.com/siraj/konsolai/internal/memory"
-	"github.com/siraj/konsolai/internal/repo"
+	"github.com/SniksaX/Konsolai/internal/diff"
+	"github.com/SniksaX/Konsolai/internal/memory"
+	"github.com/SniksaX/Konsolai/internal/repo"
 )
 
 var askRestore = confirmRestoreAnyway

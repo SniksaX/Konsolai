@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/turn"
-	"github.com/siraj/konsolai/internal/ui/theme"
+	"github.com/SniksaX/Konsolai/internal/turn"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 )
 
 func runCmd(ctx context.Context, env *Env, args []string) int {
@@ -113,9 +113,9 @@ func runTrace(ctx context.Context, env *Env, args []string) int {
 }
 
 func runModel(ctx context.Context, env *Env, _ []string) int {
-	model := env.Profile.Model
+	model := env.Profile.LLM.Model
 	win := 0
-	ep := env.Profile.Endpoint
+	ep := env.Profile.LLM.Endpoint
 	if env.Runner != nil && env.Runner.Client != nil {
 		if id, err := env.Runner.Client.ResolveModel(ctx); err == nil && id != "" {
 			model = id

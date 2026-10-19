@@ -93,6 +93,7 @@ type Client struct {
 	contextWindow   int
 	windowReady     bool
 	tokensPerChar   float64
+	fallbackWindow  int
 	sendThinkKwargs bool
 	onCall          func(CallInfo)
 }
@@ -101,24 +102,33 @@ func New(baseURL, model string) *Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.DialContext = (&net.Dialer{Timeout: 5 * time.Second}).DialContext
 	return &Client{
-		baseURL:         strings.TrimRight(baseURL, "/"),
-		model:           model,
-		http:            &http.Client{Transport: tr},
-		idleTimeout:     defaultIdleTimeout,
-		retryWait:       defaultRetryWait,
-		contextWindow:   defaultContextWindow,
-		tokensPerChar:   defaultTokensPerChar,
-		sendThinkKwargs: true,
+		baseURL:        strings.TrimRight(baseURL, "/"),
+		model:          model,
+		http:           &http.Client{Transport: tr},
+		idleTimeout:    defaultIdleTimeout,
+		retryWait:      defaultRetryWait,
+		contextWindow:  defaultContextWindow,
+		tokensPerChar:  defaultTokensPerChar,
+		fallbackWindow: defaultContextWindow,
 	}
 }
 
 // NewFast is a client for the lightweight router/answer model.
-// It never sends chat_template_kwargs.
+// Thinking kwargs stay off until SetThinkKwargs.
 func NewFast(baseURL, model string) *Client {
 	c := New(baseURL, model)
 	c.sendThinkKwargs = false
 	c.contextWindow = defaultFastWindow
+	c.fallbackWindow = defaultFastWindow
 	return c
+}
+
+// SetThinkKwargs controls whether chat_template_kwargs.enable_thinking is sent.
+func (c *Client) SetThinkKwargs(on bool) {
+	if c == nil {
+		return
+	}
+	c.sendThinkKwargs = on
 }
 
 func (c *Client) BaseURL() string { return c.baseURL }
@@ -335,9 +345,8 @@ func (c *Client) ResolveModel(ctx context.Context) (string, error) {
 		win = c.propsNCtx(ctx)
 	}
 	if win <= 0 {
-		if !c.sendThinkKwargs {
-			win = defaultFastWindow
-		} else {
+		win = c.fallbackWindow
+		if win <= 0 {
 			win = defaultContextWindow
 		}
 	}

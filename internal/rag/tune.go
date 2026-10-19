@@ -1,6 +1,6 @@
 package rag
 
-import "github.com/siraj/konsolai/internal/config"
+import "github.com/SniksaX/Konsolai/internal/config"
 
 type Tune struct {
 	Chunk  config.RAGChunk

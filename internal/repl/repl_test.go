@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siraj/konsolai/internal/commands"
-	"github.com/siraj/konsolai/internal/config"
-	"github.com/siraj/konsolai/internal/turn"
-	"github.com/siraj/konsolai/internal/ui/theme"
+	"github.com/SniksaX/Konsolai/internal/commands"
+	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/turn"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 )
 
 type scriptReader struct {
@@ -35,7 +35,7 @@ func (s *scriptReader) Close() error { return nil }
 func TestReplCommandsAndExit(t *testing.T) {
 	var out, errb bytes.Buffer
 	env := &commands.Env{
-		Profile: config.Profile{Name: "default", Model: "m", Endpoint: "http://127.0.0.1:9/v1"},
+		Profile: config.Profile{Name: "default", LLM: config.LLM{Model: "m", Endpoint: "http://127.0.0.1:9/v1"}},
 		Out:     &out,
 		Err:     &errb,
 		Cwd:     t.TempDir(),
@@ -66,7 +66,7 @@ func TestReplBannerOffUsesMutedLine(t *testing.T) {
 	var out, errb bytes.Buffer
 	prof := config.Builtin()
 	prof.UI.Banner = false
-	prof.Model = "m"
+	prof.LLM.Model = "m"
 	env := &commands.Env{Profile: prof, Out: &out, Err: &errb, Cwd: t.TempDir()}
 	code := Run(context.Background(), Config{
 		Env: env, Reg: commands.Default(), Reader: &scriptReader{lines: []string{"/exit"}},
@@ -174,10 +174,10 @@ func TestFormatFooter(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := formatFooter(footerInfo{
-		Cwd: dir, Model: "org/qwen38.nvfp4", Routing: "fast",
+		Cwd: dir, Model: "org/main-model", Routing: "fast",
 		CtxPct: 12, ShowCtx: true, Down: true,
 	})
-	if !strings.Contains(s, "dev") || !strings.Contains(s, "qwen38.nvfp4") || !strings.Contains(s, "ctx 12%") {
+	if !strings.Contains(s, "dev") || !strings.Contains(s, "main-model") || !strings.Contains(s, "ctx 12%") {
 		t.Fatalf("left %q", s)
 	}
 	if strings.Contains(s, "▰") || strings.Contains(s, "▱") {
@@ -186,8 +186,8 @@ func TestFormatFooter(t *testing.T) {
 	if !strings.Contains(s, "fast") || !strings.Contains(s, "●") {
 		t.Fatalf("right %q", s)
 	}
-	sh := formatFooter(footerInfo{Cwd: dir, Model: "qwen", Routing: "main", Shell: true})
-	if !strings.Contains(sh, "shell") || strings.Contains(sh, "qwen") {
+	sh := formatFooter(footerInfo{Cwd: dir, Model: "main-model", Routing: "main", Shell: true})
+	if !strings.Contains(sh, "shell") || strings.Contains(sh, "main-model") {
 		t.Fatalf("shell footer %q", sh)
 	}
 }
@@ -254,7 +254,7 @@ func TestEchoPrimaryBoldNotLink(t *testing.T) {
 func TestClearDrawsCompactHeader(t *testing.T) {
 	var out, errb bytes.Buffer
 	env := &commands.Env{
-		Profile: config.Profile{Name: "p", Model: "m", Endpoint: "http://127.0.0.1:9/v1"},
+		Profile: config.Profile{Name: "p", LLM: config.LLM{Model: "m", Endpoint: "http://127.0.0.1:9/v1"}},
 		Out:     &out, Err: &errb, Cwd: t.TempDir(), Version: "vtest",
 	}
 	code := Run(context.Background(), Config{
@@ -282,15 +282,15 @@ func TestInputPrompt(t *testing.T) {
 }
 
 func TestShortPathAndModel(t *testing.T) {
-	t.Setenv("HOME", "/home/u")
-	if shortPath("/home/u/src/k") != "~/src/k" {
-		t.Fatalf("%q", shortPath("/home/u/src/k"))
+	t.Setenv("HOME", "/users/u")
+	if shortPath("/users/u/src/k") != "~/src/k" {
+		t.Fatalf("%q", shortPath("/users/u/src/k"))
 	}
-	if shortPath("/home/u") != "~" {
-		t.Fatalf("%q", shortPath("/home/u"))
+	if shortPath("/users/u") != "~" {
+		t.Fatalf("%q", shortPath("/users/u"))
 	}
-	if shortModel("acme/qwen38.nvfp4") != "qwen38.nvfp4" {
-		t.Fatalf("%q", shortModel("acme/qwen38.nvfp4"))
+	if shortModel("acme/main-model") != "main-model" {
+		t.Fatalf("%q", shortModel("acme/main-model"))
 	}
 }
 
@@ -305,7 +305,7 @@ func TestHistoryWriteRedacts(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", dir)
 	h := loadFileHistory(HistoryPath())
-	if _, err := h.Write("token ghp_abcdefghijklmnopqrstuvwxyz012345"); err != nil {
+	if _, err := h.Write("token " + githubToken()); err != nil {
 		t.Fatal(err)
 	}
 	if h.Len() != 1 || strings.Contains(h.lines[0], "ghp_") {
@@ -330,7 +330,7 @@ func TestCompleterSlashAndAt(t *testing.T) {
 func TestReadLineSeesTrailingNewline(t *testing.T) {
 	var out, errb bytes.Buffer
 	env := &commands.Env{
-		Profile: config.Profile{Name: "p", Model: "m", Endpoint: "http://127.0.0.1:9/v1"},
+		Profile: config.Profile{Name: "p", LLM: config.LLM{Model: "m", Endpoint: "http://127.0.0.1:9/v1"}},
 		Out:     &out,
 		Err:     &errb,
 		Cwd:     t.TempDir(),
@@ -408,7 +408,7 @@ func TestShellCtrlDReturnsToAI(t *testing.T) {
 func TestSubmittedInputNotEchoed(t *testing.T) {
 	var out, errb bytes.Buffer
 	env := &commands.Env{
-		Profile: config.Profile{Name: "p", Model: "m", Endpoint: "http://127.0.0.1:9/v1"},
+		Profile: config.Profile{Name: "p", LLM: config.LLM{Model: "m", Endpoint: "http://127.0.0.1:9/v1"}},
 		Out:     &out,
 		Err:     &errb,
 		Cwd:     t.TempDir(),

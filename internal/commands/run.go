@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/siraj/konsolai/internal/repo"
-	"github.com/siraj/konsolai/internal/safety"
-	"github.com/siraj/konsolai/internal/store"
-	"github.com/siraj/konsolai/internal/tools"
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/repo"
+	"github.com/SniksaX/Konsolai/internal/safety"
+	"github.com/SniksaX/Konsolai/internal/store"
+	"github.com/SniksaX/Konsolai/internal/tools"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 func runRun(ctx context.Context, env *Env, args []string) int {

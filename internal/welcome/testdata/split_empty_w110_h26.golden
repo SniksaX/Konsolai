@@ -1,14 +1,14 @@
 
-  ▀▄     █  ▄▀ ▄▀▀▀▄ █▄  █ ▄▀▀▀▀ ▄▀▀▀▄ █     ▄▀▀▀▄ ▀▀█▀▀ █████      ╭─ fatboy ────────────────────── 4/4 up ─╮
-    ▀▄   █▄▀   █   █ █ ▀▄█ ▀▄▄▄  █   █ █     █▄▄▄█   █   █████      │ ● qwen38.nvfp4  main    84 tokens/s    │
-   ▄▀    █ ▀▄  █   █ █   █     █ █   █ █     █   █   █   █████      │ ● qwen38-fast   fast    120 tokens/s   │
-  ▀      ▀   ▀  ▀▀▀  ▀   ▀ ▀▀▀▀   ▀▀▀  ▀▀▀▀▀ ▀   ▀ ▀▀▀▀▀ ▀▀▀▀▀      │ ● nomic-embed   embed   40ms           │
-         your terminal agent, on your own models                    │ ● bge-reranker  rerank  18ms           │
+  ▀▄     █  ▄▀ ▄▀▀▀▄ █▄  █ ▄▀▀▀▀ ▄▀▀▀▄ █     ▄▀▀▀▄ ▀▀█▀▀ █████      ╭─ gpu-box ───────────────────── 4/4 up ─╮
+    ▀▄   █▄▀   █   █ █ ▀▄█ ▀▄▄▄  █   █ █     █▄▄▄█   █   █████      │ ● main-model    main    84 tokens/s    │
+   ▄▀    █ ▀▄  █   █ █   █     █ █   █ █     █   █   █   █████      │ ● fast-model    fast    120 tokens/s   │
+  ▀      ▀   ▀  ▀▀▀  ▀   ▀ ▀▀▀▀   ▀▀▀  ▀▀▀▀▀ ▀   ▀ ▀▀▀▀▀ ▀▀▀▀▀      │ ● embed-model   embed   40ms           │
+         your terminal agent, on your own models                    │ ● rerank-model  rerank  18ms           │
                                                                     ╰────────────────────────────────────────╯
 
   ╭─ session                                        ─╮
-  │ dir      ~/proj                                  │
-  │ branch   dev*                                    │
+  │ dir      ~/projects/demo                         │
+  │ branch   main*                                   │
   │ changed  3                                       │
   │ ahead    1                                       │
   │ behind   2                                       │

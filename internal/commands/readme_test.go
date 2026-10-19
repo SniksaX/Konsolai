@@ -55,10 +55,10 @@ func TestReadmeImagesExist(t *testing.T) {
 	}
 }
 
-func TestReadmeNoFatboy(t *testing.T) {
+func TestReadmeOmitsSampleHost(t *testing.T) {
 	text := readReadme(t)
-	if strings.Contains(text, "fatboy") {
-		t.Fatal("readme contains fatboy")
+	if strings.Contains(text, "gpu-box") {
+		t.Fatal("readme contains gpu-box")
 	}
 }
 

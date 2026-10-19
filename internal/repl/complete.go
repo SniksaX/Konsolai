@@ -9,10 +9,10 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/SniksaX/Konsolai/internal/commands"
+	"github.com/SniksaX/Konsolai/internal/repo"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 	"github.com/reeflective/readline"
-	"github.com/siraj/konsolai/internal/commands"
-	"github.com/siraj/konsolai/internal/repo"
-	"github.com/siraj/konsolai/internal/ui/theme"
 )
 
 const (

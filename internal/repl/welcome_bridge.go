@@ -9,14 +9,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/siraj/konsolai/internal/banner"
-	"github.com/siraj/konsolai/internal/commands"
-	"github.com/siraj/konsolai/internal/config"
-	"github.com/siraj/konsolai/internal/memory"
-	"github.com/siraj/konsolai/internal/store"
-	"github.com/siraj/konsolai/internal/ui"
-	"github.com/siraj/konsolai/internal/ui/theme"
-	"github.com/siraj/konsolai/internal/welcome"
+	"github.com/SniksaX/Konsolai/internal/banner"
+	"github.com/SniksaX/Konsolai/internal/commands"
+	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/memory"
+	"github.com/SniksaX/Konsolai/internal/store"
+	"github.com/SniksaX/Konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
+	"github.com/SniksaX/Konsolai/internal/welcome"
 	"golang.org/x/term"
 )
 
@@ -179,12 +179,12 @@ func welcomeInput(env *commands.Env, info banner.Info) welcome.Input {
 	if env == nil {
 		return in
 	}
-	in.Endpoint = env.Profile.Endpoint
-	in.Model = firstNonEmpty(info.Model, env.Profile.Model)
-	in.FastEndpoint = env.Profile.FastEndpoint
-	in.FastModel = env.Profile.FastModel
-	in.EmbedEndpoint = env.Profile.EmbedEndpoint
-	in.RerankEndpoint = env.Profile.RerankEndpoint
+	in.Endpoint = env.Profile.LLM.Endpoint
+	in.Model = firstNonEmpty(info.Model, env.Profile.LLM.Model)
+	in.FastEndpoint = env.Profile.Fast.Endpoint
+	in.FastModel = env.Profile.Fast.Model
+	in.EmbedEndpoint = env.Profile.RAG.EmbedEndpoint
+	in.RerankEndpoint = env.Profile.RAG.RerankEndpoint
 	in.Profile = env.Profile.Name
 	in.ProjectID = env.ProjectID
 	in.CWD = env.Cwd

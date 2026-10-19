@@ -13,16 +13,16 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/siraj/konsolai/internal/agent"
-	"github.com/siraj/konsolai/internal/intent"
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/memory"
-	"github.com/siraj/konsolai/internal/rag"
-	"github.com/siraj/konsolai/internal/repo"
-	"github.com/siraj/konsolai/internal/safety"
-	"github.com/siraj/konsolai/internal/sysctx"
-	"github.com/siraj/konsolai/internal/tools"
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/agent"
+	"github.com/SniksaX/Konsolai/internal/intent"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/memory"
+	"github.com/SniksaX/Konsolai/internal/rag"
+	"github.com/SniksaX/Konsolai/internal/repo"
+	"github.com/SniksaX/Konsolai/internal/safety"
+	"github.com/SniksaX/Konsolai/internal/sysctx"
+	"github.com/SniksaX/Konsolai/internal/tools"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
@@ -111,6 +111,12 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	r.setStatIntent(string(dec.Intent))
 	if thinkMode == ThinkAlways {
 		dec.Effort = intent.EffortHigh
+	}
+	if effort := intent.Effort(req.Effort); req.Effort != "" {
+		switch effort {
+		case intent.EffortNone, intent.EffortLow, intent.EffortHigh:
+			dec.Effort = effort
+		}
 	}
 	r.RouterModel = routeClient.ModelID()
 	if r.RouterModel == "" {
@@ -265,7 +271,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 	if dec == nil {
 		return 1, "", 0, true
 	}
-	dec.Language = intent.ResolveLanguage(req.Text, lastUserOf(history), dec.Language, r.Profile.DefaultLanguage, r.Profile.Languages)
+	dec.Language = intent.ResolveLanguage(req.Text, lastUserOf(history), dec.Language, r.Profile.Language.Default, r.Profile.Language.Languages)
 	lang := agent.ReplyInstruction(dec.Language)
 	if dec.Intent == intent.Answer {
 		prompt := agent.AnswerPrompt + "\n" + lang
@@ -350,6 +356,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			ShellMaxTimeout:     r.Profile.ShellMaxTimeout(),
 			ShellWaitDelay:      r.Profile.ShellWaitDelay(),
 		})
+		reg = registryForRAG(reg, r.Profile.RAGEnabled())
 		cfg := agent.Config{
 			Client:         client,
 			Tools:          reg,
@@ -359,7 +366,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			History:        history,
 			AutoApprove:    req.Yes,
 			Prompt:         agent.ActPrompt + "\n" + lang,
-			ThinkingPolicy: ThinkingFor(*dec, r.Profile.BuildThinking, thinkMode),
+			ThinkingPolicy: ThinkingFor(*dec, r.Profile.Agent.BuildThinking, thinkMode),
 			Trace:          req.Trace,
 			SessionID:      sessionID,
 			Intent:         string(dec.Intent),
@@ -387,7 +394,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		}
 		switch dec.Intent {
 		case intent.Lookup:
-			cfg.Tools = reg.Named("list_dir", "read_file", "outline", "search", "find_files", "web_fetch", "recall", "run_shell", "finish")
+			cfg.Tools = reg.Named(lookupToolNames(r.Profile.RAGEnabled())...)
 			cfg.Prompt = agent.LookupPrompt + "\n" + lang + sub
 			cfg.MaxSteps = r.Profile.MaxStepsFor("lookup")
 			cfg.ExploreBudget = r.Profile.ExploreBudgetFor("lookup", string(dec.Task))
@@ -454,7 +461,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			fmt.Fprintln(r.errw(), err.Error())
 			return 1, "", tok, true
 		}
-		fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.Endpoint, err, req.Trace))
+		fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.LLM.Endpoint, err, req.Trace))
 		return 1, "", tok, true
 	}
 	return 1, "", 0, true
@@ -527,7 +534,7 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 			fmt.Fprintln(r.errw(), streamErr.Error())
 			return 1, out, ptok, usedMain, ""
 		}
-		fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.Endpoint, streamErr, req.Trace))
+		fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.LLM.Endpoint, streamErr, req.Trace))
 		return 1, out, ptok, usedMain, ""
 	}
 	if strings.TrimSpace(out) == "" {
@@ -686,6 +693,21 @@ func AttachMemories(user string, hits []rag.Hit) (string, int) {
 		return user, 0
 	}
 	return rag.PrependMemory(user, hits), len(hits)
+}
+
+func registryForRAG(reg *tools.Registry, rag bool) *tools.Registry {
+	if rag {
+		return reg
+	}
+	return reg.Without("recall")
+}
+
+func lookupToolNames(rag bool) []string {
+	names := []string{"list_dir", "read_file", "outline", "search", "find_files", "web_fetch"}
+	if rag {
+		names = append(names, "recall")
+	}
+	return append(names, "run_shell", "finish")
 }
 
 func inSubproject(cwd, root string) bool {

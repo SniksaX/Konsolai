@@ -16,9 +16,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/siraj/konsolai/internal/redact"
-	"github.com/siraj/konsolai/internal/repo"
-	"github.com/siraj/konsolai/internal/store"
+	"github.com/SniksaX/Konsolai/internal/redact"
+	"github.com/SniksaX/Konsolai/internal/repo"
+	"github.com/SniksaX/Konsolai/internal/store"
 )
 
 const (

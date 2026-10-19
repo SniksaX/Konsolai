@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siraj/konsolai/internal/ui/theme"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 )
 
 func TestThemeListAndPersist(t *testing.T) {

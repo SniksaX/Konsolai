@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/siraj/konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/llm"
 )
 
 func withStateHome(t *testing.T) string {
@@ -26,7 +26,7 @@ func TestSaveLoadLastSession(t *testing.T) {
 		Title:   "hello",
 		Messages: []llm.Message{
 			{Role: llm.RoleSystem, Content: "sys"},
-			{Role: llm.RoleUser, Content: "token ghp_abcdefghijklmnopqrstuvwxyz012345"},
+			{Role: llm.RoleUser, Content: "token " + githubToken()},
 			{Role: llm.RoleAssistant, Content: "ok"},
 		},
 	}

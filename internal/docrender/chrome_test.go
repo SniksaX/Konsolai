@@ -48,19 +48,19 @@ func TestFindChromeLookPathOrder(t *testing.T) {
 func TestFindChromePuppeteerGlobNewest(t *testing.T) {
 	getenv = func(string) string { return "" }
 	lookPath = func(string) (string, error) { return "", errors.New("missing") }
-	userHome = func() (string, error) { return "/home/t", nil }
+	userHome = func() (string, error) { return "/users/t", nil }
 	glob = func(pattern string) ([]string, error) {
 		if !filepath.IsAbs(pattern) && pattern == "" {
 			t.Fatal("empty pattern")
 		}
 		return []string{
-			"/home/t/.cache/puppeteer/chrome/linux-120.0.0.0/chrome-linux64/chrome",
-			"/home/t/.cache/puppeteer/chrome/linux-155.0.8059.79/chrome-linux64/chrome",
+			"/users/t/.cache/puppeteer/chrome/linux-120.0.0.0/chrome-linux64/chrome",
+			"/users/t/.cache/puppeteer/chrome/linux-155.0.8059.79/chrome-linux64/chrome",
 		}, nil
 	}
 	t.Cleanup(restoreChromeHooks)
 	p, err := FindChrome()
-	if err != nil || p != "/home/t/.cache/puppeteer/chrome/linux-155.0.8059.79/chrome-linux64/chrome" {
+	if err != nil || p != "/users/t/.cache/puppeteer/chrome/linux-155.0.8059.79/chrome-linux64/chrome" {
 		t.Fatalf("%q %v", p, err)
 	}
 }
@@ -68,7 +68,7 @@ func TestFindChromePuppeteerGlobNewest(t *testing.T) {
 func TestFindChromeMissing(t *testing.T) {
 	getenv = func(string) string { return "" }
 	lookPath = func(string) (string, error) { return "", errors.New("missing") }
-	userHome = func() (string, error) { return "/home/t", nil }
+	userHome = func() (string, error) { return "/users/t", nil }
 	glob = func(string) ([]string, error) { return nil, nil }
 	t.Cleanup(restoreChromeHooks)
 	_, err := FindChrome()

@@ -5,12 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 func TestBannerWidth100ColorOff(t *testing.T) {
 	var b bytes.Buffer
-	info := Info{Version: "v0.1.0", Model: "qwen38.nvfp4", Dir: "~/proj"}
+	info := Info{Version: "v0.1.0", Model: "main-model", Dir: "~/projects/demo"}
 	if err := Render(&b, info, ui.Palette{Scheme: "amber"}, 100, true); err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +21,7 @@ func TestBannerWidth100ColorOff(t *testing.T) {
 	if !strings.Contains(got, "█") {
 		t.Fatalf("missing wordmark:\n%s", got)
 	}
-	if !strings.Contains(got, "qwen38.nvfp4") || !strings.Contains(got, "~/proj") {
+	if !strings.Contains(got, "main-model") || !strings.Contains(got, "~/projects/demo") {
 		t.Fatalf("metadata: %q", got)
 	}
 	if !strings.Contains(got, "/ commands") || !strings.Contains(got, "? help") {
@@ -31,7 +31,7 @@ func TestBannerWidth100ColorOff(t *testing.T) {
 
 func TestBannerWidth40Fallback(t *testing.T) {
 	var b bytes.Buffer
-	info := Info{Version: "v0.1.0", Model: "qwen38.nvfp4", Dir: "~/proj"}
+	info := Info{Version: "v0.1.0", Model: "main-model", Dir: "~/projects/demo"}
 	if err := Render(&b, info, ui.Palette{}, 40, true); err != nil {
 		t.Fatal(err)
 	}
@@ -100,10 +100,10 @@ func TestParseBuildAndHost(t *testing.T) {
 	if got := ParseBuild("v0.1.0"); got != "v0.1.0" {
 		t.Fatalf("tag %q", got)
 	}
-	if got := HostOf("http://fatboy:11436/v1"); got != "fatboy" {
+	if got := HostOf("http://gpu-box:8000/v1"); got != "gpu-box" {
 		t.Fatalf("host %q", got)
 	}
-	c := Compact(Info{Version: "v0.1.0", Model: "qwen38.nvfp4"}, ui.Palette{})
+	c := Compact(Info{Version: "v0.1.0", Model: "main-model"}, ui.Palette{})
 	if !strings.Contains(c, "KONSOLAI") || !strings.Contains(c, "v0.1.0") {
 		t.Fatalf("compact %q", c)
 	}

@@ -12,17 +12,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/SniksaX/Konsolai/internal/banner"
+	"github.com/SniksaX/Konsolai/internal/commands"
+	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/repo"
+	"github.com/SniksaX/Konsolai/internal/safety"
+	"github.com/SniksaX/Konsolai/internal/shellmode"
+	"github.com/SniksaX/Konsolai/internal/store"
+	"github.com/SniksaX/Konsolai/internal/turn"
+	"github.com/SniksaX/Konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 	"github.com/reeflective/readline"
-	"github.com/siraj/konsolai/internal/banner"
-	"github.com/siraj/konsolai/internal/commands"
-	"github.com/siraj/konsolai/internal/config"
-	"github.com/siraj/konsolai/internal/repo"
-	"github.com/siraj/konsolai/internal/safety"
-	"github.com/siraj/konsolai/internal/shellmode"
-	"github.com/siraj/konsolai/internal/store"
-	"github.com/siraj/konsolai/internal/turn"
-	"github.com/siraj/konsolai/internal/ui"
-	"github.com/siraj/konsolai/internal/ui/theme"
 	"golang.org/x/term"
 )
 
@@ -124,7 +124,7 @@ func Run(ctx context.Context, cfg Config) int {
 	p := ui.Current()
 	model := cfg.Model
 	if model == "" && env != nil {
-		model = env.Profile.Model
+		model = env.Profile.LLM.Model
 	}
 	if model == "" {
 		model = "-"
@@ -134,7 +134,7 @@ func Run(ctx context.Context, cfg Config) int {
 		Branch: gitBranch(cwd),
 	}
 	if env != nil {
-		info.Host = banner.HostOf(env.Profile.Endpoint)
+		info.Host = banner.HostOf(env.Profile.LLM.Endpoint)
 	}
 	if info.Model == "-" {
 		info.Model = ""
@@ -220,6 +220,18 @@ func Run(ctx context.Context, cfg Config) int {
 	env.OnCmdClear = func() {
 		if st.mode != nil {
 			st.mode.Hist.Clear()
+		}
+	}
+	if env != nil {
+		env.FailedShell = func() (string, int, string, bool) {
+			if st.mode == nil {
+				return "", 0, "", false
+			}
+			e, ok := st.mode.Hist.LastFailure()
+			if !ok {
+				return "", 0, "", false
+			}
+			return e.Cmd, e.Exit, e.Output, true
 		}
 	}
 
@@ -422,12 +434,12 @@ func sessionFooter(st *session, cfg Config) string {
 	routing := "main"
 	if cfg.Runner != nil && cfg.Runner.RouterSource != "" {
 		routing = cfg.Runner.RouterSource
-	} else if cfg.Env != nil && cfg.Env.Profile.FastEndpoint != "" {
+	} else if cfg.Env != nil && cfg.Env.Profile.Fast.Endpoint != "" {
 		routing = "fast"
 	}
 	model := cfg.Model
 	if model == "" && cfg.Env != nil {
-		model = cfg.Env.Profile.Model
+		model = cfg.Env.Profile.LLM.Model
 	}
 	info := footerInfo{
 		Cwd: cwd, Model: model, Routing: routing,
@@ -546,13 +558,13 @@ func probeBackground(ctx context.Context, prof config.Profile, errw io.Writer, s
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		if prof.Endpoint == "" {
+		if prof.LLM.Endpoint == "" {
 			markDown(st, p.Warn("endpoint unreachable"))
 			return
 		}
 		cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
-		req, err := http.NewRequestWithContext(cctx, http.MethodGet, strings.TrimRight(prof.Endpoint, "/")+"/models", nil)
+		req, err := http.NewRequestWithContext(cctx, http.MethodGet, strings.TrimRight(prof.LLM.Endpoint, "/")+"/models", nil)
 		if err != nil {
 			markDown(st, p.Warn("endpoint unreachable"))
 			return
@@ -569,12 +581,12 @@ func probeBackground(ctx context.Context, prof config.Profile, errw io.Writer, s
 	}()
 	go func() {
 		defer wg.Done()
-		if prof.DatabaseURL == "" {
+		if prof.Database.URL == "" {
 			return
 		}
 		cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
-		s, err := store.OpenWith(cctx, prof.DatabaseURL, store.OpenOptions{
+		s, err := store.OpenWith(cctx, prof.Database.URL, store.OpenOptions{
 			QueryTimeout:   prof.StoreQueryTimeout(),
 			MigrateTimeout: prof.StoreMigrateTimeout(),
 		})

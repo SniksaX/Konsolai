@@ -13,10 +13,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/siraj/konsolai/internal/config"
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/safety"
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/safety"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 var ErrLookupMutating = errors.New("lookup can only run read-only commands")

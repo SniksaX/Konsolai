@@ -5,8 +5,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/banner"
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/banner"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 const (

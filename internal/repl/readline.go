@@ -9,11 +9,11 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/SniksaX/Konsolai/internal/commands"
+	"github.com/SniksaX/Konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 	"github.com/reeflective/readline"
 	"github.com/reeflective/readline/inputrc"
-	"github.com/siraj/konsolai/internal/commands"
-	"github.com/siraj/konsolai/internal/ui"
-	"github.com/siraj/konsolai/internal/ui/theme"
 	"golang.org/x/term"
 )
 

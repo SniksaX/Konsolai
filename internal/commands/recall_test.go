@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/siraj/konsolai/internal/config"
-	"github.com/siraj/konsolai/internal/embed"
-	"github.com/siraj/konsolai/internal/memory"
-	"github.com/siraj/konsolai/internal/store"
+	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/embed"
+	"github.com/SniksaX/Konsolai/internal/memory"
+	"github.com/SniksaX/Konsolai/internal/store"
 )
 
 func TestParseRecallArgs(t *testing.T) {

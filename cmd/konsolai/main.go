@@ -13,19 +13,19 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/siraj/konsolai/internal/agent"
-	"github.com/siraj/konsolai/internal/commands"
-	"github.com/siraj/konsolai/internal/config"
-	"github.com/siraj/konsolai/internal/embed"
-	"github.com/siraj/konsolai/internal/intent"
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/memory"
-	"github.com/siraj/konsolai/internal/rag"
-	"github.com/siraj/konsolai/internal/repl"
-	"github.com/siraj/konsolai/internal/store"
-	"github.com/siraj/konsolai/internal/turn"
-	"github.com/siraj/konsolai/internal/ui"
-	"github.com/siraj/konsolai/internal/ui/theme"
+	"github.com/SniksaX/Konsolai/internal/agent"
+	"github.com/SniksaX/Konsolai/internal/commands"
+	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/embed"
+	"github.com/SniksaX/Konsolai/internal/intent"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/memory"
+	"github.com/SniksaX/Konsolai/internal/rag"
+	"github.com/SniksaX/Konsolai/internal/repl"
+	"github.com/SniksaX/Konsolai/internal/store"
+	"github.com/SniksaX/Konsolai/internal/turn"
+	"github.com/SniksaX/Konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 )
 
 var _ agent.Confirmer = (*ui.Prompter)(nil)
@@ -213,18 +213,18 @@ func run() int {
 	}
 	ui.ApplyUIOpts(prof.PaletteName(), prof.Appearance(), inv.Plain, prof.CodeHighlightOn(), prof.StripEmojiOn())
 	theme.SetCursorColor(prof.CursorColorOn())
-	inv.Endpoint = prof.Endpoint
+	inv.Endpoint = prof.LLM.Endpoint
 
 	needMem := inv.Cmd == cmdUndo || inv.Cmd == cmdFacts || inv.Cmd == cmdPrune || inv.Cmd == cmdRemember || inv.Cmd == cmdForget
 	var st *store.Store
-	if prof.DatabaseURL == "" {
+	if prof.Database.URL == "" {
 		if needMem {
 			fmt.Fprintln(os.Stderr, noMemory)
 			return 1
 		}
 	} else {
 		clear := ui.StartAfter("loading memory", 300*time.Millisecond)
-		opened, err := store.OpenWith(ctx, prof.DatabaseURL, store.OpenOptions{
+		opened, err := store.OpenWith(ctx, prof.Database.URL, store.OpenOptions{
 			QueryTimeout:   prof.StoreQueryTimeout(),
 			MigrateTimeout: prof.StoreMigrateTimeout(),
 		})
@@ -234,18 +234,18 @@ func run() int {
 				fmt.Fprintln(os.Stderr, "konsolai:", err)
 				return 1
 			}
-			fmt.Fprintln(os.Stderr, ui.Dim(config.DisableLine(prof.DatabaseURL, err)))
+			fmt.Fprintln(os.Stderr, ui.Dim(config.DisableLine(prof.Database.URL, err)))
 		} else {
 			st = opened
 			defer st.Close()
 		}
 	}
 	mem := memory.NewGuard(st, func(err error) {
-		fmt.Fprintln(os.Stderr, ui.Dim(config.DisableLine(prof.DatabaseURL, err)))
+		fmt.Fprintln(os.Stderr, ui.Dim(config.DisableLine(prof.Database.URL, err)))
 	})
 	mem.SetIsolatedTimeout(prof.IsolatedTimeout())
 	if s := mem.Store(); s != nil {
-		if err := s.PruneIfDue(ctx, prof.RetentionDays); err != nil {
+		if err := s.PruneIfDue(ctx, prof.Memory.RetentionDays); err != nil {
 			mem.Fail(err)
 		}
 	}
@@ -257,12 +257,19 @@ func run() int {
 	}
 	projectID := upsertProject(ctx, mem, cwd)
 
-	client := llm.New(prof.Endpoint, prof.Model)
-	client.SetIdleTimeout(time.Duration(prof.LLMIdleTimeoutSeconds) * time.Second)
+	client := llm.New(prof.LLM.Endpoint, prof.LLM.Model)
+	client.SetIdleTimeout(time.Duration(prof.LLM.IdleTimeoutSeconds) * time.Second)
+	client.SetThinkKwargs(prof.LLM.ThinkingKwargs)
+	var fastClient *llm.Client
+	if prof.FastOn() {
+		fastClient = llm.NewFast(prof.Fast.Endpoint, prof.Fast.Model)
+		fastClient.SetIdleTimeout(time.Duration(prof.LLM.IdleTimeoutSeconds) * time.Second)
+		fastClient.SetThinkKwargs(prof.Fast.ThinkingKwargs)
+	}
 	runner := &turn.Runner{
 		Profile:    prof,
 		Client:     client,
-		FastClient: llm.NewFast(prof.FastEndpoint, prof.FastModel),
+		FastClient: fastClient,
 		Mem:        mem,
 		Out:        os.Stdout,
 		Err:        os.Stderr,
@@ -275,7 +282,7 @@ func run() int {
 		if !st.RAGAvailable(ctx) {
 			fmt.Fprintln(os.Stderr, ui.Current().Warn("rag unavailable"))
 		} else {
-			emb = embed.New(prof.EmbedEndpoint, prof.RerankEndpoint)
+			emb = embed.New(prof.RAG.EmbedEndpoint, prof.RAG.RerankEndpoint)
 			emb.SetBatch(prof.RAG.EmbedBatch)
 			ing := rag.New(st, emb, prof.Name)
 			ing.SetTune(rag.TuneFrom(prof))
@@ -299,7 +306,7 @@ func run() int {
 	if isRepl {
 		env := commandEnv(runner, mem, prof, cwd, projectID, inv, emb)
 		env.InRepl = true
-		model := prof.Model
+		model := prof.LLM.Model
 		if id, err := client.ResolveModel(ctx); err == nil && id != "" {
 			model = id
 		}
@@ -381,7 +388,7 @@ func commandEnv(runner *turn.Runner, mem *memory.Guard, prof config.Profile, cwd
 			return runForget(ctx, mem, args[0], id)
 		},
 		Prune: func(ctx context.Context) int {
-			return runPrune(ctx, mem, prof.RetentionDays)
+			return runPrune(ctx, mem, prof.Memory.RetentionDays)
 		},
 	}
 }

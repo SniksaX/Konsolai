@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/ui"
-	"github.com/siraj/konsolai/internal/ui/theme"
+	"github.com/SniksaX/Konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 )
 
 func HostOf(endpoint string) string {

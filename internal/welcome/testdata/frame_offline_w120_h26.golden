@@ -1,5 +1,5 @@
 
-╭─ konsolai v0.1.0 ───────────────────────────────────────────────────────────────────────────────── ○ fatboy offline ─╮
+╭─ konsolai v0.1.0 ──────────────────────────────────────────────────────────────────────────────── ○ gpu-box offline ─╮
 │                                                                                                                      │
 │   ▀▄     █  ▄▀ ▄▀▀▀▄ █▄  █ ▄▀▀▀▀ ▄▀▀▀▄ █     ▄▀▀▀▄ ▀▀█▀▀ █████  Your terminal agent, on your own models.             │
 │     ▀▄   █▄▀   █   █ █ ▀▄█ ▀▄▄▄  █   █ █     █▄▄▄█   █   █████  answer · lookup · act · build                        │
@@ -8,10 +8,10 @@
 │                                                                                                                      │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │  MODELS                                SESSION                                                                       │
-│  ○ qwen38.nvfp4  main    unreachable   dir      ~/proj                                                               │
-│  ○ qwen38-fast   fast    unreachable   branch   dev*                                                                 │
-│  ○ nomic-embed   embed   unreachable   changed  3                                                                    │
-│  ○ bge-reranker  rerank  unreachable   ahead    1                                                                    │
+│  ○ main-model    main    unreachable   dir      ~/projects/demo                                                      │
+│  ○ fast-model    fast    unreachable   branch   main*                                                                │
+│  ○ embed-model   embed   unreachable   changed  3                                                                    │
+│  ○ rerank-model  rerank  unreachable   ahead    1                                                                    │
 │                                        behind   2                                                                    │
 │                                        build    v0.1.0  ab12cd3                                                      │
 │                                        memory   412 facts · 2 sessions                                               │

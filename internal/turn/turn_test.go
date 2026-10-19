@@ -10,12 +10,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siraj/konsolai/internal/agent"
-	"github.com/siraj/konsolai/internal/config"
-	"github.com/siraj/konsolai/internal/intent"
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/memory"
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/agent"
+	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/intent"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/memory"
+	"github.com/SniksaX/Konsolai/internal/tools"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 type autoConfirm struct{}
@@ -73,7 +74,7 @@ func testRunner(t *testing.T, client *llm.Client, conf agent.Confirmer) *Runner 
 		t.Setenv("XDG_STATE_HOME", t.TempDir())
 	}
 	return &Runner{
-		Profile: config.Profile{Name: "default", SessionIdleMinutes: 30, BuildThinking: "plan_step"},
+		Profile: config.Profile{Name: "default", Memory: config.Memory{SessionIdleMinutes: 30}, Agent: config.Agent{BuildThinking: "plan_step"}},
 		Client:  client,
 		Mem:     memory.NewGuard(nil, nil),
 		Out:     io.Discard,
@@ -237,13 +238,38 @@ func TestStripThinkPrefix(t *testing.T) {
 	}
 }
 
+func TestRAGOffDropsRecall(t *testing.T) {
+	reg := tools.NewRegistry(nil, nil, nil, nil, nil)
+	if _, ok := registryForRAG(reg, false).Get("recall"); ok {
+		t.Fatal("recall offered while rag is off")
+	}
+	if _, ok := registryForRAG(reg, true).Get("recall"); !ok {
+		t.Fatal("recall missing while rag is on")
+	}
+	names := lookupToolNames(false)
+	for _, n := range names {
+		if n == "recall" {
+			t.Fatal("lookup lists recall while rag is off")
+		}
+	}
+	found := false
+	for _, n := range lookupToolNames(true) {
+		if n == "recall" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("lookup omits recall while rag is on")
+	}
+}
+
 func TestFastUnreachableFallsBack(t *testing.T) {
 	llm.ResetReachCache()
 	t.Cleanup(llm.ResetReachCache)
 	client := fakeLLM(t, []llm.Message{{Role: llm.RoleAssistant, Content: `{"intent":"answer","language":"en","reason":"hi","reasoning":false,"effort":"none","task":"other","continues_session":0}`}, {Role: llm.RoleAssistant, Content: "hello"}})
 	r := testRunner(t, client, autoConfirm{})
-	r.Profile.FastEndpoint = "http://127.0.0.1:1/v1"
-	r.FastClient = llm.NewFast(r.Profile.FastEndpoint, "mini")
+	r.Profile.Fast.Endpoint = "http://127.0.0.1:1/v1"
+	r.FastClient = llm.NewFast(r.Profile.Fast.Endpoint, "mini")
 	var errB strings.Builder
 	r.Err = &errB
 	res := r.RunTurn(context.Background(), Request{Text: "hi", Trace: true, Yes: true, Cwd: t.TempDir(), New: true})

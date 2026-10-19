@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/rag"
+	"github.com/SniksaX/Konsolai/internal/rag"
 )
 
 func runRecall(ctx context.Context, env *Env, args []string) int {

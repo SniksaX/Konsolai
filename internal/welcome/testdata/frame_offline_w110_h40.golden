@@ -1,14 +1,14 @@
 
-  ▀▄     █  ▄▀ ▄▀▀▀▄ █▄  █ ▄▀▀▀▀ ▄▀▀▀▄ █     ▄▀▀▀▄ ▀▀█▀▀ █████      ╭─ fatboy ────────────────────── 0/4 up ─╮
-    ▀▄   █▄▀   █   █ █ ▀▄█ ▀▄▄▄  █   █ █     █▄▄▄█   █   █████      │ ○ qwen38.nvfp4  main    unreachable    │
-   ▄▀    █ ▀▄  █   █ █   █     █ █   █ █     █   █   █   █████      │ ○ qwen38-fast   fast    unreachable    │
-  ▀      ▀   ▀  ▀▀▀  ▀   ▀ ▀▀▀▀   ▀▀▀  ▀▀▀▀▀ ▀   ▀ ▀▀▀▀▀ ▀▀▀▀▀      │ ○ nomic-embed   embed   unreachable    │
-         your terminal agent, on your own models                    │ ○ bge-reranker  rerank  unreachable    │
+  ▀▄     █  ▄▀ ▄▀▀▀▄ █▄  █ ▄▀▀▀▀ ▄▀▀▀▄ █     ▄▀▀▀▄ ▀▀█▀▀ █████      ╭─ gpu-box ───────────────────── 0/4 up ─╮
+    ▀▄   █▄▀   █   █ █ ▀▄█ ▀▄▄▄  █   █ █     █▄▄▄█   █   █████      │ ○ main-model    main    unreachable    │
+   ▄▀    █ ▀▄  █   █ █   █     █ █   █ █     █   █   █   █████      │ ○ fast-model    fast    unreachable    │
+  ▀      ▀   ▀  ▀▀▀  ▀   ▀ ▀▀▀▀   ▀▀▀  ▀▀▀▀▀ ▀   ▀ ▀▀▀▀▀ ▀▀▀▀▀      │ ○ embed-model   embed   unreachable    │
+         your terminal agent, on your own models                    │ ○ rerank-model  rerank  unreachable    │
                                                                     ╰────────────────────────────────────────╯
 
   ╭─ session                                        ─╮  ╭─ recent ─────────────────────────────── /resume ─╮
-  │ dir      ~/proj                                  │  │ › fix the welcome screen before the... build  5m │
-  │ branch   dev*                                    │  │ › lookup theme roles                  lookup  2h │
+  │ dir      ~/projects/demo                         │  │ › fix the welcome screen before the... build  5m │
+  │ branch   main*                                   │  │ › lookup theme roles                  lookup  2h │
   │ changed  3                                       │  │ › answer a short question             answer  1d │
   │ ahead    1                                       │  │ › wire the footer meter                  act  3w │
   │ behind   2                                       │  ╰──────────────────────────────────────────────────╯

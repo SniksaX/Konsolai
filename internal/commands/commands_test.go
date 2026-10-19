@@ -12,11 +12,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siraj/konsolai/internal/config"
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/memory"
-	"github.com/siraj/konsolai/internal/turn"
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/memory"
+	"github.com/SniksaX/Konsolai/internal/turn"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 func testEnv(t *testing.T) (*Env, *bytes.Buffer, *bytes.Buffer) {
@@ -24,7 +24,7 @@ func testEnv(t *testing.T) (*Env, *bytes.Buffer, *bytes.Buffer) {
 	var out, errb bytes.Buffer
 	var copied string
 	env := &Env{
-		Profile: config.Profile{Name: "default", Model: "m", Endpoint: "http://127.0.0.1:9/v1"},
+		Profile: config.Profile{Name: "default", LLM: config.LLM{Model: "m", Endpoint: "http://127.0.0.1:9/v1"}},
 		Out:     &out,
 		Err:     &errb,
 		Cwd:     t.TempDir(),
@@ -312,14 +312,14 @@ func TestStatusWindowFromModels(t *testing.T) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data": []map[string]any{{"id": "qwen38.nvfp4", "max_model_len": 94208}},
+			"data": []map[string]any{{"id": "main-model", "max_model_len": 94208}},
 		})
 	}))
 	t.Cleanup(srv.Close)
 	env, out, _ := testEnv(t)
-	env.Profile.Endpoint = srv.URL + "/v1"
-	env.Profile.Model = "qwen38.nvfp4"
-	client := llm.New(srv.URL+"/v1", "qwen38.nvfp4")
+	env.Profile.LLM.Endpoint = srv.URL + "/v1"
+	env.Profile.LLM.Model = "main-model"
+	client := llm.New(srv.URL+"/v1", "main-model")
 	if client.ContextWindow() != 32768 {
 		t.Fatalf("fallback %d", client.ContextWindow())
 	}

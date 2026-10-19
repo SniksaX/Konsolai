@@ -10,10 +10,10 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/siraj/konsolai/internal/repo"
-	"github.com/siraj/konsolai/internal/safety"
-	"github.com/siraj/konsolai/internal/ui"
-	"github.com/siraj/konsolai/internal/ui/theme"
+	"github.com/SniksaX/Konsolai/internal/repo"
+	"github.com/SniksaX/Konsolai/internal/safety"
+	"github.com/SniksaX/Konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 )
 
 type RunFunc func(ctx context.Context, cwd, line string, stdin *os.File, stdout io.Writer) (exit int, dur time.Duration, capture string, err error)
@@ -94,7 +94,7 @@ func (s *Session) Handle(ctx context.Context, line string) (toAI bool, err error
 		run = RunPty
 	}
 	code, dur, cap, err := run(ctx, s.Cwd, line, s.Stdin, s.out())
-	s.Hist.Add(line, cap)
+	s.Hist.AddExit(line, cap, code)
 	if code != 0 || dur > 2*time.Second {
 		fmt.Fprintln(s.out(), ui.Current().Muted(fmt.Sprintf("exit %d · %.1fs", code, dur.Seconds())))
 	}

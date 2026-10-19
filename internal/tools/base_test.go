@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siraj/konsolai/internal/safety"
+	"github.com/SniksaX/Konsolai/internal/safety"
 )
 
 func TestBaseRelativeTools(t *testing.T) {

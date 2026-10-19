@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/memory"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/memory"
 )
 
 func TestHistoryWithSummary(t *testing.T) {

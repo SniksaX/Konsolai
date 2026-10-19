@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/siraj/konsolai/internal/agent"
-	"github.com/siraj/konsolai/internal/config"
-	"github.com/siraj/konsolai/internal/intent"
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/memory"
+	"github.com/SniksaX/Konsolai/internal/agent"
+	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/intent"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/memory"
 )
 
 func TestParseArgs(t *testing.T) {
@@ -271,7 +271,7 @@ func TestStreamAnswerRetryThenEmpty(t *testing.T) {
 		_, _ = io.WriteString(w, "data: [DONE]\n\n")
 	}))
 	t.Cleanup(srv.Close)
-	c := llm.New(srv.URL+"/v1", "qwen")
+	c := llm.New(srv.URL+"/v1", "main-model")
 	out, _, err := streamAnswer(context.Background(), c, []llm.Message{{Role: llm.RoleUser, Content: "q"}}, false, true)
 	if err != nil {
 		t.Fatal(err)
@@ -297,7 +297,7 @@ func TestResumeSessionLocalFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	mem := memory.NewGuard(nil, nil)
-	prof := config.Profile{Name: "default", SessionIdleMinutes: 30}
+	prof := config.Profile{Name: "default", Memory: config.Memory{SessionIdleMinutes: 30}}
 	cands := findCandidates(context.Background(), mem, prof, nil, cwd)
 	if len(cands) != 1 || cands[0].Title != "quel process" || len(cands[0].Messages) != 1 || cands[0].Messages[0].Content != "port 3000" {
 		t.Fatalf("%+v", cands)
@@ -345,8 +345,8 @@ func TestTopicAwareResume(t *testing.T) {
 }
 
 func TestModelErrorLine(t *testing.T) {
-	ep := "http://fatboy:11436/v1"
-	if got := modelErrorLine(ep, llm.ErrIdleTimeout, false); !strings.Contains(got, "stopped responding (fatboy:11436)") {
+	ep := "http://gpu-box:8000/v1"
+	if got := modelErrorLine(ep, llm.ErrIdleTimeout, false); !strings.Contains(got, "stopped responding (gpu-box:8000)") {
 		t.Fatalf("idle %q", got)
 	}
 	if got := modelErrorLine(ep, llm.ErrTruncated, false); !strings.Contains(got, "cut off") {
@@ -357,7 +357,7 @@ func TestModelErrorLine(t *testing.T) {
 		t.Fatalf("4xx %q", got)
 	}
 	dial := errors.New("llm: chat: dial tcp: connection refused")
-	if got := modelErrorLine(ep, dial, false); got != "konsolai: cannot reach the model server at fatboy:11436." {
+	if got := modelErrorLine(ep, dial, false); got != "konsolai: cannot reach the model server at gpu-box:8000." {
 		t.Fatalf("dial %q", got)
 	}
 	if got := modelErrorLine(ep, llm.ErrIdleTimeout, true); !strings.Contains(got, llm.ErrIdleTimeout.Error()) {

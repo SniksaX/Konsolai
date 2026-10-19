@@ -4,7 +4,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 func renderFrame(w io.Writer, d Data, width, height int) {

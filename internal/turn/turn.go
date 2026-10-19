@@ -9,14 +9,14 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/siraj/konsolai/internal/agent"
-	"github.com/siraj/konsolai/internal/config"
-	"github.com/siraj/konsolai/internal/embed"
-	"github.com/siraj/konsolai/internal/intent"
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/memory"
-	"github.com/siraj/konsolai/internal/rag"
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/agent"
+	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/embed"
+	"github.com/SniksaX/Konsolai/internal/intent"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/memory"
+	"github.com/SniksaX/Konsolai/internal/rag"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 type ThinkMode int
@@ -79,6 +79,7 @@ type Request struct {
 	Text          string
 	Stdin         string
 	Intent        string
+	Effort        string
 	Yes           bool
 	Trace         bool
 	Plain         bool
@@ -121,8 +122,9 @@ func (r *Runner) errw() io.Writer {
 
 func (r *Runner) client() *llm.Client {
 	if r.Client == nil {
-		c := llm.New(r.Profile.Endpoint, r.Profile.Model)
-		c.SetIdleTimeout(time.Duration(r.Profile.LLMIdleTimeoutSeconds) * time.Second)
+		c := llm.New(r.Profile.LLM.Endpoint, r.Profile.LLM.Model)
+		c.SetIdleTimeout(time.Duration(r.Profile.LLM.IdleTimeoutSeconds) * time.Second)
+		c.SetThinkKwargs(r.Profile.LLM.ThinkingKwargs)
 		r.Client = c
 	}
 	r.attachStats(r.Client)
@@ -137,12 +139,13 @@ func (r *Runner) fastClient() *llm.Client {
 	if !r.Profile.FastOn() {
 		return nil
 	}
-	ep := r.Profile.FastEndpoint
+	ep := r.Profile.Fast.Endpoint
 	if ep == "" {
 		return nil
 	}
-	c := llm.NewFast(ep, r.Profile.FastModel)
-	c.SetIdleTimeout(time.Duration(r.Profile.LLMIdleTimeoutSeconds) * time.Second)
+	c := llm.NewFast(ep, r.Profile.Fast.Model)
+	c.SetIdleTimeout(time.Duration(r.Profile.LLM.IdleTimeoutSeconds) * time.Second)
+	c.SetThinkKwargs(r.Profile.Fast.ThinkingKwargs)
 	r.FastClient = c
 	r.attachStats(c)
 	return c

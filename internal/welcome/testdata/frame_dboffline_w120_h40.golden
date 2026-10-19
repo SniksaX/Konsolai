@@ -1,5 +1,5 @@
 
-╭─ konsolai v0.1.0 ────────────────────────────────────────────────────────────────────────────────── ● fatboy online ─╮
+╭─ konsolai v0.1.0 ───────────────────────────────────────────────────────────────────────────────── ● gpu-box online ─╮
 │                                                                                                                      │
 │   ▀▄     █  ▄▀ ▄▀▀▀▄ █▄  █ ▄▀▀▀▀ ▄▀▀▀▄ █     ▄▀▀▀▄ ▀▀█▀▀ █████  Your terminal agent, on your own models.             │
 │     ▀▄   █▄▀   █   █ █ ▀▄█ ▀▄▄▄  █   █ █     █▄▄▄█   █   █████  answer · lookup · act · build                        │
@@ -8,10 +8,10 @@
 │                                                                                                                      │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │  MODELS                                SESSION                               RECENT                                  │
-│  ● qwen38.nvfp4  main    84 tokens/s   dir      ~/proj                       no sessions yet                         │
-│  ● qwen38-fast   fast    120 tokens/s  branch   dev*                                                                 │
-│  ● nomic-embed   embed   40ms          changed  3                                                                    │
-│  ● bge-reranker  rerank  18ms          ahead    1                                                                    │
+│  ● main-model    main    84 tokens/s   dir      ~/projects/demo              no sessions yet                         │
+│  ● fast-model    fast    120 tokens/s  branch   main*                                                                │
+│  ● embed-model   embed   40ms          changed  3                                                                    │
+│  ● rerank-model  rerank  18ms          ahead    1                                                                    │
 │                                        behind   2                                                                    │
 │                                        build    v0.1.0  ab12cd3                                                      │
 │                                        memory   memory offline                                                       │

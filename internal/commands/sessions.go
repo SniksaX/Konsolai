@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/memory"
-	"github.com/siraj/konsolai/internal/turn"
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/memory"
+	"github.com/SniksaX/Konsolai/internal/turn"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 func runHistory(ctx context.Context, env *Env, args []string) int {

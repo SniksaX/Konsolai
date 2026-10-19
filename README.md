@@ -33,6 +33,10 @@ Optional:
 
 ## Install
 
+```sh
+go install github.com/SniksaX/Konsolai/cmd/konsolai@latest
+```
+
 From a checkout of this repo, `scripts/build.sh` sets the version from `git describe --tags --always --dirty` and runs:
 
 ```sh
@@ -51,21 +55,25 @@ Stamp the version yourself with `-ldflags "-X main.version=..."`.
 
 ## Configuration
 
-Create the file with either of these. There is no `konsolai init` subcommand.
+Every key, with its default and a one-line comment, is in [config.example.yaml](config.example.yaml). That file is generated from `internal/config/keys.go`.
 
 ```sh
 konsolai /config init
+konsolai /config init --from-current
+konsolai /config diff
 ```
 
-Inside the REPL: `/config init`. Add `--force` to overwrite. The write is mode `0600` and refuses to replace an existing file without `--force`.
+`/config init` writes the defaults, mode `0600`, and refuses to replace an existing file without `--force`. `/config init --from-current` writes the effective config (file, then environment). `/config diff` lists only the keys that differ from the defaults, and where each value came from: file, env, or flag.
+
+Inside the REPL the same subcommands are `/config init`, `/config init --from-current`, and `/config diff`.
 
 The path is `$XDG_CONFIG_HOME/konsolai/config.yaml`, or `~/.config/konsolai/config.yaml` when `XDG_CONFIG_HOME` is unset. A missing file loads built-in defaults.
 
-The file has `default_profile`, a `defaults` block, and a `profiles` map. Each profile overlays `defaults`, which overlay the built-in values. The sections you usually set are `llm`, `fast`, `database`, `rag`, `ui`, and `agent`. The file also has `memory`, `context`, `language`, `safety`, `router`, `tools`, `store`, and `stats`. `/config show` prints the resolved profile and masks a password in `database.url`. `/config path` prints the path. `/config validate` checks it.
+The file has `default_profile`, a `defaults` block, and a `profiles` map. Each profile overlays `defaults`, which overlay the built-in values. `/config show` prints the resolved profile and masks a password in `database.url`. `/config path` prints the path. `/config validate` checks it.
 
 `--profile NAME` selects the profile. If that flag is empty, `KONSOLAI_PROFILE` is used, then `default_profile`, then the built-in name `default`.
 
-These variables override fields after the profile is chosen. Set them only when you want the override:
+These variables override fields after the profile is chosen. A copy with generic values is [.env.example](.env.example). Put a database password in `~/.pgpass`, not in the URL. Set a variable only when you want the override:
 
 | Variable | Field |
 | --- | --- |
@@ -204,6 +212,11 @@ The `name` cell is `Command.DisplayNames`. The `args` cell lists `Arg.Name`; opt
 | /facts | | List remembered facts |
 | /forget | scope id | Delete a fact |
 | /prune | | Prune old sessions now |
+| /stats | [window] | Show calls, tokens, and latency |
+| /doctor | | Check config, endpoints, database, and local tools |
+| /save | [file] | Write the last answer to a Markdown file |
+| /pdf | [file] | Render the last answer to a PDF |
+| /explain | | Explain the last failed shell command (set PROMPT_COMMAND="history -a") |
 
 ## Development
 
@@ -215,7 +228,7 @@ Tests that define behavior:
 
 - Welcome goldens: 150 files in `internal/welcome/testdata`, checked by `TestRenderGoldens`.
 - PTY: `internal/repl/readline_pty_test.go`, `internal/repl/theme_pty_test.go`, `cmd/konsolai/e2e_slash_pty_test.go`. UI checks use a real PTY, not a pipe.
-- Store tests read `KONSOLAI_TEST_DATABASE_URL`. `scripts/test-db.sh up` starts the throwaway container `konsolai-pg-test` (image `pgvector/pgvector:pg17-trixie`, port 55433, database `konsolai_test`). `scripts/test-db.sh down` removes it. Do not start, stop, or remove the container `konsolai-pg` (port 55432).
+- Store tests read `KONSOLAI_TEST_DATABASE_URL`. `scripts/test-db.sh up` starts the throwaway test database and `scripts/test-db.sh down` removes it. Never touch the developer's own database container.
 
 Commits go to `dev` only. One commit per file. A split of one file into siblings may be one commit, so that every commit builds. The message is `[TYPE|SIZE] Title` in the imperative, title at most 72 characters. TYPE is `ADD`, `UPDATE`, `FIX`, `DELETE`, `MOVE`, or `REFACTOR`. SIZE is `MINOR` (under 20 lines), `MEDIUM` (20–100), or `MAJOR` (over 100, or a public API or behavior change).
 

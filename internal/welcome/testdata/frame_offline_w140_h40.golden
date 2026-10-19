@@ -1,5 +1,5 @@
 
-╭─ konsolai v0.1.0 ───────────────────────────────────────────────────────────────────────────────────────────────────── ○ fatboy offline ─╮
+╭─ konsolai v0.1.0 ──────────────────────────────────────────────────────────────────────────────────────────────────── ○ gpu-box offline ─╮
 │                                                                                                                                          │
 │   ▀▄     █  ▄▀ ▄▀▀▀▄ █▄  █ ▄▀▀▀▀ ▄▀▀▀▄ █     ▄▀▀▀▄ ▀▀█▀▀ █████  Your terminal agent, on your own models.                                 │
 │     ▀▄   █▄▀   █   █ █ ▀▄█ ▀▄▄▄  █   █ █     █▄▄▄█   █   █████  answer · lookup · act · build                                            │
@@ -8,10 +8,10 @@
 │                                                                                                                                          │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │  MODELS                                       SESSION                                      RECENT                                        │
-│  ○ qwen38.nvfp4  main    :11436 unreachable   dir      ~/proj                              › fix the welcome screen before ... build  5m │
-│  ○ qwen38-fast   fast    :11437 unreachable   branch   dev*                                › lookup theme roles               lookup  2h │
-│  ○ nomic-embed   embed   :8081 unreachable    changed  3                                   › answer a short question          answer  1d │
-│  ○ bge-reranker  rerank  :8082 unreachable    ahead    1                                   › wire the footer meter               act  3w │
+│  ○ main-model    main    :8000 unreachable    dir      ~/projects/demo                     › fix the welcome screen before ... build  5m │
+│  ○ fast-model    fast    :11437 unreachable   branch   main*                               › lookup theme roles               lookup  2h │
+│  ○ embed-model   embed   :8081 unreachable    changed  3                                   › answer a short question          answer  1d │
+│  ○ rerank-model  rerank  :8082 unreachable    ahead    1                                   › wire the footer meter               act  3w │
 │                                               behind   2                                                                                 │
 │                                               build    v0.1.0  ab12cd3                                                                   │
 │                                               memory   412 facts · 2 sessions                                                            │

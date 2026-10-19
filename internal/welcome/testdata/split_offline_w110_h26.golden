@@ -1,14 +1,14 @@
 
-  ▀▄     █  ▄▀ ▄▀▀▀▄ █▄  █ ▄▀▀▀▀ ▄▀▀▀▄ █     ▄▀▀▀▄ ▀▀█▀▀ █████      ╭─ fatboy ────────────────────── 0/4 up ─╮
-    ▀▄   █▄▀   █   █ █ ▀▄█ ▀▄▄▄  █   █ █     █▄▄▄█   █   █████      │ ○ qwen38.nvfp4  main    unreachable    │
-   ▄▀    █ ▀▄  █   █ █   █     █ █   █ █     █   █   █   █████      │ ○ qwen38-fast   fast    unreachable    │
-  ▀      ▀   ▀  ▀▀▀  ▀   ▀ ▀▀▀▀   ▀▀▀  ▀▀▀▀▀ ▀   ▀ ▀▀▀▀▀ ▀▀▀▀▀      │ ○ nomic-embed   embed   unreachable    │
-         your terminal agent, on your own models                    │ ○ bge-reranker  rerank  unreachable    │
+  ▀▄     █  ▄▀ ▄▀▀▀▄ █▄  █ ▄▀▀▀▀ ▄▀▀▀▄ █     ▄▀▀▀▄ ▀▀█▀▀ █████      ╭─ gpu-box ───────────────────── 0/4 up ─╮
+    ▀▄   █▄▀   █   █ █ ▀▄█ ▀▄▄▄  █   █ █     █▄▄▄█   █   █████      │ ○ main-model    main    unreachable    │
+   ▄▀    █ ▀▄  █   █ █   █     █ █   █ █     █   █   █   █████      │ ○ fast-model    fast    unreachable    │
+  ▀      ▀   ▀  ▀▀▀  ▀   ▀ ▀▀▀▀   ▀▀▀  ▀▀▀▀▀ ▀   ▀ ▀▀▀▀▀ ▀▀▀▀▀      │ ○ embed-model   embed   unreachable    │
+         your terminal agent, on your own models                    │ ○ rerank-model  rerank  unreachable    │
                                                                     ╰────────────────────────────────────────╯
 
   ╭─ session                                        ─╮
-  │ dir      ~/proj                                  │
-  │ branch   dev*                                    │
+  │ dir      ~/projects/demo                         │
+  │ branch   main*                                   │
   │ changed  3                                       │
   │ ahead    1                                       │
   │ behind   2                                       │

@@ -7,14 +7,14 @@ import (
 	"os"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/agent"
-	"github.com/siraj/konsolai/internal/clip"
-	"github.com/siraj/konsolai/internal/config"
-	"github.com/siraj/konsolai/internal/embed"
-	"github.com/siraj/konsolai/internal/memory"
-	"github.com/siraj/konsolai/internal/turn"
-	"github.com/siraj/konsolai/internal/ui"
-	"github.com/siraj/konsolai/internal/ui/theme"
+	"github.com/SniksaX/Konsolai/internal/agent"
+	"github.com/SniksaX/Konsolai/internal/clip"
+	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/embed"
+	"github.com/SniksaX/Konsolai/internal/memory"
+	"github.com/SniksaX/Konsolai/internal/turn"
+	"github.com/SniksaX/Konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 )
 
 type Arg struct {
@@ -77,6 +77,7 @@ type Env struct {
 	OnCmd        func() int
 	OnCmdClear   func()
 	OnClear      func()
+	FailedShell  func() (cmd string, exit int, output string, ok bool)
 	Embed        *embed.Client
 	ProjectID    *int64
 	ConfigPath   string
@@ -281,8 +282,8 @@ func Default() *Registry {
 		Command{Name: "output", Usage: "output [n]", Summary: "Reprint the full output of a recent command",
 			Args: []Arg{{Name: "n", Help: "how many lines"}}, Example: "/output", Run: runOutput},
 		Command{Name: "status", Usage: "status", Summary: "Show version, model, database and environment", Example: "/status", Run: runStatus},
-		Command{Name: "config", Usage: "config path|show|init|validate", Summary: "Show or write the YAML config",
-			Args: []Arg{{Name: "action", Help: "path, show, init or validate", Required: true}}, Example: "/config validate", Run: runConfig},
+		Command{Name: "config", Usage: "config path|show|validate|diff|init [--force|--from-current]", Summary: "Show or write the YAML config",
+			Args: []Arg{{Name: "action", Help: "path, show, validate, diff or init", Required: true}}, Example: "/config validate", Run: runConfig},
 		Command{Name: "theme", Usage: "theme [name]", Summary: "List palettes or apply one",
 			Args: []Arg{{Name: "name", Help: "theme name"}}, Example: "/theme glacier", Run: runTheme},
 		Command{Name: "index", Usage: "index [path]|status|clear", Summary: "Index the project for recall",
@@ -296,6 +297,15 @@ func Default() *Registry {
 			Args:    []Arg{{Name: "scope", Help: "user or project", Required: true}, {Name: "id", Help: "fact id", Required: true}},
 			Example: "/forget user 3", Run: runForget},
 		Command{Name: "prune", Usage: "prune", Summary: "Prune old sessions now", Example: "/prune", Run: runPrune},
+		Command{Name: "stats", Usage: "stats [today|week|all]", Summary: "Show calls, tokens, and latency",
+			Args: []Arg{{Name: "window", Help: "today, week, or all"}}, Example: "/stats week", Run: runStats},
+		Command{Name: "doctor", Usage: "doctor", Summary: "Check config, endpoints, database, and local tools", Example: "/doctor", Run: runDoctor},
+		Command{Name: "save", Usage: "save [file] [--force]", Summary: "Write the last answer to a Markdown file",
+			Args: []Arg{{Name: "file", Help: "output path"}}, Example: "/save", Run: runSave},
+		Command{Name: "pdf", Usage: "pdf [file] [--force]", Summary: "Render the last answer to a PDF",
+			Args: []Arg{{Name: "file", Help: "output path"}}, Example: "/pdf", Run: runPDF},
+		Command{Name: "explain", Usage: "explain", Summary: "Explain the last failed shell command (set PROMPT_COMMAND=\"history -a\")",
+			Example: "/explain", Run: runExplain},
 	)
 }
 

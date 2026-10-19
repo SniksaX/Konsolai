@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/siraj/konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 const lineLimit = 60

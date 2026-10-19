@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/siraj/konsolai/internal/llm"
-	"github.com/siraj/konsolai/internal/safety"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/safety"
 )
 
 type ActionKind int
@@ -160,6 +160,24 @@ func (r *Registry) Specs() []llm.ToolSpec {
 func (r *Registry) Get(name string) (Tool, bool) {
 	t, ok := r.byName[name]
 	return t, ok
+}
+
+// Without returns a registry that does not offer the named tool.
+func (r *Registry) Without(name string) *Registry {
+	if r == nil {
+		return nil
+	}
+	var list []Tool
+	byName := make(map[string]Tool, len(r.tools))
+	for _, t := range r.tools {
+		n := t.Spec().Function.Name
+		if n == name {
+			continue
+		}
+		list = append(list, t)
+		byName[n] = t
+	}
+	return &Registry{tools: list, byName: byName}
 }
 
 func (r *Registry) Named(names ...string) *Registry {

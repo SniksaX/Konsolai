@@ -11,8 +11,29 @@ import (
 	"testing"
 	"time"
 
-	"github.com/siraj/konsolai/internal/store"
+	"github.com/SniksaX/Konsolai/internal/store"
 )
+
+func TestGatherListsOnlyConfiguredEndpoints(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer up.Close()
+	data, err := Gather(context.Background(), Input{
+		Endpoint: up.URL + "/v1",
+		Model:    "main-model",
+		CWD:      t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data.Models) != 1 || data.Total != 1 || data.Models[0].Role != "main" {
+		t.Fatalf("models %+v total %d", data.Models, data.Total)
+	}
+	if data.Host == "" {
+		t.Fatal("missing host")
+	}
+}
 
 func TestGatherHonorsProbeDeadline(t *testing.T) {
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -24,7 +45,7 @@ func TestGatherHonorsProbeDeadline(t *testing.T) {
 	start := time.Now()
 	_, err := Gather(context.Background(), Input{
 		Endpoint:    slow.URL + "/v1",
-		Model:       "qwen",
+		Model:       "main-model",
 		ProbeBudget: 80 * time.Millisecond,
 		CWD:         t.TempDir(),
 	})
@@ -65,7 +86,7 @@ func TestGatherProbesDeadlineAndOffline(t *testing.T) {
 	start := time.Now()
 	data, err := Gather(context.Background(), Input{
 		Endpoint:       up.URL + "/v1",
-		Model:          "qwen",
+		Model:          "main-model",
 		FastEndpoint:   slow.URL + "/v1",
 		FastModel:      "mini",
 		EmbedEndpoint:  refusedURL,
@@ -90,7 +111,7 @@ func TestGatherProbesDeadlineAndOffline(t *testing.T) {
 	for _, m := range data.Models {
 		byRole[m.Role] = m
 	}
-	if byRole["main"].Status != StatusUp || byRole["main"].Name != "qwen" {
+	if byRole["main"].Status != StatusUp || byRole["main"].Name != "main-model" {
 		t.Fatalf("main %+v", byRole["main"])
 	}
 	if !strings.HasSuffix(byRole["main"].Stat, "ms") && !strings.Contains(byRole["main"].Stat, "tokens/s") {

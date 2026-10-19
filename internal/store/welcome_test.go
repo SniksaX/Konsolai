@@ -20,13 +20,13 @@ func TestWelcomeMemoryAndRecent(t *testing.T) {
 		t.Fatal(err)
 	}
 	localNew, err := s.CreateSession(ctx, NewSession{
-		Profile: "home", ProjectID: &pid, CWD: "/tmp/welcome", Mode: "answer", Model: "qwen", Title: "local new",
+		Profile: "home", ProjectID: &pid, CWD: "/tmp/welcome", Mode: "answer", Model: "main-model", Title: "local new",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	localOld, err := s.CreateSession(ctx, NewSession{
-		Profile: "home", CWD: "/tmp/welcome", Mode: "answer", Model: "qwen", Title: "",
+		Profile: "home", CWD: "/tmp/welcome", Mode: "answer", Model: "main-model", Title: "",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +35,7 @@ func TestWelcomeMemoryAndRecent(t *testing.T) {
 		t.Fatal(err)
 	}
 	other, err := s.CreateSession(ctx, NewSession{
-		Profile: "home", CWD: "/tmp/other", Mode: "act", Model: "qwen", Title: "elsewhere",
+		Profile: "home", CWD: "/tmp/other", Mode: "act", Model: "main-model", Title: "elsewhere",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestWelcomeMemoryAndRecent(t *testing.T) {
 	stamp(other, now.Add(-time.Hour))
 	stamp(localNew, now.Add(-time.Minute))
 	if err := s.RecordTurnStat(ctx, TurnStat{
-		SessionID: localNew, Intent: "lookup", Model: "qwen", Endpoint: "http://fatboy/v1",
+		SessionID: localNew, Intent: "lookup", Model: "main-model", Endpoint: "http://gpu-box/v1",
 		PromptTokens: 1, CompletionTokens: 1, ModelMS: 10,
 	}); err != nil {
 		t.Fatal(err)

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/siraj/konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/config"
 )
 
 func runConfig(ctx context.Context, env *Env, args []string) int {
@@ -34,12 +34,25 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 		return 0
 	case "init":
 		force := false
+		fromCurrent := false
 		for _, a := range args[1:] {
-			if a == "--force" {
+			switch a {
+			case "--force":
 				force = true
+			case "--from-current":
+				fromCurrent = true
+			default:
+				fmt.Fprintln(env.errw(), "usage: /config path|show|validate|diff|init [--force|--from-current]")
+				return 2
 			}
 		}
-		if err := config.WriteInit(path, force); err != nil {
+		var err error
+		if fromCurrent {
+			err = config.WriteCurrent(path, force)
+		} else {
+			err = config.WriteInit(path, force)
+		}
+		if err != nil {
 			fmt.Fprintln(env.errw(), "konsolai:", err)
 			return 1
 		}
@@ -61,8 +74,20 @@ func runConfig(ctx context.Context, env *Env, args []string) int {
 		}
 		fmt.Fprintln(env.out(), "ok")
 		return 0
+	case "diff":
+		name := ""
+		if env != nil {
+			name = env.Profile.Name
+		}
+		text, err := config.DiffText(path, name)
+		if err != nil {
+			fmt.Fprintln(env.errw(), err)
+			return 1
+		}
+		fmt.Fprint(env.out(), text)
+		return 0
 	default:
-		fmt.Fprintln(env.errw(), "usage: /config path|show|init [--force]|validate")
+		fmt.Fprintln(env.errw(), "usage: /config path|show|validate|diff|init [--force|--from-current]")
 		return 2
 	}
 }
