@@ -410,7 +410,7 @@ func (s *welcomeState) refresh() {
 	}
 }
 
-func bindWelcome(env *commands.Env, st *welcomeState, rd LineReader) {
+func bindWelcome(st *welcomeState, rd LineReader) {
 	if st == nil {
 		return
 	}
@@ -423,8 +423,4 @@ func bindWelcome(env *commands.Env, st *welcomeState, rd LineReader) {
 	st.mu.Lock()
 	st.onPlaceholder = setPH
 	st.mu.Unlock()
-	if env == nil {
-		return
-	}
-	commands.SetWelcomeRedraw(env, func() { st.redraw(env.Out) })
 }

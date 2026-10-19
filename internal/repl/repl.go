@@ -188,7 +188,7 @@ func Run(ctx context.Context, cfg Config) int {
 	if s, ok := rd.(interface{ SetMenuEnv(*commands.Env) }); ok {
 		s.SetMenuEnv(env)
 	}
-	bindWelcome(env, welcome, rd)
+	bindWelcome(welcome, rd)
 	if kr, ok := rd.(interface{ ReadKey() (byte, error) }); ok {
 		ui.SetKeyReader(kr.ReadKey)
 		defer ui.SetKeyReader(nil)

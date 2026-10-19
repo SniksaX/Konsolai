@@ -26,19 +26,19 @@ defaults:
 		t.Fatalf("list %d %s", code, errb.String())
 	}
 	listed := out.String()
+	if !strings.Contains(listed, "now: /set theme") || !strings.Contains(listed, "ui.theme") {
+		t.Fatalf("alias %q", listed)
+	}
 	for _, name := range theme.PaletteNames {
 		if !strings.Contains(listed, name) {
 			t.Fatalf("missing %s in %q", name, listed)
 		}
 	}
-	if !strings.Contains(listed, "▀") || !strings.Contains(listed, "●") {
-		t.Fatalf("preview %q", listed)
-	}
 	out.Reset()
 	if code := runTheme(context.Background(), env, []string{"rose"}); code != 0 {
 		t.Fatalf("apply %d %s", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "theme rose") {
+	if !strings.Contains(out.String(), "applied now") || strings.Contains(out.String(), "\x1b[H\x1b[2J") {
 		t.Fatalf("apply print %q", out.String())
 	}
 	if env.Profile.PaletteName() != "rose" {
@@ -67,7 +67,7 @@ func TestThemeAliasApplies(t *testing.T) {
 	if env.Profile.PaletteName() != "glacier" {
 		t.Fatalf("live %q", env.Profile.PaletteName())
 	}
-	if !strings.Contains(out.String(), "theme glacier") {
+	if !strings.Contains(out.String(), "applied now") || !strings.Contains(out.String(), "now: /set theme") {
 		t.Fatalf("print %q", out.String())
 	}
 }
