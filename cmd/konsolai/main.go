@@ -33,7 +33,7 @@ var _ agent.Confirmer = (*ui.Prompter)(nil)
 var version = "dev"
 
 const (
-	usageText = `usage: konsolai [--yes] [--profile NAME] [--intent answer|lookup|act|build] [--trace] [--plain] [--version] [new] ["<request>"]
+	usageText = `usage: konsolai [--yes] [--profile NAME] [--config FILE] [--intent answer|lookup|act|build] [--trace] [--plain] [--version] [new] ["<request>"]
        konsolai /<command> [args]`
 
 	noMemory = "memory is not configured (see ~/.config/konsolai/config.yaml)"
@@ -64,6 +64,7 @@ type invocation struct {
 	FactID    int64
 	Fact      string
 	Endpoint  string
+	Config    string
 	Version   bool
 	Slash     string
 	SlashArgs [8]string
@@ -80,6 +81,7 @@ func parseArgs(args []string) (invocation, error) {
 	fs.SetOutput(io.Discard)
 	yes := fs.Bool("yes", false, "auto-approve non-denylisted actions")
 	profile := fs.String("profile", "", "config profile")
+	configPath := fs.String("config", "", "config file")
 	intent := fs.String("intent", "", "skip the router")
 	trace := fs.Bool("trace", false, "print per-call timing and tokens")
 	plain := fs.Bool("plain", false, "disable styled output")
@@ -92,7 +94,7 @@ func parseArgs(args []string) (invocation, error) {
 		return invocation{}, errRequest
 	}
 	rest := fs.Args()
-	inv := invocation{Yes: *yes, Profile: *profile, Intent: *intent, Trace: *trace, Plain: *plain, Version: *showVer}
+	inv := invocation{Yes: *yes, Profile: *profile, Intent: *intent, Trace: *trace, Plain: *plain, Version: *showVer, Config: *configPath}
 	if len(rest) == 0 {
 		return inv, nil
 	}
@@ -198,7 +200,8 @@ func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 	defer stop()
 
-	file, err := config.Load("")
+	cfgPath := config.ResolveConfigPath(inv.Config)
+	file, err := config.Load(cfgPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "konsolai:", err)
 		return 1
@@ -213,11 +216,11 @@ func run() int {
 	}
 	ui.ApplyUIOpts(prof.PaletteName(), prof.Appearance(), inv.Plain, prof.CodeHighlightOn(), prof.StripEmojiOn())
 	theme.SetCursorColor(prof.CursorColorOn())
-	inv.Endpoint = prof.LLM.Endpoint
+	inv.Endpoint = prof.MainEndpoint()
 
 	needMem := inv.Cmd == cmdUndo || inv.Cmd == cmdFacts || inv.Cmd == cmdPrune || inv.Cmd == cmdRemember || inv.Cmd == cmdForget
 	var st *store.Store
-	if prof.Database.URL == "" {
+	if prof.Database.URL == "" || !prof.MemoryOn() {
 		if needMem {
 			fmt.Fprintln(os.Stderr, noMemory)
 			return 1
@@ -257,14 +260,22 @@ func run() int {
 	}
 	projectID := upsertProject(ctx, mem, cwd)
 
-	client := llm.New(prof.LLM.Endpoint, prof.LLM.Model)
+	client := llm.New(prof.MainEndpoint(), prof.MainModelID())
 	client.SetIdleTimeout(time.Duration(prof.LLM.IdleTimeoutSeconds) * time.Second)
-	client.SetThinkKwargs(prof.LLM.ThinkingKwargs)
+	client.SetThinkKwargs(prof.MainThinking())
+	if prof.Main().Context > 0 {
+		client.PinContext(prof.Main().Context)
+	}
+	client.SetRetry(prof.LLM.Retries, time.Duration(prof.LLM.RetryWaitMS)*time.Millisecond)
 	var fastClient *llm.Client
 	if prof.FastOn() {
-		fastClient = llm.NewFast(prof.Fast.Endpoint, prof.Fast.Model)
+		fastClient = llm.NewFast(prof.FastEndpoint(), prof.FastModelID())
 		fastClient.SetIdleTimeout(time.Duration(prof.LLM.IdleTimeoutSeconds) * time.Second)
-		fastClient.SetThinkKwargs(prof.Fast.ThinkingKwargs)
+		fastClient.SetThinkKwargs(prof.FastThinking())
+		if fm, ok := prof.FastModel(); ok && fm.Context > 0 {
+			fastClient.PinContext(fm.Context)
+		}
+		fastClient.SetRetry(prof.LLM.Retries, time.Duration(prof.LLM.RetryWaitMS)*time.Millisecond)
 	}
 	runner := &turn.Runner{
 		Profile:    prof,
@@ -282,7 +293,7 @@ func run() int {
 		if !st.RAGAvailable(ctx) {
 			fmt.Fprintln(os.Stderr, ui.Current().Warn("rag unavailable"))
 		} else {
-			emb = embed.New(prof.RAG.EmbedEndpoint, prof.RAG.RerankEndpoint)
+			emb = embed.New(prof.EmbedURL(), prof.RerankURL())
 			emb.SetBatch(prof.RAG.EmbedBatch)
 			ing := rag.New(st, emb, prof.Name)
 			ing.SetTune(rag.TuneFrom(prof))
@@ -306,7 +317,7 @@ func run() int {
 	if isRepl {
 		env := commandEnv(runner, mem, prof, cwd, projectID, inv, emb)
 		env.InRepl = true
-		model := prof.LLM.Model
+		model := prof.MainModelID()
 		if id, err := client.ResolveModel(ctx); err == nil && id != "" {
 			model = id
 		}
@@ -356,7 +367,7 @@ func commandEnv(runner *turn.Runner, mem *memory.Guard, prof config.Profile, cwd
 		Plain:      inv.Plain,
 		Embed:      emb,
 		ProjectID:  projectID,
-		ConfigPath: config.DefaultPath(),
+		ConfigPath: config.ResolveConfigPath(inv.Config),
 		Undo: func(ctx context.Context) int {
 			return runUndo(ctx, mem, projectID, cwd, inv.Yes)
 		},
@@ -438,7 +449,7 @@ func sanitizeAnswerHistory(hist []llm.Message) []llm.Message {
 }
 
 func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, think, plain bool) (string, llm.Usage, error) {
-	return turn.StreamAnswer(ctx, client, msgs, think, plain, os.Stdout, os.Stderr)
+	return turn.StreamAnswer(ctx, client, msgs, think, plain, os.Stdout, os.Stderr, 0, 0)
 }
 
 func modelErrorLine(endpoint string, err error, trace bool) string {
