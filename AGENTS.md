@@ -93,7 +93,7 @@ Accessors are the only `<= 0` means default logic (`nonzero` and the ratio acces
 ## Tests that define behavior
 
 - `internal/welcome/testdata/*.golden` (150) via `TestRenderGoldens`. `TestFrameBelow120MatchesSplit`. `TestWideSplitKeepsRecentBesideSession`.
-- PTY: `internal/repl/readline_pty_test.go` (placeholder not accepted, Ctrl-L, slash menu), `internal/repl/theme_pty_test.go` (Esc leaves the theme, Enter redraws), `cmd/konsolai/e2e_slash_pty_test.go`.
+- PTY: `internal/repl/readline_pty_test.go` (placeholder not accepted, Ctrl-L, slash menu), `internal/repl/theme_pty_test.go` (Esc leaves the theme, Enter applies it in place), `cmd/konsolai/e2e_slash_pty_test.go`.
 - `turn_stats` tests need the test DB (`internal/store/stats_test.go`).
 - Plan: `internal/tools/plan_test.go` (command-only plans, `export_doc` for PDF). `internal/agent/agent_test.go` (`TestIdenticalPlanRejectStops`, `TestShellStillRequiresPlan`).
 - Config: `TestConfigKeysComplete` in `internal/config/keys_test.go`.
@@ -104,7 +104,8 @@ Work lands on `dev`. Config keys are the single table in `internal/config/keys.g
 
 - REPL welcome: `split`, `frame`, and `minimal`. Paint once after probes. Height from the wrapped TTY.
 - `turn_stats`: best-effort token and timing rows. Welcome rates use `ModelRate`.
-- `/theme`: picker. Esc does not change the theme or clear the screen. Enter redraws the cached welcome.
+- `/theme`: picker. Esc does not change the theme or clear the screen. Enter applies the palette in place and does not redraw the welcome.
+- Frame side text removed; theme applies in place; `/set default <name|all>` restores `config.default.yaml`.
 - Placeholder: inline suggestion only. Enter does not submit it.
 - Footer context meter: last prompt tokens against the window (`ctx_warn_pct`, `ctx_hot_pct`, `ctx_cells`).
 - `propose_plan`: a command-only plan may omit `files` when the plan does not write or edit files.
