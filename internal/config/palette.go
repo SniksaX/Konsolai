@@ -190,14 +190,7 @@ func encodeYAML(path string, doc *yaml.Node) error {
 	if err := enc.Close(); err != nil {
 		return fmt.Errorf("config: encode %s: %w", path, err)
 	}
-	mode := os.FileMode(0600)
-	if fi, err := os.Stat(path); err == nil {
-		mode = fi.Mode().Perm()
-	}
-	if err := os.WriteFile(path, buf.Bytes(), mode); err != nil {
-		return fmt.Errorf("config: write %s: %w", path, err)
-	}
-	return nil
+	return WriteAtomic(path, buf.Bytes())
 }
 
 func mappingRoot(doc *yaml.Node) *yaml.Node {
