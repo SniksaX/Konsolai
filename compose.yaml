@@ -1,0 +1,69 @@
+# Compose project "konsolai".
+# `docker compose up -d` starts only the database. The CLI is profile "app"
+# and the embedding server is profile "rag".
+# The database password comes from KONSOLAI_DB_PASSWORD. It is never stored here.
+# This project uses its own volume and published port. It does not use the
+# developer's own database.
+
+name: konsolai
+
+services:
+  db:
+    image: pgvector/pgvector:pg17-trixie@sha256:7a7e9f22015b67edb4bef5c59daeebcd7e74bfa570df6ce60ae01237c8648a84
+    environment:
+      POSTGRES_DB: konsolai
+      POSTGRES_PASSWORD: ${KONSOLAI_DB_PASSWORD:?}
+    ports:
+      - "${KONSOLAI_DB_PORT:-55434}:5432"
+    volumes:
+      - konsolai-compose-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d konsolai"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  konsolai:
+    profiles: ["app"]
+    image: ${KONSOLAI_IMAGE:-konsolai:dev}
+    build:
+      context: .
+      target: ${KONSOLAI_TARGET:-base}
+      args:
+        VERSION: ${KONSOLAI_VERSION:-docker}
+    stdin_open: true
+    tty: true
+    working_dir: /work
+    volumes:
+      - ${KONSOLAI_WORKDIR:-.}:/work
+      - ${KONSOLAI_CONFIG_FILE:-./config.yaml}:/config/config.yaml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      KONSOLAI_CONFIG: /config/config.yaml
+      # Password is the same KONSOLAI_DB_PASSWORD value. sslmode=disable matches a local compose network.
+      KONSOLAI_DATABASE_URL: postgres://postgres:${KONSOLAI_DB_PASSWORD:?}@db:5432/konsolai?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+    # host.docker.internal (set by extra_hosts above) is how the container
+    # reaches a model server on the host. The alternative is host networking,
+    # which shares the host network namespace. Do not enable both.
+    # With host networking the database is the published host port, not the name db.
+    # network_mode: host
+
+  embed:
+    profiles: ["rag"]
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
+    command: ["--model-id", "${KONSOLAI_EMBED_MODEL:-BAAI/bge-base-en-v1.5}"]
+    ports:
+      - "${KONSOLAI_EMBED_PORT:-8080}:80"
+    volumes:
+      - konsolai-compose-embed:/data
+
+volumes:
+  konsolai-compose-db:
+    name: ${KONSOLAI_DB_VOLUME:-konsolai-compose-db}
+  konsolai-compose-embed:
+    name: ${KONSOLAI_EMBED_VOLUME:-konsolai-compose-embed}
