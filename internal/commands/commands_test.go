@@ -24,7 +24,7 @@ func testEnv(t *testing.T) (*Env, *bytes.Buffer, *bytes.Buffer) {
 	var out, errb bytes.Buffer
 	var copied string
 	env := &Env{
-		Profile: config.Profile{Name: "default", LLM: config.LLM{Model: "m", Endpoint: "http://127.0.0.1:9/v1"}},
+		Profile: config.WithMain("http://127.0.0.1:9/v1", "m"),
 		Out:     &out,
 		Err:     &errb,
 		Cwd:     t.TempDir(),
@@ -317,8 +317,7 @@ func TestStatusWindowFromModels(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	env, out, _ := testEnv(t)
-	env.Profile.LLM.Endpoint = srv.URL + "/v1"
-	env.Profile.LLM.Model = "main-model"
+	env.Profile.SetMain(srv.URL+"/v1", "main-model", false)
 	client := llm.New(srv.URL+"/v1", "main-model")
 	if client.ContextWindow() != 32768 {
 		t.Fatalf("fallback %d", client.ContextWindow())
@@ -565,7 +564,8 @@ func TestConfigPathAndShowMask(t *testing.T) {
 	if code := runConfig(context.Background(), env, []string{"path"}); code != 0 {
 		t.Fatalf("path %d %s", code, errb.String())
 	}
-	if strings.TrimSpace(out.String()) != env.ConfigPath {
+	wantPath := env.ConfigPath + "\n" + env.ConfigPath + "\n"
+	if out.String() != wantPath {
 		t.Fatalf("path %q", out.String())
 	}
 	out.Reset()
