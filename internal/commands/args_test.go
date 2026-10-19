@@ -73,6 +73,37 @@ func TestSetTreeMatchesFriendlyNames(t *testing.T) {
 	}
 }
 
+func TestSetDefaultInTree(t *testing.T) {
+	env := setEnvTree(t)
+	tree := Default().Lookup("set").Tree(env)
+	ch, ok := findChoice(tree, "default")
+	if !ok {
+		t.Fatal("missing default")
+	}
+	if ch.Terminal || len(ch.Next) == 0 {
+		t.Fatal("default should open a level")
+	}
+	all, ok := findChoice(ch.Next, "all")
+	if !ok || !all.Terminal {
+		t.Fatal("missing terminal all")
+	}
+	theme, ok := findChoice(ch.Next, "theme")
+	if !ok || !theme.Terminal {
+		t.Fatal("missing terminal theme")
+	}
+	if _, ok := findChoice(ch.Next, "steps"); !ok {
+		t.Fatal("missing steps")
+	}
+	vals := config.CompleteSet([]string{"default"}, "", true)
+	if len(vals) == 0 || vals[0] != "all" {
+		t.Fatalf("complete %v", vals)
+	}
+	joined := strings.Join(vals, ",")
+	if !strings.Contains(joined, "theme") || !strings.Contains(joined, "steps") {
+		t.Fatalf("complete %v", vals)
+	}
+}
+
 func TestSetTreeEnumsMatchAllowed(t *testing.T) {
 	env := setEnvTree(t)
 	tree := Default().Lookup("set").Tree(env)
