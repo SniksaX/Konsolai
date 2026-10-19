@@ -64,13 +64,13 @@ konsolai /set steps 20
 konsolai /set steps default
 ```
 
-`/set` with no arguments lists every setting, grouped by section. On a TTY inside the REPL it is a menu (↑/↓, Enter, Esc, `?`). `/set <name>` shows the value, its source, the default, the allowed values, and the doc. `/set <name> <value>` checks the value, writes the active config with comments and order kept, and prints `applied now`, `from the next turn`, or `after restart`. `/set <name> default` removes the key. `--session` keeps the change in this REPL and does not write the file. A full key path works (`/set agent.max_steps.act 20`). A unique suffix works. An ambiguous name lists the candidates. Tab completes names, then arguments, then allowed values.
+`/set` with no arguments lists every setting, grouped by section. On a TTY inside the REPL it is a menu (↑/↓, Enter, Esc, `?`). `/set <name>` shows the value, its source, the default, the allowed values, and the doc. `/set <name> <value>` checks the value, writes the active config with comments and order kept, and prints `applied now`, `from the next turn`, or `after restart`. `/set <name> default` and `/set default <name>` remove that key. `/set default all` rewrites the active file from the factory document. `--session` keeps the change in this REPL and does not write the file. A full key path works (`/set agent.max_steps.act 20`). A unique suffix works. An ambiguous name lists the candidates. Tab completes names, then arguments, then allowed values.
 
 Secrets are refused. A database password belongs in `~/.pgpass` or `KONSOLAI_DATABASE_URL`, not in the file. If the shell already sets the key's environment variable, the file is still written and `/set` warns that the variable overrides it.
 
 `/theme`, `/think`, `/yes`, `/trace`, and `/models` remain for one release. Each prints `now: /set ...`. `/think`, `/yes`, and `/trace` stay session-only.
 
-The active file is `--config`, then `KONSOLAI_CONFIG`, then `$XDG_CONFIG_HOME/konsolai/config.yaml` or `~/.config/konsolai/config.yaml`. A checkout may point that path at `config.yaml` in the repo (mode `0600`, gitignored). `/config path` prints the configured path and the path after symlinks are resolved. Writes go to the real file. [config.example.yaml](config.example.yaml) is the commented default, generated from the key table. [.env.example](.env.example) lists the environment overrides.
+The active file is `--config`, then `KONSOLAI_CONFIG`, then `$XDG_CONFIG_HOME/konsolai/config.yaml` or `~/.config/konsolai/config.yaml`. A checkout may point that path at `config.yaml` in the repo (mode `0600`, gitignored). `/config path` prints the configured path and the path after symlinks are resolved. Writes go to the real file. [config.example.yaml](config.example.yaml) and [config.default.yaml](config.default.yaml) are the commented factory defaults, generated from the key table. `/set default all` writes that document. [.env.example](.env.example) lists the environment overrides.
 
 `/config init` writes the defaults, mode `0600`, and refuses to replace an existing file without `--force`. `/config init --from-current` writes the effective config. `/config diff` lists keys that differ from the defaults. `/config show` masks a password in `database.url`. `/config validate` checks the file.
 
@@ -162,7 +162,7 @@ The request is one argument. `new` closes resumable sessions so the next request
 
 A paste of at least `ui.paste_chip_lines` lines (default 11) or `ui.paste_chip_chars` characters (default 1000) is shown as `[pasted #N · L lines]` and expanded before the turn.
 
-`/theme` with no argument opens a picker on a TTY. Esc leaves it with the current theme. Enter applies the highlighted palette and redraws the welcome. `/theme glacier` applies that palette and writes it to the config file. Names: `amber`, `glacier`, `nebula`, `jade`, `rose`, `mono`.
+`/theme` with no argument opens a picker on a TTY. Esc leaves it with the current theme. Enter saves the highlighted palette, erases the picker, and leaves the screen in place. `/theme glacier` is `/set theme glacier`: it writes the palette and prints `applied now`. Names: `amber`, `glacier`, `nebula`, `jade`, `rose`, `mono`.
 
 These commands exist only in the REPL: `exit`, `clear`, `cd`, `cmd`, `yes`, `trace`, `think`, `model`, `compact`.
 
