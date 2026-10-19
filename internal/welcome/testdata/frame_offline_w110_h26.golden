@@ -1,0 +1,20 @@
+
+  ▀▄     █  ▄▀ ▄▀▀▀▄ █▄  █ ▄▀▀▀▀ ▄▀▀▀▄ █     ▄▀▀▀▄ ▀▀█▀▀ █████      ╭─ gpu-box ───────────────────── 0/4 up ─╮
+    ▀▄   █▄▀   █   █ █ ▀▄█ ▀▄▄▄  █   █ █     █▄▄▄█   █   █████      │ ○ main-model    main    unreachable    │
+   ▄▀    █ ▀▄  █   █ █   █     █ █   █ █     █   █   █   █████      │ ○ fast-model    fast    unreachable    │
+  ▀      ▀   ▀  ▀▀▀  ▀   ▀ ▀▀▀▀   ▀▀▀  ▀▀▀▀▀ ▀   ▀ ▀▀▀▀▀ ▀▀▀▀▀      │ ○ embed-model   embed   unreachable    │
+         your terminal agent, on your own models                    │ ○ rerank-model  rerank  unreachable    │
+                                                                    ╰────────────────────────────────────────╯
+
+  ╭─ session ────────────────────────────────────────╮
+  │ dir      ~/projects/demo                         │
+  │ branch   main*                                   │
+  │ changed  3                                       │
+  │ ahead    1                                       │
+  │ behind   2                                       │
+  │ build    v0.1.0  ab12cd3                         │
+  │ memory   412 facts · 2 sessions                  │
+  ╰──────────────────────────────────────────────────╯
+
+    / commands   ! shell   @ files   ? help                             tip /undo reverts the last file change
+

@@ -1,0 +1,20 @@
+
+  ▀▄     █  ▄▀ ▄▀▀▀▄ █▄  █ ▄▀▀▀▀ ▄▀▀▀▄ █     ▄▀▀▀▄ ▀▀█▀▀ █████      ╭─ gpu-box ─────────────────────────────────────────────────── 4/4 up ─╮
+    ▀▄   █▄▀   █   █ █ ▀▄█ ▀▄▄▄  █   █ █     █▄▄▄█   █   █████      │ ● main-model    main    84 tokens/s                                  │
+   ▄▀    █ ▀▄  █   █ █   █     █ █   █ █     █   █   █   █████      │ ● fast-model    fast    120 tokens/s                                 │
+  ▀      ▀   ▀  ▀▀▀  ▀   ▀ ▀▀▀▀   ▀▀▀  ▀▀▀▀▀ ▀   ▀ ▀▀▀▀▀ ▀▀▀▀▀      │ ● embed-model   embed   40ms                                         │
+         your terminal agent, on your own models                    │ ● rerank-model  rerank  18ms                                         │
+                                                                    ╰──────────────────────────────────────────────────────────────────────╯
+
+  ╭─ session ───────────────────────────────────────────────────────╮  ╭─ recent ────────────────────────────────────────────── /resume ─╮
+  │ dir      ~/projects/demo                                        │  │ no sessions yet                                                 │
+  │ branch   main*                                                  │  ╰─────────────────────────────────────────────────────────────────╯
+  │ changed  3                                                      │
+  │ ahead    1                                                      │
+  │ behind   2                                                      │
+  │ build    v0.1.0  ab12cd3                                        │
+  │ memory   memory offline                                         │
+  ╰─────────────────────────────────────────────────────────────────╯
+
+    / commands   ! shell   @ files   ? help                                                           tip /undo reverts the last file change
+

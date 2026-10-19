@@ -1,0 +1,20 @@
+
+  ▀▄     █  ▄▀ ▄▀▀▀▄ █▄  █ ▄▀▀▀▀ ▄▀▀▀▄ █     ▄▀▀▀▄ ▀▀█▀▀ █████      ╭─ gpu-box ─────────────────────────────────────────────────── 4/4 up ─╮
+    ▀▄   █▄▀   █   █ █ ▀▄█ ▀▄▄▄  █   █ █     █▄▄▄█   █   █████      │ ● main-model    main    84 tokens/s                                  │
+   ▄▀    █ ▀▄  █   █ █   █     █ █   █ █     █   █   █   █████      │ ● fast-model    fast    120 tokens/s                                 │
+  ▀      ▀   ▀  ▀▀▀  ▀   ▀ ▀▀▀▀   ▀▀▀  ▀▀▀▀▀ ▀   ▀ ▀▀▀▀▀ ▀▀▀▀▀      │ ● embed-model   embed   40ms                                         │
+         your terminal agent, on your own models                    │ ● rerank-model  rerank  18ms                                         │
+                                                                    ╰──────────────────────────────────────────────────────────────────────╯
+
+  ╭─ session ───────────────────────────────────────────────────────╮  ╭─ recent ────────────────────────────────────────────── /resume ─╮
+  │ dir      ~/projects/demo                                        │  │ › fix the welcome screen before theme preview         build  5m │
+  │ branch   main*                                                  │  │ › lookup theme roles                                 lookup  2h │
+  │ changed  3                                                      │  │ › answer a short question                            answer  1d │
+  │ ahead    1                                                      │  │ › wire the footer meter                                 act  3w │
+  │ behind   2                                                      │  ╰─────────────────────────────────────────────────────────────────╯
+  │ build    v0.1.0  ab12cd3                                        │
+  │ memory   412 facts · 2 sessions                                 │
+  ╰─────────────────────────────────────────────────────────────────╯
+
+    / commands   ! shell   @ files   ? help                                                           tip /undo reverts the last file change
+
