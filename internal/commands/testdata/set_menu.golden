@@ -1,0 +1,125 @@
+ui
+  theme                        amber
+  appearance                   auto
+  welcome                      split
+roles
+  roles.main                   default
+  roles.fast                   ""
+  roles.embed                  ""
+  roles.rerank                 ""
+llm
+  llm.idle_timeout_seconds     120
+  llm.max_tokens.answer        4096
+  llm.max_tokens.lookup        4096
+  llm.max_tokens.act           4096
+  llm.max_tokens.build         12288
+  llm.temperature.answer       0.3
+  llm.temperature.lookup       0.2
+  llm.temperature.act          0.2
+  llm.temperature.build        0.3
+  llm.top_p                    0
+  llm.retries                  1
+  llm.retry_wait_ms            2000
+fast
+  fast.context_guard_ratio     0.6
+database
+  database.url                 ""
+memory
+  memory.enabled               true
+  memory.session_idle_minutes  30
+  memory.retention_days        90
+  memory.compact_threshold     0.7
+  memory.isolated_timeout_ms   2000
+context
+  context.elide_trigger        0.6
+  context.elide_target         0.4
+agent
+  agent.max_steps.lookup       10
+  agent.max_steps.act          15
+  agent.max_steps.build        60
+  agent.explore_budget.lookup  6
+  agent.explore_budget.lookup_analysis 10
+  agent.explore_budget.act     6
+  agent.explore_budget.build   8
+  agent.explore_budget.build_docs 16
+  agent.explore_budget.build_analysis 12
+  agent.build_thinking         plan_step
+  agent.think_mode             auto
+  agent.think_answer           auto
+  agent.think_lookup           auto
+  agent.think_act              plan_step
+  agent.approve                ask
+  agent.plan.act_low           false
+  agent.plan.act_high          true
+  agent.plan.build             true
+  agent.identical_rejects      2
+rag
+  rag.enabled                  false
+  rag.embed_batch              32
+  rag.chunk.turn_tokens        1200
+  rag.chunk.web_tokens         600
+  rag.chunk.web_overlap_tokens 80
+  rag.chunk.code_window_lines  60
+  rag.chunk.code_overlap_lines 10
+  rag.chunk.go_max_decl_lines  200
+  rag.chunk.go_split_window_lines 120
+  rag.chunk.go_split_overlap_lines 20
+  rag.search.vector_top        30
+  rag.search.text_top          30
+  rag.search.rrf_k             60
+  rag.search.rerank_top        20
+  rag.search.k                 6
+  rag.search.rerank_threshold  0.1
+  rag.index.max_file_kb        512
+  rag.index.confirm_over_minutes 5
+ui
+  ui.display_lines             60
+  ui.paste_chip_lines          11
+  ui.paste_chip_chars          1000
+  ui.output_keep_kb            256
+  ui.cursor_color              true
+  ui.banner                    true
+  ui.code_highlight            true
+  ui.clear_on_start            true
+  ui.strip_emoji               true
+  ui.probe_deadline_ms         400
+  ui.probe_timeout_ms          300
+  ui.git_query_ms              200
+  ui.memory_query_ms           200
+  ui.startup_cap_ms            500
+  ui.welcome_cache_seconds     60
+  ui.model_rate_calls          20
+  ui.model_slow_ms             1000
+  ui.ctx_warn_pct              60
+  ui.trace                     false
+  ui.stats                     true
+  ui.badge                     true
+  ui.ctx_hot_pct               85
+  ui.ctx_cells                 8
+  ui.ctx_narrow_cols           90
+  ui.layout.tiny_height        22
+  ui.layout.recent_height      30
+  ui.layout.tiny_width         64
+  ui.layout.narrow_width       110
+  ui.layout.frame_width        120
+tools
+  tools.shell.default_timeout_sec 120
+  tools.shell.max_timeout_sec  600
+  tools.shell.wait_delay_ms    2000
+  tools.web.enabled            true
+  tools.web.results            0
+store
+  store.query_timeout_ms       2000
+  store.migrate_timeout_ms     15000
+stats
+  stats.insert_timeout_ms      2000
+language
+  language.mode                auto
+  language.languages           ["en", "fr"]
+  language.default             en
+safety
+  safety.extra_read_deny       []
+  safety.extra_command_deny    []
+router
+  router.action_verbs          ["create", "write", "make", "add", "generate", "fix", "update", "edit", "change", "refactor", "rename", "delete", "remove", "install", "run", "build", "deploy", "commit", "move", "copy", "crée", "créer", "écris", "écrire", "ajoute", "ajouter", "génère", "générer", "corrige", "corriger", "modifie", "modifier", "supprime", "supprimer", "installe", "installer", "lance", "lancer", "déplace", "renomme"]
+  router.targets               ["file", "folder", "directory", "project", "repo", "branch", "readme", "test", "function", "endpoint", "fichier", "dossier", "projet", "branche"]
