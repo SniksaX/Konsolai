@@ -133,11 +133,33 @@ func friendlyNames() []string {
 
 func setTree(env *Env) []Choice {
 	names := friendlyNames()
-	out := make([]Choice, 0, len(names))
+	out := make([]Choice, 0, len(names)+1)
 	for _, name := range names {
 		out = append(out, friendlyChoice(env, name))
 	}
+	out = append(out, defaultChoice(names))
 	return out
+}
+
+func defaultChoice(names []string) Choice {
+	next := make([]Choice, 0, len(names)+1)
+	next = append(next, Choice{
+		Value:       "all",
+		Description: "Restore every setting to the built-in default",
+		Terminal:    true,
+	})
+	for _, name := range names {
+		next = append(next, Choice{
+			Value:       name,
+			Description: "Restore " + name + " to the built-in default",
+			Terminal:    true,
+		})
+	}
+	return Choice{
+		Value:       "default",
+		Description: "Restore a setting or every setting",
+		Next:        next,
+	}
 }
 
 func friendlyChoice(env *Env, name string) Choice {
