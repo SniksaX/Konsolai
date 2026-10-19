@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/SniksaX/Konsolai/internal/commands"
+	"github.com/SniksaX/Konsolai/internal/config"
 	"github.com/SniksaX/Konsolai/internal/repo"
 	"github.com/SniksaX/Konsolai/internal/ui/theme"
 	"github.com/reeflective/readline"
@@ -131,6 +132,9 @@ func slashItems(reg *commands.Registry, line string) []slashItem {
 		return nil
 	}
 	cmd := parts[0]
+	if cmd == "set" {
+		return setSlashItems(parts, space)
+	}
 	arg := ""
 	if !space && len(parts) > 1 {
 		arg = parts[len(parts)-1]
@@ -160,6 +164,19 @@ func matchCommand(c commands.Command, line string) (value, display string, ok bo
 		}
 	}
 	return "", "", false
+}
+
+func setSlashItems(parts []string, space bool) []slashItem {
+	partial := ""
+	if !space && len(parts) > 1 {
+		partial = parts[len(parts)-1]
+	}
+	vals := config.CompleteSet(parts[1:], partial, space && len(parts) > 1)
+	out := make([]slashItem, 0, len(vals))
+	for _, v := range vals {
+		out = append(out, slashItem{Value: v, Display: "  " + v})
+	}
+	return out
 }
 
 func slashPrefix(line string) string {
