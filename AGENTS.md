@@ -19,13 +19,13 @@ Approved in `go.mod`: jackc/pgx/v5, alecthomas/chroma/v2, yuin/goldmark, reeflec
 
 ## Reference setup (example)
 
-Chat is any OpenAI-compatible server. The built-in default is `http://localhost:8000/v1`. Leave `llm.model` empty to use the server default. `llm.thinking_kwargs` sends `chat_template_kwargs.enable_thinking` only when it is true. Reasoning may arrive in `delta.reasoning`.
-Fast is optional. When `fast.enabled` is false or `fast.endpoint` is empty, the fast role uses the main model. An answer stream retries on main if the fast call fails.
-Embed and rerank are optional. When `rag.enabled` is false, Konsolai does not ingest and does not offer the recall tool.
+Chat is any OpenAI-compatible server. The built-in model is named `default` at `http://localhost:8000/v1` with an empty id. `thinking_kwargs` sends `chat_template_kwargs.enable_thinking` only when that model's flag is true. Reasoning may arrive in `delta.reasoning`.
+Fast is optional. An empty `roles.fast` uses the main model and stays quiet. An answer stream retries on main if the fast call fails.
+Embed and rerank are optional URLs on `roles.embed` and `roles.rerank`. When `rag.enabled` is false, Konsolai does not ingest and does not offer the recall tool.
 Never touch the developer's own database container. Integration tests use `scripts/test-db.sh`.
-Config path is `$XDG_CONFIG_HOME/konsolai/config.yaml`, or `~/.config/konsolai/config.yaml`. `/config init` writes mode 0600 and does not overwrite unless `--force`. `/config init --from-current` writes the effective config. `/config diff` lists keys that differ from the defaults.
-A new key is ONE entry in `internal/config/keys.go`.
-Env overrides are the `Env` column of that table, plus `KONSOLAI_PROFILE` for the profile name. `--profile` beats `KONSOLAI_PROFILE` beats `default_profile` beats built-in `default`.
+Config path is `--config`, then `KONSOLAI_CONFIG`, then `$XDG_CONFIG_HOME/konsolai/config.yaml` or `~/.config/konsolai/config.yaml`. Writes resolve symlinks and land in the real file, mode 0600.
+A new setting is ONE entry in `internal/config/keys.go`. Every configuration change goes through `/set`.
+Env overrides are the `Env` column of that table, plus `KONSOLAI_PROFILE` and `KONSOLAI_CONFIG`. `--profile` beats `KONSOLAI_PROFILE` beats `default_profile` beats built-in `default`. `--config` beats `KONSOLAI_CONFIG` beats the XDG path.
 
 ## Architecture
 
@@ -108,7 +108,7 @@ Work lands on `dev`. Config keys are the single table in `internal/config/keys.g
 - Placeholder: inline suggestion only. Enter does not submit it.
 - Footer context meter: last prompt tokens against the window (`ctx_warn_pct`, `ctx_hot_pct`, `ctx_cells`).
 - `propose_plan`: a command-only plan may omit `files` when the plan does not write or edit files.
-- Config keys are one table in `internal/config/keys.go`. Flat mirrors and `syncFlat` are gone. `TestConfigKeysComplete` walks every leaf.
+- Config keys are one table in `internal/config/keys.go`. Named models and `roles` replace `llm`/`fast` endpoints. `/set` is the configuration command. `TestConfigKeysComplete` walks every scalar leaf.
 - File splits: agent helpers, safety plan rules and segments, welcome paint helpers.
 - README at the repo root. Header image `docs/assets/konsolai-header.svg`. No screenshots in the tree. `TestReadmeSlashTable` locks the slash-command table to `commands.Default()`.
 - `/stats [today|week|all]` (default week) reads `turn_stats` and sessions. Per model: calls, tokens, average tok/s, and p50/p95 of `model_ms`. Per intent: turns, average steps (mean `turn_stats` rows per session), and average wall time (mean `model_ms`; there is no separate wall-clock column). With memory off: `stats need the database (memory is not configured)`.
