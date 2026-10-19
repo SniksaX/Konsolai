@@ -54,6 +54,44 @@ func TestArgMenuSetListsNames(t *testing.T) {
 	}
 }
 
+func TestArgMenuSetDefault(t *testing.T) {
+	m := menuWithSet()
+	m.Sync("/set default ")
+	vals := rowValues(m)
+	if len(vals) == 0 || vals[0] != "all" {
+		t.Fatalf("level %v", vals)
+	}
+	joined := strings.Join(vals, ",")
+	if !strings.Contains(joined, "theme") || !strings.Contains(joined, "steps") {
+		t.Fatalf("level %v", vals)
+	}
+	r := m.Down()
+	if r.Line != "/set default all" {
+		t.Fatalf("down %q", r.Line)
+	}
+	r = m.Enter()
+	if r.Action != actionLineSubmit || r.Line != "/set default all" {
+		t.Fatalf("submit %+v", r)
+	}
+	m = menuWithSet()
+	m.Sync("/set default ")
+	found := false
+	for i := 0; i < len(m.rows)+1; i++ {
+		m.Down()
+		if m.Selected() >= 0 && m.rows[m.Selected()].Value == "theme" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("theme not in %v", rowValues(m))
+	}
+	r = m.Enter()
+	if r.Action != actionLineSubmit || r.Line != "/set default theme" {
+		t.Fatalf("theme %+v", r)
+	}
+}
+
 func TestArgMenuModelThenFast(t *testing.T) {
 	m := menuWithSet()
 	m.env.Profile.Models["extra"] = config.Model{Endpoint: "http://localhost:8000/v1", Model: "extra-model"}
