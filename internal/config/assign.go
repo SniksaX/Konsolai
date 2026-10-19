@@ -255,6 +255,8 @@ func CompleteSet(parts []string, partial string, haveSpace bool) []string {
 		head = parts[0]
 	}
 	switch head {
+	case "default":
+		return filterPrefix(append([]string{"all"}, friendlyTableNames()...), partial)
 	case "theme":
 		return filterPrefix(ThemeNames, partial)
 	case "appearance":
@@ -308,6 +310,24 @@ func CompleteSet(parts []string, partial string, haveSpace bool) []string {
 	}
 }
 
+func friendlyTableNames() []string {
+	var out []string
+	for _, line := range strings.Split(FriendlyTable(), "\n") {
+		if !strings.HasPrefix(line, "| ") || strings.HasPrefix(line, "| name") || strings.HasPrefix(line, "| ---") {
+			continue
+		}
+		f := strings.Split(line, "|")
+		if len(f) < 2 {
+			continue
+		}
+		name := strings.TrimSpace(f[1])
+		if name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 func friendlyCompletions() []string {
 	seen := map[string]bool{}
 	var out []string
@@ -318,6 +338,7 @@ func friendlyCompletions() []string {
 		seen[s] = true
 		out = append(out, s)
 	}
+	add("default")
 	for _, line := range strings.Split(FriendlyTable(), "\n") {
 		if !strings.HasPrefix(line, "| ") || strings.HasPrefix(line, "| name") || strings.HasPrefix(line, "| ---") {
 			continue
