@@ -44,6 +44,7 @@ func takeWelcomeRedraw(env *Env) func() {
 }
 
 func runTheme(ctx context.Context, env *Env, args []string) int {
+	fmt.Fprintln(env.out(), ui.Current().Muted("now: /set theme"))
 	if len(args) == 0 {
 		if env != nil && env.InRepl && pickerInteractive() {
 			return runThemePicker(env)
