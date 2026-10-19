@@ -210,6 +210,27 @@ func TestWideSplitKeepsRecentBesideSession(t *testing.T) {
 	}
 }
 
+func TestFrameOmitsSideCopy(t *testing.T) {
+	plain(t)
+	got := renderString(allUp(), "frame", 140, 40)
+	for _, s := range []string{
+		"Plans before it acts",
+		"answer · lookup · act · build",
+		"Your terminal agent, on your own models.",
+	} {
+		if strings.Contains(got, s) {
+			t.Fatalf("frame still contains %q", s)
+		}
+	}
+	if !strings.Contains(got, "MODELS") || !strings.Contains(got, "SESSION") || !strings.Contains(got, "█") {
+		t.Fatalf("frame lost the wordmark or columns\n%s", got)
+	}
+	split := renderString(allUp(), "split", 140, 40)
+	if !strings.Contains(split, "your terminal agent, on your own models") {
+		t.Fatal("split tagline missing")
+	}
+}
+
 func TestFrameBelow120MatchesSplit(t *testing.T) {
 	plain(t)
 	for _, fx := range fixtures() {
