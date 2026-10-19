@@ -206,6 +206,34 @@ func TestArgMenuCopy(t *testing.T) {
 	}
 }
 
+func TestArgMenuArrowStaysOnCommands(t *testing.T) {
+	m := menuWithSet()
+	m.Sync("/")
+	m.Down()
+	if m.selectedLine() != "/help" || m.arg {
+		t.Fatalf("help %+v arg %v", m.selectedLine(), m.arg)
+	}
+	m.Sync("/help")
+	m.Down()
+	m.Sync("/copy")
+	if m.arg || m.selectedLine() != "/copy" {
+		t.Fatalf("copy should stay a command arg %v line %s", m.arg, m.selectedLine())
+	}
+	r := m.Up()
+	if r.Line != "/help" {
+		t.Fatalf("up %q", r.Line)
+	}
+	m.Down()
+	m.Sync("/copy")
+	if m.Question().Action != actionNone || !m.Detail() {
+		t.Fatal("detail")
+	}
+	plain := stripANSI(m.Render(80))
+	if !strings.Contains(plain, "usage") {
+		t.Fatalf("usage\n%s", plain)
+	}
+}
+
 func TestArgMenuQuietAfterEsc(t *testing.T) {
 	m := menuWithSet()
 	m.Sync("/set theme ")
