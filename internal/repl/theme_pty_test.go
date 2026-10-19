@@ -82,12 +82,10 @@ func themePickerChild() {
 	dir := os.Getenv("KONSOLAI_THEME_CWD")
 	cfgPath := os.Getenv("KONSOLAI_THEME_CFG")
 	prof := config.Builtin()
-	prof.LLM.Model = "main-model"
-	prof.LLM.Endpoint = "http://127.0.0.1:1/v1"
-	prof.Fast.Endpoint = ""
-	prof.Fast.Enabled = false
-	prof.RAG.EmbedEndpoint = ""
-	prof.RAG.RerankEndpoint = ""
+	prof.SetMain("http://127.0.0.1:1/v1", "main-model", false)
+	prof.Roles.Fast = ""
+	prof.Roles.Embed = ""
+	prof.Roles.Rerank = ""
 	prof.RAG.Enabled = false
 	prof.Database.URL = ""
 	prof.UI.ClearOnStart = false
