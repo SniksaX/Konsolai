@@ -69,6 +69,7 @@ type Runner struct {
 	lastPromise      bool
 	lastEscalate     intent.Intent
 	escalated        bool
+	RebindNext       bool
 	statMu           sync.Mutex
 	statOn           bool
 	statIntent       string
@@ -122,9 +123,13 @@ func (r *Runner) errw() io.Writer {
 
 func (r *Runner) client() *llm.Client {
 	if r.Client == nil {
-		c := llm.New(r.Profile.LLM.Endpoint, r.Profile.LLM.Model)
+		c := llm.New(r.Profile.MainEndpoint(), r.Profile.MainModelID())
 		c.SetIdleTimeout(time.Duration(r.Profile.LLM.IdleTimeoutSeconds) * time.Second)
-		c.SetThinkKwargs(r.Profile.LLM.ThinkingKwargs)
+		c.SetThinkKwargs(r.Profile.MainThinking())
+		if n := r.Profile.Main().Context; n > 0 {
+			c.PinContext(n)
+		}
+		c.SetRetry(r.Profile.LLM.Retries, time.Duration(r.Profile.LLM.RetryWaitMS)*time.Millisecond)
 		r.Client = c
 	}
 	r.attachStats(r.Client)
@@ -139,13 +144,17 @@ func (r *Runner) fastClient() *llm.Client {
 	if !r.Profile.FastOn() {
 		return nil
 	}
-	ep := r.Profile.Fast.Endpoint
+	ep := r.Profile.FastEndpoint()
 	if ep == "" {
 		return nil
 	}
-	c := llm.NewFast(ep, r.Profile.Fast.Model)
+	c := llm.NewFast(ep, r.Profile.FastModelID())
 	c.SetIdleTimeout(time.Duration(r.Profile.LLM.IdleTimeoutSeconds) * time.Second)
-	c.SetThinkKwargs(r.Profile.Fast.ThinkingKwargs)
+	c.SetThinkKwargs(r.Profile.FastThinking())
+	if fm, ok := r.Profile.FastModel(); ok && fm.Context > 0 {
+		c.PinContext(fm.Context)
+	}
+	c.SetRetry(r.Profile.LLM.Retries, time.Duration(r.Profile.LLM.RetryWaitMS)*time.Millisecond)
 	r.FastClient = c
 	r.attachStats(c)
 	return c
@@ -213,6 +222,62 @@ func StripThinkPrefix(s string) (string, bool) {
 		}
 	}
 	return s, false
+}
+
+func answerThink(dec *intent.Decision, policy string, mode ThinkMode) bool {
+	if mode == ThinkNever {
+		return false
+	}
+	if mode == ThinkAlways {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(policy)) {
+	case "on":
+		return true
+	case "off":
+		return false
+	default:
+		return dec != nil && dec.EffectiveEffort() == intent.EffortHigh
+	}
+}
+
+func policyFor(dec intent.Decision, prof config.Profile, mode ThinkMode) agent.ThinkingPolicy {
+	if mode == ThinkAlways {
+		return agent.ThinkOn
+	}
+	if mode == ThinkNever {
+		return agent.ThinkOff
+	}
+	switch dec.Intent {
+	case intent.Build:
+		return parseThink(prof.BuildThink(), agent.ThinkPlanStep)
+	case intent.Act:
+		return parseThink(prof.ActThinking(), agent.ThinkPlanStep)
+	case intent.Lookup:
+		return parseThink(prof.LookupThinking(), agent.ThinkLookup)
+	default:
+		if answerThink(&dec, prof.AnswerThinking(), ThinkAuto) {
+			return agent.ThinkOn
+		}
+		return agent.ThinkOff
+	}
+}
+
+func parseThink(policy string, fallback agent.ThinkingPolicy) agent.ThinkingPolicy {
+	switch strings.ToLower(strings.TrimSpace(policy)) {
+	case "on":
+		return agent.ThinkOn
+	case "off":
+		return agent.ThinkOff
+	case "until_plan":
+		return agent.ThinkUntilPlan
+	case "plan_step":
+		return agent.ThinkPlanStep
+	case "auto", "":
+		return fallback
+	default:
+		return agent.ParseBuildThinking(policy)
+	}
 }
 
 func ThinkingFor(dec intent.Decision, buildThinking string, mode ThinkMode) agent.ThinkingPolicy {
