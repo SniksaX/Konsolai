@@ -79,13 +79,13 @@ konsolai /set steps 20
 konsolai /set steps default
 ```
 
-`/set` with no arguments lists every setting, grouped by section. On a TTY inside the REPL it is a menu (↑/↓, Enter, Esc, `?`). `/set <name>` shows the value, its source, the default, the allowed values, and the doc. `/set <name> <value>` checks the value, writes the active config with comments and order kept, and prints `applied now`, `from the next turn`, or `after restart`. `/set <name> default` and `/set default <name>` remove that key. `/set default all` rewrites the active file from the factory document. `--session` keeps the change in this REPL and does not write the file. A full key path works (`/set agent.max_steps.act 20`). A unique suffix works. An ambiguous name lists the candidates. Tab completes names, then arguments, then allowed values.
+`/set` with no arguments lists every setting, grouped by section. On a TTY inside the REPL it is a menu (↑/↓, Enter, Esc, `?`). `/set <name>` shows the value, its source, the default, the allowed values, and the doc. `/set <name> <value>` checks the value, writes the active config with comments and order kept, and prints `applied now`, `from the next turn`, or `after restart`. `/set <name> default` and `/set default <name>` remove that key. `/set default all` asks first, with a single key: y writes the factory document and n leaves the file. The prompt says how many keys differ from the factory values and that models, roles, and endpoints will be reset. `--yes` skips the prompt. Before the rewrite, the real file (symlinks resolved) is copied to `config.yaml.bak-<YYYYmmdd-HHMMSS>` beside it, mode `0600`, and only the last five of those backups are kept. `--session` keeps the change in this REPL and does not write the file. A full key path works (`/set agent.max_steps.act 20`). A unique suffix works. An ambiguous name lists the candidates. Tab completes names, then arguments, then allowed values.
 
 Secrets are refused. A database password belongs in `~/.pgpass` or `KONSOLAI_DATABASE_URL`, not in the file. If the shell already sets the key's environment variable, the file is still written and `/set` warns that the variable overrides it.
 
 `/theme`, `/think`, `/yes`, `/trace`, and `/models` remain for one release. Each prints `now: /set ...`. `/think`, `/yes`, and `/trace` stay session-only.
 
-The active file is `--config`, then `KONSOLAI_CONFIG`, then `$XDG_CONFIG_HOME/konsolai/config.yaml` or `~/.config/konsolai/config.yaml`. A checkout may point that path at `config.yaml` in the repo (mode `0600`, gitignored). `/config path` prints the configured path and the path after symlinks are resolved. Writes go to the real file. [config.example.yaml](config.example.yaml) and [config.default.yaml](config.default.yaml) are the commented factory defaults, generated from the key table. `/set default all` writes that document. [.env.example](.env.example) lists the environment overrides.
+The active file is `--config`, then `KONSOLAI_CONFIG`, then `$XDG_CONFIG_HOME/konsolai/config.yaml` or `~/.config/konsolai/config.yaml`. A checkout may point that path at `config.yaml` in the repo (mode `0600`, gitignored). `/config path` prints the configured path and the path after symlinks are resolved. Writes go to the real file. [config.example.yaml](config.example.yaml) and [config.default.yaml](config.default.yaml) are the commented factory defaults, generated from the key table. `/set default all` writes that document after the confirmation above. [.env.example](.env.example) lists the environment overrides, and a separate block at the bottom lists the Compose variables.
 
 `/config init` writes the defaults, mode `0600`, and refuses to replace an existing file without `--force`. `/config init --from-current` writes the effective config. `/config diff` lists keys that differ from the defaults. `/config show` masks a password in `database.url`. `/config validate` checks the file.
 
@@ -286,6 +286,32 @@ The `name` cell is `Command.DisplayNames`. The `args` cell lists `Arg.Name`; opt
 | /save | [file] | Write the last answer to a Markdown file |
 | /pdf | [file] | Render the last answer to a PDF |
 | /explain | | Explain the last failed shell command (set PROMPT_COMMAND="history -a") |
+
+## Docker
+
+The image contains no config and no secrets. Mount the project at `/work` and a config file at `/config/config.yaml`. Shell commands the agent runs only see `/work`.
+
+```sh
+docker build --target base -t konsolai:dev .
+docker run -it --rm \
+  -v "$PWD":/work \
+  -v "$PWD/config.yaml":/config/config.yaml \
+  konsolai:dev
+```
+
+`scripts/docker.sh build base` is that build. `scripts/docker.sh build full` is the PDF image: Chromium (`KONSOLAI_CHROME`) and `mmdc`, so `/pdf` and `export_doc` can render. The Mermaid runner is non-root and gets `--no-sandbox` from the same puppeteer config the program writes.
+
+Memory uses Compose. Set `KONSOLAI_DB_PASSWORD` first (see the Compose block in [.env.example](.env.example); the value is not a default password). `docker compose up -d` starts only the database, on its own volume and its own published port (`KONSOLAI_DB_PORT`, default `55434`). It does not use the developer's database. `scripts/docker.sh db down` stops that Compose project only.
+
+```sh
+export KONSOLAI_DB_PASSWORD=change-me
+docker compose up -d
+scripts/docker.sh run
+```
+
+The app service is profile `app`. Its `KONSOLAI_DATABASE_URL` points at the Compose database and uses the same password. `scripts/docker.sh run` is `docker compose run --rm konsolai` with the current directory mounted. `scripts/docker.sh shell` opens bash in the image.
+
+From inside the container, a model server on the host is `http://host.docker.internal:<port>/v1`. `localhost` is the container itself. [compose.yaml](compose.yaml) comments the `network_mode: host` alternative. The optional embedding service is profile `rag` (`docker compose --profile rag up -d`). Set `KONSOLAI_EMBED_MODEL` to choose its model; the default is `BAAI/bge-base-en-v1.5`.
 
 ## Development
 
