@@ -4,17 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
+	"sync"
 
 	"github.com/SniksaX/Konsolai/internal/config"
 	"github.com/SniksaX/Konsolai/internal/turn"
 	"github.com/SniksaX/Konsolai/internal/ui"
 	"github.com/SniksaX/Konsolai/internal/ui/theme"
+	"github.com/SniksaX/Konsolai/internal/welcome"
 )
 
 func runModels(ctx context.Context, env *Env, args []string) int {
@@ -602,11 +601,13 @@ func formatSetList(c config.Config) string {
 func formatModelTable(ctx context.Context, env *Env) string {
 	c := env.Profile
 	names := c.ModelNames()
+	timeout := c.ProbeTimeout()
+	slow := c.ModelSlow()
 	var b strings.Builder
+	p := ui.Current()
 	for _, name := range names {
 		m := c.Models[name]
 		mark := "  "
-		label := name
 		var roles []string
 		if c.Roles.Main == name {
 			roles = append(roles, "main")
@@ -622,102 +623,201 @@ func formatModelTable(ctx context.Context, env *Env) string {
 		if role == "" {
 			role = "-"
 		}
+		status, body := welcome.Probe(ctx, m.Endpoint, "main", "models", timeout, slow)
+		env.noteServer(m.Endpoint, body)
+		id, idServer, nctx, ctxServer := modelIdentity(env, m)
 		host := turn.EndpointHost(m.Endpoint)
-		id := m.Model
-		if id == "" {
-			id = "-"
-		}
-		status := probeStatus(ctx, m.Endpoint, env)
-		line := fmt.Sprintf("%s%s  %s  %s  %s  ctx %d  %s", mark, label, role, host, id, m.Context, status)
+		head := fmt.Sprintf("%s%s  %s  %s  ", mark, name, role, host)
 		if mark == "› " {
-			line = ui.Current().Accent(line)
+			head = p.Accent(head)
 		}
-		fmt.Fprintln(&b, line)
+		fmt.Fprintf(&b, "%s%s  %s  %s\n", head, paintServer(id, idServer), paintServer(fmt.Sprintf("ctx %d", nctx), ctxServer), status)
 	}
 	if c.EmbedURL() == "" {
-		fmt.Fprintln(&b, "  embed  "+ui.Current().Muted("not configured"))
+		fmt.Fprintln(&b, "  embed  "+p.Muted("not configured"))
 	} else {
-		fmt.Fprintf(&b, "  embed  %s  %s\n", turn.EndpointHost(c.EmbedURL()), probeStatus(ctx, c.EmbedURL(), env))
+		status, _ := welcome.Probe(ctx, c.EmbedURL(), "embed", "embed", timeout, slow)
+		fmt.Fprintf(&b, "  embed  %s  %s\n", turn.EndpointHost(c.EmbedURL()), status)
 	}
 	if c.RerankURL() == "" {
-		fmt.Fprintln(&b, "  rerank  "+ui.Current().Muted("not configured"))
+		fmt.Fprintln(&b, "  rerank  "+p.Muted("not configured"))
 	} else {
-		fmt.Fprintf(&b, "  rerank  %s  %s\n", turn.EndpointHost(c.RerankURL()), probeStatus(ctx, c.RerankURL(), env))
+		status, _ := welcome.Probe(ctx, c.RerankURL(), "rerank", "rerank", timeout, slow)
+		fmt.Fprintf(&b, "  rerank  %s  %s\n", turn.EndpointHost(c.RerankURL()), status)
 	}
 	return b.String()
 }
 
-func probeStatus(ctx context.Context, endpoint string, env *Env) string {
-	if strings.TrimSpace(endpoint) == "" {
-		return "down"
+func paintServer(text string, fromServer bool) string {
+	if fromServer {
+		return ui.Current().Muted(text + " (server)")
 	}
-	timeout := 300 * time.Millisecond
-	if env != nil {
-		if d := env.Profile.ProbeTimeout(); d > 0 {
-			timeout = d
+	return text
+}
+
+func modelIdentity(env *Env, m config.Model) (id string, idServer bool, nctx int, ctxServer bool) {
+	id = strings.TrimSpace(m.Model)
+	nctx = m.Context
+	rep, ok := env.serverModel(m.Endpoint)
+	if id == "" && ok && rep.ID != "" {
+		id = rep.ID
+		idServer = true
+	}
+	if nctx == 0 && ok && rep.Context > 0 {
+		nctx = rep.Context
+		ctxServer = true
+	}
+	if id == "" {
+		id = "-"
+	}
+	return id, idServer, nctx, ctxServer
+}
+
+type serverSeen struct {
+	mu sync.Mutex
+	by map[string]seenModel
+}
+
+type seenModel struct {
+	ID      string
+	Context int
+}
+
+func (e *Env) noteServer(endpoint string, body []byte) {
+	if e == nil || len(body) == 0 {
+		return
+	}
+	rep, ok := parseReported(body, "")
+	if !ok {
+		return
+	}
+	e.rememberServer(endpoint, rep)
+}
+
+func (e *Env) rememberServer(endpoint string, rep seenModel) {
+	if e == nil {
+		return
+	}
+	endpoint = strings.TrimRight(strings.TrimSpace(endpoint), "/")
+	if endpoint == "" {
+		return
+	}
+	if e.seen == nil {
+		e.seen = &serverSeen{}
+	}
+	e.seen.mu.Lock()
+	defer e.seen.mu.Unlock()
+	if e.seen.by == nil {
+		e.seen.by = map[string]seenModel{}
+	}
+	e.seen.by[endpoint] = rep
+}
+
+func (e *Env) serverModel(endpoint string) (seenModel, bool) {
+	if e == nil || e.seen == nil {
+		return seenModel{}, false
+	}
+	endpoint = strings.TrimRight(strings.TrimSpace(endpoint), "/")
+	e.seen.mu.Lock()
+	defer e.seen.mu.Unlock()
+	rep, ok := e.seen.by[endpoint]
+	return rep, ok
+}
+
+func parseReported(body []byte, wantID string) (seenModel, bool) {
+	items := parseModelItems(body)
+	if len(items) == 0 {
+		return seenModel{}, false
+	}
+	pick := items[0]
+	if wantID != "" {
+		for _, it := range items {
+			if it.ID == wantID {
+				pick = it
+				break
+			}
 		}
 	}
-	cctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(cctx, http.MethodGet, strings.TrimRight(endpoint, "/")+"/models", nil)
-	if err != nil {
-		return "down"
+	if pick.ID == "" && pick.Context == 0 {
+		return seenModel{}, false
 	}
-	t0 := time.Now()
-	resp, err := http.DefaultClient.Do(req)
-	lat := time.Since(t0).Round(time.Millisecond)
-	if err != nil {
-		return "down"
+	return seenModel{ID: pick.ID, Context: pick.Context}, true
+}
+
+type modelItem struct {
+	ID      string
+	Context int
+}
+
+func parseModelItems(body []byte) []modelItem {
+	var parsed struct {
+		Data []struct {
+			ID            string `json:"id"`
+			MaxModelLen   int    `json:"max_model_len"`
+			NCtx          int    `json:"n_ctx"`
+			ContextLength int    `json:"context_length"`
+		} `json:"data"`
+		ID            string `json:"id"`
+		MaxModelLen   int    `json:"max_model_len"`
+		NCtx          int    `json:"n_ctx"`
+		ContextLength int    `json:"context_length"`
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return "down"
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil
 	}
-	word := "up"
-	if env != nil && lat > env.Profile.ModelSlow() {
-		word = "slow"
-	}
-	extra := ""
-	if env != nil && env.Mem != nil && env.Mem.Store() != nil {
-		if rate, err := env.Mem.Store().ModelRate(ctx, "", env.Profile.ModelRateWindow()); err == nil && rate != nil {
-			extra = fmt.Sprintf("  %.0f tok/s", *rate)
+	ctxOf := func(maxLen, nCtx, length int) int {
+		if maxLen > 0 {
+			return maxLen
 		}
+		if nCtx > 0 {
+			return nCtx
+		}
+		return length
 	}
-	return fmt.Sprintf("%s %s%s", word, lat, extra)
+	var items []modelItem
+	for _, d := range parsed.Data {
+		if d.ID == "" && ctxOf(d.MaxModelLen, d.NCtx, d.ContextLength) == 0 {
+			continue
+		}
+		items = append(items, modelItem{ID: d.ID, Context: ctxOf(d.MaxModelLen, d.NCtx, d.ContextLength)})
+	}
+	if len(items) == 0 && (parsed.ID != "" || ctxOf(parsed.MaxModelLen, parsed.NCtx, parsed.ContextLength) > 0) {
+		items = append(items, modelItem{ID: parsed.ID, Context: ctxOf(parsed.MaxModelLen, parsed.NCtx, parsed.ContextLength)})
+	}
+	return items
 }
 
 func discoverModels(ctx context.Context, c config.Config) string {
-	seen := map[string]map[string]bool{}
+	seen := map[string]bool{}
 	var endpoints []string
 	add := func(ep string) {
 		ep = strings.TrimRight(strings.TrimSpace(ep), "/")
-		if ep == "" {
+		if ep == "" || seen[ep] {
 			return
 		}
-		if _, ok := seen[ep]; ok {
-			return
-		}
-		seen[ep] = map[string]bool{}
+		seen[ep] = true
 		endpoints = append(endpoints, ep)
 	}
 	for _, name := range c.ModelNames() {
 		add(c.Models[name].Endpoint)
 	}
-	configured := map[string]bool{}
-	for _, m := range c.Models {
-		if m.Model != "" {
-			configured[m.Model] = true
-		}
-	}
 	sort.Strings(endpoints)
+	timeout := c.ProbeTimeout()
+	if timeout <= 0 {
+		timeout = config.Builtin().ProbeTimeout()
+	}
 	var b strings.Builder
 	for _, ep := range endpoints {
-		ids := listModelIDs(ctx, ep)
-		for _, id := range ids {
-			if configured[id] {
+		_, body := welcome.Probe(ctx, ep, "main", "models", timeout, c.ModelSlow())
+		for _, item := range parseModelItems(body) {
+			if item.ID == "" {
 				continue
 			}
-			fmt.Fprintf(&b, "/set model add %s %s %s\n", slugModel(id), ep, id)
+			if name, ok := configuredAs(c, ep, item.ID); ok {
+				fmt.Fprintf(&b, "already configured as %s\n", name)
+				continue
+			}
+			fmt.Fprintf(&b, "/set model add %s %s %s\n", SuggestModelName(item.ID), ep, item.ID)
 		}
 	}
 	if b.Len() == 0 {
@@ -726,55 +826,13 @@ func discoverModels(ctx context.Context, c config.Config) string {
 	return b.String()
 }
 
-func listModelIDs(ctx context.Context, endpoint string) []string {
-	cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(cctx, http.MethodGet, endpoint+"/models", nil)
-	if err != nil {
-		return nil
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	var parsed struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return nil
-	}
-	var ids []string
-	for _, d := range parsed.Data {
-		if d.ID != "" {
-			ids = append(ids, d.ID)
+func configuredAs(c config.Config, endpoint, id string) (string, bool) {
+	endpoint = strings.TrimRight(strings.TrimSpace(endpoint), "/")
+	for _, name := range c.ModelNames() {
+		m := c.Models[name]
+		if strings.TrimRight(strings.TrimSpace(m.Endpoint), "/") == endpoint && m.Model == id {
+			return name, true
 		}
 	}
-	return ids
-}
-
-func slugModel(id string) string {
-	id = strings.ToLower(id)
-	var b strings.Builder
-	for _, r := range id {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-		default:
-			if b.Len() > 0 && b.String()[b.Len()-1] != '-' {
-				b.WriteByte('-')
-			}
-		}
-	}
-	s := strings.Trim(b.String(), "-")
-	if s == "" {
-		s = "model"
-	}
-	if len(s) > 32 {
-		s = s[:32]
-	}
-	return s
+	return "", false
 }
