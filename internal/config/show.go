@@ -27,6 +27,11 @@ func (c Config) ShowYAML() (string, error) {
 	return renderShow(c), nil
 }
 
+// RenderResolved is the commented config document for c.
+func RenderResolved(c Config) string {
+	return renderCurrentYAML(c)
+}
+
 func WriteInit(path string, force bool) error {
 	return writeConfigFile(path, InitYAML(), force)
 }
@@ -61,10 +66,7 @@ func writeConfigFile(path, body string, force bool) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return fmt.Errorf("config: mkdir: %w", err)
 	}
-	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
-		return fmt.Errorf("config: write %s: %w", path, err)
-	}
-	return nil
+	return WriteAtomic(path, []byte(body))
 }
 
 func InitYAML() string {
