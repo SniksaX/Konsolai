@@ -153,7 +153,11 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 	}
 	sh.Prompt.Primary(func() string { return r.prompt })
 	sh.SyntaxHighlighter = func(line []rune) string {
-		return echoBody(string(line))
+		var reg *commands.Registry
+		if r.menu != nil {
+			reg = r.menu.reg
+		}
+		return highlightInput(string(line), reg)
 	}
 	sh.Hint.SetProvider(func(line []rune, cursor int) []rune {
 		r.syncPlaceholder(line)
