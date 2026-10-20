@@ -121,6 +121,32 @@ func TestCdVariantsAndGuard(t *testing.T) {
 	}
 }
 
+func TestCdHookOwnsTheDirectory(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "sub")
+	if err := os.Mkdir(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+	s := New(root)
+	s.Run = func(context.Context, string, string, *os.File, io.Writer) (int, time.Duration, string, error) {
+		t.Fatal("cd must not run in the pty")
+		return 0, 0, "", nil
+	}
+	var got string
+	s.OnCwd = func(abs string) error {
+		got = abs
+		s.OldPwd = s.Cwd
+		s.Cwd = abs
+		return nil
+	}
+	if _, err := s.Handle(context.Background(), "cd sub"); err != nil {
+		t.Fatal(err)
+	}
+	if got != evalPath(t, sub) || s.Cwd != got {
+		t.Fatalf("hook %q cwd %q", got, s.Cwd)
+	}
+}
+
 func TestHandleRecordsHistory(t *testing.T) {
 	var out bytes.Buffer
 	s := New(t.TempDir())
