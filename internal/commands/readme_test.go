@@ -84,6 +84,57 @@ func TestReadmeOmitsSampleHost(t *testing.T) {
 	}
 }
 
+func TestReadmeEnvOverrides(t *testing.T) {
+	text := readReadme(t)
+	if strings.Contains(text, ".env.example") || strings.Contains(text, "config.default.yaml") {
+		t.Fatal("readme names a removed config file")
+	}
+	section := readmeSection(text, "### Environment overrides")
+	if section == "" {
+		t.Fatal("readme missing Environment overrides")
+	}
+	note := "Prefer `config.yaml`. Environment variables are for containers and CI."
+	if !strings.Contains(section, note) {
+		t.Fatal("readme missing the environment-override note")
+	}
+	if !strings.Contains(section, config.EnvOverrideTable()) {
+		t.Fatalf("config env table drifted\nwant:\n%s", config.EnvOverrideTable())
+	}
+	if !strings.Contains(section, config.ComposeVarTable()) {
+		t.Fatalf("compose var table drifted\nwant:\n%s", config.ComposeVarTable())
+	}
+	for _, k := range config.Keys() {
+		if k.Env == "" {
+			continue
+		}
+		if !strings.Contains(section, k.Env) || !strings.Contains(section, k.Path) {
+			t.Errorf("section missing %s (%s)", k.Env, k.Path)
+		}
+	}
+}
+
+func readmeSection(text, heading string) string {
+	lines := strings.Split(text, "\n")
+	start := -1
+	for i, line := range lines {
+		if line == heading {
+			start = i + 1
+			break
+		}
+	}
+	if start < 0 {
+		return ""
+	}
+	end := len(lines)
+	for i := start; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], "## ") && !strings.HasPrefix(lines[i], "###") {
+			end = i
+			break
+		}
+	}
+	return strings.Join(lines[start:end], "\n")
+}
+
 func registrySlashRows() [][3]string {
 	cmds := Default().All()
 	rows := make([][3]string, 0, len(cmds))
