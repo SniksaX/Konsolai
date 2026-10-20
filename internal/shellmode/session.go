@@ -84,6 +84,7 @@ func (s *Session) Handle(ctx context.Context, line string) (toAI bool, err error
 	case builtin && name == "exit":
 		return true, nil
 	case builtin && (name == "clear" || name == "reset"):
+		fmt.Fprint(s.out(), theme.ResetScroll)
 		fmt.Fprint(s.out(), theme.ClearScroll)
 		if s.OnClear != nil {
 			s.OnClear()
