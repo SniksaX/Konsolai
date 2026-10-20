@@ -35,7 +35,7 @@ Optional:
 
 - Postgres with the `vector` extension (pgvector). Memory and RAG stay off when `database.url` is empty. Opening the store runs `CREATE EXTENSION vector`.
 - A TEI-compatible embedding server and, separately, a rerank server. The client `POST`s `/embed` with `inputs`, `normalize`, and `truncate`, and `POST`s `/rerank` with `query` and `texts`. A failed rerank keeps the fused search hits.
-- PDF and Mermaid export. `export_doc` renders Markdown with goldmark. A `mermaid` fence is sent to the `mmdc` binary from `@mermaid-js/mermaid-cli` (`npm i -g @mermaid-js/mermaid-cli`). PDF printing runs headless Chrome: `KONSOLAI_CHROME` if set, otherwise the first of `chromium`, `chromium-browser`, `google-chrome-stable`, `google-chrome`, `brave`, and `brave-browser`. A Puppeteer-cached Chrome is preferred over Brave. HTML with no Mermaid fence needs neither binary.
+- PDF and Mermaid export. `export_doc` renders Markdown with goldmark. A `mermaid` fence renders in headless Chromium with the embedded Mermaid script, then the SVG is inlined into the page. Chromium is `KONSOLAI_CHROME` if set, otherwise the first of `chromium`, `chromium-browser`, `google-chrome-stable`, `google-chrome`, `brave`, and `brave-browser`. A Puppeteer-cached Chrome is preferred over Brave. HTML with no Mermaid fence renders with goldmark alone. A Mermaid fence, and every PDF, needs Chromium.
 - Clipboard for `/copy`. With `WAYLAND_DISPLAY` set, `wl-copy`. With `DISPLAY` set, `xclip`, then `xsel`. Otherwise OSC 52 on the TTY (100 KiB cap).
 
 ## Install
@@ -217,7 +217,7 @@ From the shell the same commands are `konsolai /history` and so on. The bare wor
 
 ### Export
 
-`export_doc` accepts `html` and `pdf`. The model writes Markdown, then exports it. Mermaid fences go through `mmdc`. PDF goes through headless Chrome, as in [Requirements](#requirements). Shell PDF and HTML printers are refused. A docs plan that asks for PDF or HTML has to name `export_doc`.
+`export_doc` accepts `html` and `pdf`. The model writes Markdown, then exports it. Mermaid fences render in headless Chromium; the HTML result inlines the SVGs and contains no script. PDF uses the same Chromium, as in [Requirements](#requirements). Shell PDF and HTML printers are refused. A docs plan that asks for PDF or HTML has to name `export_doc`.
 
 ## Safety model
 
@@ -291,7 +291,7 @@ docker run -it --rm \
   konsolai:dev
 ```
 
-`scripts/docker.sh build base` is that build. `scripts/docker.sh build full` is the PDF image: Chromium (`KONSOLAI_CHROME`) and `mmdc`, so `/pdf` and `export_doc` can render. The Mermaid runner is non-root and gets `--no-sandbox` from the same puppeteer config the program writes.
+`scripts/docker.sh build base` is that build. `scripts/docker.sh build full` is the PDF image: Debian Chromium at `KONSOLAI_CHROME=/usr/bin/chromium`. The `konsolai` user runs it with `--no-sandbox`, so `/pdf` and `export_doc` can render diagrams.
 
 Memory uses Compose. Set `KONSOLAI_DB_PASSWORD` first (see the Compose block in [.env.example](.env.example); the value is not a default password). `docker compose up -d` starts only the database, on its own volume and its own published port (`KONSOLAI_DB_PORT`, default `55434`). It does not use the developer's database. `scripts/docker.sh db down` stops that Compose project only.
 
