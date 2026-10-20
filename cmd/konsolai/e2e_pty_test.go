@@ -28,6 +28,9 @@ var (
 
 func e2eKonsolai(t *testing.T) string {
 	t.Helper()
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("needs go")
+	}
 	e2eBinOnce.Do(func() {
 		dir, err := os.MkdirTemp("", "konsolai-e2e-bin")
 		if err != nil {
