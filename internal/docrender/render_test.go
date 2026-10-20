@@ -99,9 +99,7 @@ func TestTitleFallsBackToFileName(t *testing.T) {
 }
 
 func TestMermaidHTMLInlineSVG(t *testing.T) {
-	if _, err := FindChrome(); err != nil {
-		t.Skip("chrome not installed")
-	}
+	skipWithoutChrome(t)
 	src := `# Architecture
 
 | Fn | Role |
@@ -135,9 +133,7 @@ func TestMermaidHTMLInlineSVG(t *testing.T) {
 }
 
 func TestMermaidSyntaxErrorNamesDiagram(t *testing.T) {
-	if _, err := FindChrome(); err != nil {
-		t.Skip("chrome not installed")
-	}
+	skipWithoutChrome(t)
 	src := "# T\n\n```mermaid\nnot a diagram\n```\n"
 	_, err := Render(context.Background(), "html", "t.md", src)
 	if err == nil {
@@ -150,9 +146,7 @@ func TestMermaidSyntaxErrorNamesDiagram(t *testing.T) {
 }
 
 func TestRenderPDFIntegration(t *testing.T) {
-	if _, err := FindChrome(); err != nil {
-		t.Skip("chrome not installed")
-	}
+	skipWithoutChrome(t)
 	src := `# Architecture
 
 | Fn | Role |
@@ -170,13 +164,12 @@ func TestRenderPDFIntegration(t *testing.T) {
 	if res.Diagrams != 1 {
 		t.Fatalf("diagrams %d", res.Diagrams)
 	}
-	text := pdfText(t, res.Bytes)
-	if text == "" {
-		return
-	}
-	if !strings.Contains(text, "Agent") && !strings.Contains(text, "Tools") {
-		t.Fatalf("pdf missing diagram text: %q", text)
-	}
+	t.Run("pdftotext", func(t *testing.T) {
+		text := pdfText(t, res.Bytes)
+		if !strings.Contains(text, "Agent") && !strings.Contains(text, "Tools") {
+			t.Fatalf("pdf missing diagram text: %q", text)
+		}
+	})
 }
 
 func TestSVGStripsFontLicense(t *testing.T) {
@@ -196,29 +189,26 @@ func TestSVGStripsFontLicense(t *testing.T) {
 	if strings.Contains(got, "@font-face") {
 		t.Fatalf("still has @font-face: %s", got)
 	}
-	if _, err := FindChrome(); err != nil {
-		return
-	}
-	pdf, err := printPDF(context.Background(), wrapHTML("A", got))
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := pdfText(t, pdf)
-	if text == "" {
-		return
-	}
-	if n := strings.Count(strings.ToLower(text), "font license"); n != 0 {
-		t.Fatalf("pdftotext font license count %d: %s", n, text)
-	}
-	if strings.Contains(text, "SIL Open Font License") {
-		t.Fatalf("pdf text has OFL: %s", text)
-	}
+	t.Run("pdf", func(t *testing.T) {
+		skipWithoutChrome(t)
+		pdf, err := printPDF(context.Background(), wrapHTML("A", got))
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := pdfText(t, pdf)
+		if n := strings.Count(strings.ToLower(text), "font license"); n != 0 {
+			t.Fatalf("pdftotext font license count %d: %s", n, text)
+		}
+		if strings.Contains(text, "SIL Open Font License") {
+			t.Fatalf("pdf text has OFL: %s", text)
+		}
+	})
 }
 
 func pdfText(t *testing.T, pdf []byte) string {
 	t.Helper()
 	if _, err := exec.LookPath("pdftotext"); err != nil {
-		return ""
+		t.Skip("needs pdftotext")
 	}
 	dir := t.TempDir()
 	p := filepath.Join(dir, "doc.pdf")
@@ -230,4 +220,22 @@ func pdfText(t *testing.T, pdf []byte) string {
 		t.Fatal(err)
 	}
 	return string(out)
+}
+
+func skipWithoutChrome(t *testing.T) {
+	t.Helper()
+	if p := strings.TrimSpace(os.Getenv("KONSOLAI_CHROME")); p != "" {
+		if _, err := exec.LookPath(p); err == nil {
+			return
+		}
+	}
+	for _, name := range []string{"chromium", "chromium-browser", "google-chrome-stable", "google-chrome", "brave", "brave-browser"} {
+		if _, err := exec.LookPath(name); err == nil {
+			return
+		}
+	}
+	if _, err := FindChrome(); err == nil {
+		return
+	}
+	t.Skip("needs chromium")
 }
