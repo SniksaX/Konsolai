@@ -2,6 +2,7 @@ package theme
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -56,6 +57,25 @@ func TestStylePrimaryUncolored(t *testing.T) {
 	}
 	if Style(Accent, "x") == "x" {
 		t.Fatal("accent should paint")
+	}
+}
+
+func TestInputEchoUsesHeading(t *testing.T) {
+	defer Force(true, true, "glacier", Dark)()
+	got := InputEcho("/theme")
+	if got != Style(Heading, "/theme") {
+		t.Fatalf("echo %q", got)
+	}
+	if strings.Contains(got, "\x1b[1") || strings.Contains(got, ";39m") || strings.Contains(got, "[39m") {
+		t.Fatalf("echo is bold or default %q", got)
+	}
+	bold := Bold("plan")
+	if !strings.HasPrefix(bold, "\x1b[1;38;") || strings.Contains(bold, ";39m") || strings.Contains(bold, "[39m") {
+		t.Fatalf("bold heading %q", bold)
+	}
+	seq := HeadingSeq()
+	if strings.Contains(seq, "1;") || strings.Contains(seq, ";39m") || strings.Contains(seq, "[39m") {
+		t.Fatalf("selection %q", seq)
 	}
 }
 

@@ -8,8 +8,10 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/SniksaX/Konsolai/internal/commands"
+	"github.com/SniksaX/Konsolai/internal/config"
 	"github.com/SniksaX/Konsolai/internal/ui"
 	"github.com/SniksaX/Konsolai/internal/ui/theme"
 	"github.com/reeflective/readline"
@@ -25,6 +27,8 @@ type rlReader struct {
 	onClear     func()
 	pastes      *PasteStore
 	menu        *slashMenu
+	at          *atMenu
+	escTimeout  func() time.Duration
 	lastChip    string
 	shellOn     bool
 	framed      bool
@@ -54,8 +58,8 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 	_ = sh.Config.Set("enable-bracketed-paste", true)
 	_ = sh.Config.Set("history-size", histCap)
 	_ = sh.Config.Set("cursor-position-probe", false)
-	// Autocomplete would steal arrows via menuselect. @ and shell-mode
-	// still complete on Tab through Completer.
+	// Autocomplete would steal arrows via menuselect. Shell-mode still
+	// completes on Tab. @ is the file menu, not readline candidates.
 	_ = sh.Config.Set("autocomplete", false)
 	_ = sh.Config.Set("keyseq-timeout", 500)
 	_ = sh.Config.Set("usage-hint-always", true)
@@ -66,7 +70,13 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 	// enabling it produced a second "› line" in a real TTY.
 	_ = sh.Config.Set("prompt-transient", false)
 	_ = sh.Config.Set("transient-prompt", false)
-	r := &rlReader{sh: sh, footer: footer, pastes: pastes, menu: newSlashMenu(reg)}
+	r := &rlReader{sh: sh, footer: footer, pastes: pastes, menu: newSlashMenu(reg), at: newAtMenu(func() string {
+		wd, err := os.Getwd()
+		if err != nil {
+			return ""
+		}
+		return wd
+	})}
 	sh.History.Add("repl", &gatedHistory{inner: loadFileHistory(HistoryPath()), active: &r.shellOn, want: false})
 	sh.History.Add("shell", &gatedHistory{inner: loadFileHistory(ShellHistoryPath()), active: &r.shellOn, want: true})
 	r.framed = term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stdin.Fd()))
@@ -112,14 +122,27 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 	bindEmacsVi(`\M-OA`, "konsolai-up")
 	bindEmacsVi(`\eOB`, "konsolai-down")
 	bindEmacsVi(`\M-OB`, "konsolai-down")
+	// Home/End/Delete forms readline does not bind. The escape reader
+	// dispatches the emacs action for the whole sequence.
+	bindEmacsVi(`\e[3~`, "delete-char")
+	bindEmacsVi(`\M-[3~`, "delete-char")
+	bindEmacsVi(`\e[1~`, "beginning-of-line")
+	bindEmacsVi(`\M-[1~`, "beginning-of-line")
+	bindEmacsVi(`\e[4~`, "end-of-line")
+	bindEmacsVi(`\M-[4~`, "end-of-line")
+	bindEmacsVi(`\e[7~`, "beginning-of-line")
+	bindEmacsVi(`\M-[7~`, "beginning-of-line")
+	bindEmacsVi(`\e[8~`, "end-of-line")
+	bindEmacsVi(`\M-[8~`, "end-of-line")
 	bindEmacsVi(`\e`, "konsolai-esc")
 	bindEmacsVi(`\C-i`, "konsolai-tab")
 	bindEmacsVi(`\C-m`, "konsolai-enter")
 	bindEmacsVi(`\C-j`, "konsolai-enter")
 	bindEmacsVi(`?`, "konsolai-question")
-	// Local map has only Esc, so a lone Esc matches immediately. Arrow
-	// leftovers are finished in slashEsc; main-map \e[A stays for when
-	// the local map is not active (completion).
+	// Reeflective has no inter-byte timeout, so a longer Esc bind would
+	// make a lone Esc wait forever. This local map matches Esc at once.
+	// slashEsc then reads the rest of the sequence (CSI, SS3, or Alt+key)
+	// and dispatches that bind. Only a lone Esc reaches the menu.
 	if sh.Config.Binds["slash-esc"] == nil {
 		sh.Config.Binds["slash-esc"] = map[string]inputrc.Bind{}
 	}
@@ -165,11 +188,16 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 		if r.menu != nil {
 			r.menu.Sync(s)
 		}
+		if r.at != nil {
+			r.at.Sync(s, cursor)
+		}
 		r.gateAutocomplete(s)
 		r.ensureEscLocal()
 		width := theme.TermWidth()
 		menu := ""
-		if r.menu != nil && r.menu.Open() {
+		if r.at != nil && r.at.Open() {
+			menu = r.at.Render(width)
+		} else if r.menu != nil && r.menu.Open() {
 			menu = r.menu.Render(width)
 		}
 		foot := r.hintFooter()
@@ -224,7 +252,7 @@ func (r *rlReader) syncPlaceholder(line []rune) {
 		return
 	}
 	ph := r.currentPlaceholder()
-	hide := r.shellOn || len(line) != 0 || ph == "" || (r.menu != nil && r.menu.Open())
+	hide := r.shellOn || len(line) != 0 || ph == "" || (r.menu != nil && r.menu.Open()) || (r.at != nil && r.at.Open())
 	if hide {
 		if r.sh.GetInlineSuggestion() != "" {
 			r.sh.ClearInlineSuggestion()
@@ -297,6 +325,9 @@ func (r *rlReader) ensureEscLocal() {
 }
 
 func (r *rlReader) hintFooter() string {
+	if r.at != nil && r.at.Open() {
+		return r.at.HintFooter()
+	}
 	if r.menu != nil && r.menu.Open() {
 		return r.menu.HintFooter()
 	}
@@ -320,8 +351,15 @@ func (r *rlReader) syncMenu() {
 		return
 	}
 	line := string(*r.sh.Line())
+	cur := 0
+	if r.sh.Cursor() != nil {
+		cur = r.sh.Cursor().Pos()
+	}
 	if r.menu != nil {
 		r.menu.Sync(line)
+	}
+	if r.at != nil {
+		r.at.Sync(line, cur)
 	}
 	r.gateAutocomplete(line)
 	r.ensureEscLocal()
@@ -350,6 +388,9 @@ func (r *rlReader) applyMenu(res menuResult) {
 	switch res.Action {
 	case actionLine:
 		r.applyLine(res.Line)
+		if res.KeepCursor && r.sh.Cursor() != nil {
+			r.sh.Cursor().Set(res.Cursor)
+		}
 	case actionSubmit:
 		r.callWidget("accept-line")
 	case actionLineSubmit:
@@ -368,6 +409,10 @@ func (r *rlReader) SetMenuEnv(env *commands.Env) {
 
 func (r *rlReader) slashDown() {
 	r.syncMenu()
+	if r.at != nil && r.at.Open() {
+		r.applyMenu(r.at.Down())
+		return
+	}
 	if r.menu != nil && r.menu.Open() {
 		r.applyMenu(r.menu.Down())
 		return
@@ -377,6 +422,10 @@ func (r *rlReader) slashDown() {
 
 func (r *rlReader) slashUp() {
 	r.syncMenu()
+	if r.at != nil && r.at.Open() {
+		r.applyMenu(r.at.Up())
+		return
+	}
 	if r.menu != nil && r.menu.Open() {
 		r.applyMenu(r.menu.Up())
 		return
@@ -384,18 +433,58 @@ func (r *rlReader) slashUp() {
 	r.callWidget("previous-history")
 }
 
-func (r *rlReader) slashEsc() {
-	if up, down, ok := r.pendingArrow(); ok {
-		if up {
-			r.slashUp()
-			return
-		}
-		if down {
-			r.slashDown()
-			return
+func (r *rlReader) SetEscTimeout(fn func() time.Duration) {
+	if r == nil {
+		return
+	}
+	r.escTimeout = fn
+}
+
+func (r *rlReader) escWait() time.Duration {
+	if r != nil && r.escTimeout != nil {
+		if d := r.escTimeout(); d > 0 {
+			return d
 		}
 	}
+	return config.Builtin().EscTimeout()
+}
+
+func (r *rlReader) slashEsc() {
+	tail, lone := readEscapeTail(func() (byte, bool) {
+		return r.nextEscByte(r.escWait())
+	})
+	if lone {
+		r.loneEsc()
+		return
+	}
+	if arrowUp(tail) {
+		r.slashUp()
+		return
+	}
+	if arrowDown(tail) {
+		r.slashDown()
+		return
+	}
+	if dropEsc(tail) {
+		return
+	}
+	action := r.actionFor(string(append([]byte{0x1b}, tail...)))
+	if action == "" {
+		action = fallbackEdit(tail)
+	}
+	if action == "" {
+		return
+	}
+	r.callWidget(action)
 	r.syncMenu()
+}
+
+func (r *rlReader) loneEsc() {
+	r.syncMenu()
+	if r.at != nil && r.at.open {
+		r.applyMenu(r.at.Esc())
+		return
+	}
 	if r.menu != nil {
 		r.applyMenu(r.menu.Esc())
 		return
@@ -403,37 +492,15 @@ func (r *rlReader) slashEsc() {
 	r.applyLine("")
 }
 
-// pendingArrow consumes a CSI/SS3 arrow that arrived after a lone Esc.
-func (r *rlReader) pendingArrow() (up, down, ok bool) {
-	if r == nil || r.sh == nil || r.sh.Keys == nil {
-		return false, false, false
-	}
-	k1, empty := r.sh.Keys.Pop()
-	if empty {
-		return false, false, false
-	}
-	if k1 != '[' && k1 != 'O' {
-		r.sh.Keys.Feed(false, rune(k1))
-		return false, false, false
-	}
-	k2, empty := r.sh.Keys.Pop()
-	if empty {
-		r.sh.Keys.Feed(false, rune(k1))
-		return false, false, false
-	}
-	switch k2 {
-	case 'A':
-		return true, false, true
-	case 'B':
-		return false, true, true
-	default:
-		r.sh.Keys.Feed(false, rune(k1), rune(k2))
-		return false, false, false
-	}
-}
-
 func (r *rlReader) slashTab() {
 	r.syncMenu()
+	if r.at != nil && r.at.Open() {
+		res := r.at.Tab()
+		if res.Action != actionPass {
+			r.applyMenu(res)
+		}
+		return
+	}
 	line := ""
 	if r.sh != nil && r.sh.Line() != nil {
 		line = string(*r.sh.Line())
@@ -452,6 +519,13 @@ func (r *rlReader) slashTab() {
 
 func (r *rlReader) slashEnter() {
 	r.syncMenu()
+	if r.at != nil && r.at.Open() {
+		res := r.at.Enter()
+		if res.Action != actionPass {
+			r.applyMenu(res)
+			return
+		}
+	}
 	if r.menu != nil && r.menu.Open() {
 		res := r.menu.Enter()
 		if res.Action != actionPass {
@@ -464,6 +538,13 @@ func (r *rlReader) slashEnter() {
 
 func (r *rlReader) slashQuestion() {
 	r.syncMenu()
+	if r.at != nil && r.at.Open() {
+		res := r.at.Question()
+		if res.Action != actionPass {
+			r.applyMenu(res)
+			return
+		}
+	}
 	if r.menu != nil && r.menu.Open() {
 		res := r.menu.Question()
 		if res.Action != actionPass {
@@ -505,6 +586,7 @@ func (r *rlReader) undoOrExpand() {
 func (r *rlReader) SetOnClear(fn func()) { r.onClear = fn }
 
 func (r *rlReader) clearScreen() {
+	fmt.Fprint(os.Stdout, theme.ResetScroll)
 	fmt.Fprint(os.Stdout, theme.ClearScroll)
 	if r.onClear != nil {
 		r.onClear()
@@ -581,6 +663,12 @@ func (r *rlReader) ReadLine(_ context.Context, prompt string) (string, error) {
 }
 
 func (r *rlReader) Close() error { return nil }
+
+func (r *rlReader) SetFileRoot(cwd func() string) {
+	if r != nil && r.at != nil {
+		r.at.SetRoot(cwd)
+	}
+}
 
 func (r *rlReader) SetShellMode(on bool) {
 	if r == nil || r.sh == nil || r.shellOn == on {

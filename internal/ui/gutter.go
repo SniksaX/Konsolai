@@ -205,7 +205,7 @@ func IntentBadge(name string) string {
 
 func IntentBadgeLine(name string, escalated bool) string {
 	p := Current()
-	line := "  " + p.Accent("◆") + " " + p.Heading(name)
+	line := "  " + p.Accent("◆") + " " + p.Strong(name)
 	if escalated {
 		line += p.Muted(" · escalated")
 	}

@@ -533,7 +533,7 @@ func TestOutputMissing(t *testing.T) {
 }
 
 func TestRunCmd(t *testing.T) {
-	env, _, errb := testEnv(t)
+	env, out, errb := testEnv(t)
 	if code := runCmd(context.Background(), env, nil); code != 2 {
 		t.Fatalf("no callback %d", code)
 	}
@@ -545,9 +545,14 @@ func TestRunCmd(t *testing.T) {
 	if code := runCmd(context.Background(), env, nil); code != 0 || !toggled {
 		t.Fatal("toggle")
 	}
-	cleared := false
-	env.OnCmdClear = func() { cleared = true }
-	if code := runCmd(context.Background(), env, []string{"clear"}); code != 0 || !cleared {
+	forgot := false
+	env.OnCmdClear = func() { forgot = true }
+	if code := runCmd(context.Background(), env, []string{"forget"}); code != 0 || !forgot {
+		t.Fatal("forget")
+	}
+	screen := false
+	env.OnClear = func() { screen = true }
+	if code := runCmd(context.Background(), env, []string{"clear"}); code != 0 || !screen || !strings.Contains(out.String(), "\x1b[3J") {
 		t.Fatal("clear")
 	}
 	if code := runCmd(context.Background(), env, []string{"nope"}); code != 2 {

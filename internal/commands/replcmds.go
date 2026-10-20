@@ -12,13 +12,16 @@ import (
 
 func runCmd(ctx context.Context, env *Env, args []string) int {
 	if len(args) == 1 && strings.EqualFold(args[0], "clear") {
+		return runClear(ctx, env, nil)
+	}
+	if len(args) == 1 && strings.EqualFold(args[0], "forget") {
 		if env.OnCmdClear != nil {
 			env.OnCmdClear()
 		}
 		return 0
 	}
 	if len(args) != 0 {
-		fmt.Fprintln(env.errw(), "usage: /cmd [clear]")
+		fmt.Fprintln(env.errw(), "usage: /cmd [clear|forget]")
 		return 2
 	}
 	if env.OnCmd != nil {
@@ -36,6 +39,7 @@ func runExit(ctx context.Context, env *Env, _ []string) int {
 }
 
 func runClear(ctx context.Context, env *Env, _ []string) int {
+	fmt.Fprint(env.out(), theme.ResetScroll)
 	fmt.Fprint(env.out(), theme.ClearScroll)
 	if env.OnClear != nil {
 		env.OnClear()

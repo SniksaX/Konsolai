@@ -101,5 +101,5 @@ func HeadingSeq() string {
 	if !s.enabled {
 		return ""
 	}
-	return "\x1b[" + "1;" + fgCode(s, roleColor(s.palette, s.appear, Heading)) + "m"
+	return "\x1b[" + fgCode(s, roleColor(s.palette, s.appear, Heading)) + "m"
 }

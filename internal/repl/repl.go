@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/SniksaX/Konsolai/internal/banner"
@@ -40,19 +41,23 @@ type Config struct {
 }
 
 type session struct {
-	mu      sync.Mutex
-	id      string
-	cwd     string
-	yes     bool
-	trace   bool
-	down    bool
-	ctxPct  int
-	showCtx bool
-	shell   bool
-	pastes  *PasteStore
-	mode    *shellmode.Session
-	cancel  context.CancelFunc
-	warns   []string
+	mu         sync.Mutex
+	id         string
+	cwd        string
+	yes        bool
+	trace      bool
+	down       bool
+	ctxPct     int
+	showCtx    bool
+	shell      bool
+	pastes     *PasteStore
+	mode       *shellmode.Session
+	welcome    *welcomeState
+	resumeIdle bool
+	pinRows    int
+	regionOn   bool
+	cancel     context.CancelFunc
+	warns      []string
 }
 
 type nlWriter struct {
@@ -149,6 +154,7 @@ func Run(ctx context.Context, cfg Config) int {
 		fmt.Fprintln(errw, "konsolai:", err)
 		return 1
 	}
+	st.welcome = welcome
 
 	go probeBackground(ctx, env.Profile, errw, st)
 
@@ -188,21 +194,58 @@ func Run(ctx context.Context, cfg Config) int {
 	if s, ok := rd.(interface{ SetMenuEnv(*commands.Env) }); ok {
 		s.SetMenuEnv(env)
 	}
+	if s, ok := rd.(interface{ SetEscTimeout(func() time.Duration) }); ok && env != nil {
+		s.SetEscTimeout(func() time.Duration { return env.Profile.EscTimeout() })
+	}
+	if s, ok := rd.(interface{ SetFileRoot(func() string) }); ok {
+		s.SetFileRoot(func() string {
+			st.mu.Lock()
+			defer st.mu.Unlock()
+			return st.cwd
+		})
+	}
 	bindWelcome(welcome, rd)
 	if kr, ok := rd.(interface{ ReadKey() (byte, error) }); ok {
 		ui.SetKeyReader(kr.ReadKey)
 		defer ui.SetKeyReader(nil)
 	}
+	paintClear := func() { st.afterClear(out, env, info) }
 	if clr, ok := rd.(interface{ SetOnClear(func()) }); ok {
-		clr.SetOnClear(func() {
-			fmt.Fprintln(out, banner.Compact(info, ui.Current()))
-		})
+		clr.SetOnClear(paintClear)
 	}
-	env.OnClear = func() {
-		fmt.Fprintln(out, banner.Compact(info, ui.Current()))
-	}
+	env.OnClear = paintClear
 	if st.mode != nil {
-		st.mode.OnClear = env.OnClear
+		st.mode.OnClear = paintClear
+	}
+	if tty {
+		defer func() {
+			if rec := recover(); rec != nil {
+				st.resetRegion(out)
+				panic(rec)
+			}
+		}()
+		defer st.resetRegion(out)
+		sigCh := make(chan os.Signal, 4)
+		done := make(chan struct{})
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGWINCH)
+		defer close(done)
+		defer signal.Stop(sigCh)
+		go func() {
+			for {
+				select {
+				case <-done:
+					return
+				case s := <-sigCh:
+					st.resetRegion(out)
+					if s == syscall.SIGWINCH {
+						st.reapplyRegion(out)
+					}
+				}
+			}
+		}()
+		if env.Profile.PinnedHeader() {
+			st.holdHeader(out, welcome.rows)
+		}
 	}
 	defer func() { _ = rd.Close() }()
 	setShell := func(on bool) {
@@ -246,6 +289,7 @@ func Run(ctx context.Context, cfg Config) int {
 		default:
 		}
 		flushWarns(errw, st)
+		st.reapplyRegion(out)
 		ui.ResetDisplay()
 		tracked.ensureNL()
 		st.mu.Lock()
@@ -338,15 +382,17 @@ func Run(ctx context.Context, cfg Config) int {
 		turnCtx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 		st.mu.Lock()
 		st.cancel = cancel
+		turnID, turnCwd, resumeIdle := st.id, st.cwd, st.resumeIdle
 		st.mu.Unlock()
 		res := cfg.Runner.RunTurn(turnCtx, turn.Request{
-			Text: line, Yes: st.yes, Trace: st.trace, Cwd: st.cwd,
-			ResumeSession: st.id, New: st.id == "", KeepOpen: true,
+			Text: line, Yes: st.yes, Trace: st.trace, Cwd: turnCwd,
+			ResumeSession: turnID, New: turnID == "" && !resumeIdle, KeepOpen: true,
 		})
 		cancelled := res.ExitCode == 130 || (turnCtx.Err() != nil && ctx.Err() == nil)
 		cancel()
 		st.mu.Lock()
 		st.cancel = nil
+		st.resumeIdle = false
 		if res.SessionID != "" {
 			st.id = res.SessionID
 		}
@@ -421,8 +467,7 @@ func echoInput(w io.Writer, text string) {
 	fmt.Fprintln(w, "  "+theme.Style(theme.Accent, "›")+" "+echoBody(text))
 }
 
-// echoBody is the submitted line: primary (default foreground, never Accent
-// or Link) plus bold. 39 keeps a surrounding accent color from sticking.
+// echoBody is the submitted line in the heading color, without bold.
 func echoBody(text string) string {
 	if text == "" || !theme.Enabled() {
 		return text
@@ -461,19 +506,19 @@ func sessionFooter(st *session, cfg Config) string {
 
 func wireEnv(env *commands.Env, st *session, cfg Config) {
 	env.OnCwd = func(dir string) error {
-		abs, err := expandDir(st.cwd, dir)
+		st.mu.Lock()
+		cwd := st.cwd
+		st.mu.Unlock()
+		abs, err := expandDir(cwd, dir)
 		if err != nil {
 			return err
 		}
-		st.cwd = abs
-		env.Cwd = abs
-		if st.mode != nil {
-			st.mode.Cwd = abs
-			if st.mode.Guard != nil {
-				_ = st.mode.Guard.SetBase(abs)
-			}
+		return st.switchDir(env, abs)
+	}
+	if st.mode != nil {
+		st.mode.OnCwd = func(abs string) error {
+			return st.switchDir(env, abs)
 		}
-		return nil
 	}
 	env.OnYes = func(on bool) { st.yes = on; env.Yes = on }
 	env.OnTrace = func(on bool) { st.trace = on }
@@ -485,6 +530,146 @@ func wireEnv(env *commands.Env, st *session, cfg Config) {
 		return runCompact(ctx, cfg.Runner, env, st)
 	}
 	env.OnExit = func() int { return -1 }
+}
+
+func (st *session) afterClear(w io.Writer, env *commands.Env, base banner.Info) {
+	st.mu.Lock()
+	cwd := st.cwd
+	wel := st.welcome
+	st.regionOn = false
+	st.mu.Unlock()
+	mode := "full"
+	pin := false
+	var projectID *int64
+	if env != nil {
+		mode = env.Profile.ClearHeader()
+		pin = env.Profile.PinnedHeader()
+		projectID = env.ProjectID
+	}
+	base.Dir = shortPath(cwd)
+	base.Branch = gitBranch(cwd)
+	rows := 0
+	switch mode {
+	case "none":
+	case "compact":
+		fmt.Fprintln(w, banner.Compact(base, ui.Current()))
+		rows = 1
+	default:
+		if wel != nil {
+			wel.retarget(cwd, base.Dir, base.Branch, projectID)
+			rows = wel.redraw(w)
+		}
+	}
+	if pin && rows > 0 {
+		st.holdHeader(w, rows)
+		return
+	}
+	st.mu.Lock()
+	st.pinRows = 0
+	st.mu.Unlock()
+}
+
+func (st *session) holdHeader(w io.Writer, rows int) {
+	if st == nil || w == nil || rows < 1 {
+		return
+	}
+	_, height := termBox(w)
+	top := rows + 1
+	if top >= height {
+		return
+	}
+	fmt.Fprint(w, theme.ScrollRegion(top, height))
+	st.mu.Lock()
+	st.pinRows = rows
+	st.regionOn = true
+	st.mu.Unlock()
+}
+
+func (st *session) reapplyRegion(w io.Writer) {
+	if st == nil {
+		return
+	}
+	st.mu.Lock()
+	rows := st.pinRows
+	on := st.regionOn
+	st.mu.Unlock()
+	if on || rows < 1 {
+		return
+	}
+	st.holdHeader(w, rows)
+}
+
+func (st *session) resetRegion(w io.Writer) {
+	if st == nil {
+		return
+	}
+	st.mu.Lock()
+	on := st.regionOn
+	st.regionOn = false
+	st.mu.Unlock()
+	if on && w != nil {
+		fmt.Fprint(w, theme.ResetScroll)
+	}
+}
+
+func (st *session) switchDir(env *commands.Env, abs string) error {
+	if eval, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = eval
+	}
+	st.mu.Lock()
+	prev := st.cwd
+	st.mu.Unlock()
+	if abs == prev {
+		return nil
+	}
+	if err := os.Chdir(abs); err != nil {
+		return fmt.Errorf("chdir: %w", err)
+	}
+	root := repo.Root(abs)
+	g, err := safety.NewAt(root, abs)
+	if err != nil {
+		_ = os.Chdir(prev)
+		return err
+	}
+	oldRoot := repo.Root(prev)
+	changed := oldRoot != root
+	st.mu.Lock()
+	st.cwd = abs
+	if changed {
+		st.id = ""
+		st.resumeIdle = true
+	}
+	mode := st.mode
+	wel := st.welcome
+	st.mu.Unlock()
+	if mode != nil {
+		mode.OldPwd = prev
+		mode.Cwd = abs
+		mode.Guard = g
+	}
+	var projectID *int64
+	if env != nil {
+		env.Cwd = abs
+		if env.Mem != nil {
+			projectID = turn.UpsertProject(context.Background(), env.Mem, abs)
+			env.ProjectID = projectID
+		}
+	}
+	branch := gitBranch(abs)
+	if wel != nil {
+		wel.retarget(abs, shortPath(abs), branch, projectID)
+	}
+	if changed && env != nil {
+		if branch == "" {
+			branch = "-"
+		}
+		w := env.Out
+		if w == nil {
+			w = os.Stdout
+		}
+		fmt.Fprintln(w, ui.Current().Muted(fmt.Sprintf("now in %s (%s)", filepath.Base(root), branch)))
+	}
+	return nil
 }
 
 func expandDir(cwd, dir string) (string, error) {

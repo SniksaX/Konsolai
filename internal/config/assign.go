@@ -212,6 +212,8 @@ func FriendlyTable() string {
 		{"appearance", "auto | dark | light", "ui.appearance"},
 		{"welcome", "split | frame | minimal", "ui.welcome"},
 		{"banner", "on | off", "ui.banner"},
+		{"clear", "full | compact | none", "ui.clear_header"},
+		{"pinned_header", "on | off", "ui.pinned_header"},
 		{"emoji", "on | off", "ui.strip_emoji"},
 		{"highlight", "on | off", "ui.code_highlight"},
 		{"cursor", "on | off", "ui.cursor_color"},

@@ -312,20 +312,22 @@ func Style(role Role, text string) string {
 	}
 	c := roleColor(s.palette, s.appear, role)
 	code := fgCode(s, c)
-	if role == Heading {
-		code = "1;" + code
-	}
 	if role == Link {
 		code = "4;" + code
 	}
 	return wrap(code, text)
 }
 
+// Bold paints text bold in the heading color. It never uses the default foreground.
 func Bold(text string) string {
-	if text == "" || !snap().enabled {
+	if text == "" {
 		return text
 	}
-	return wrap("1", text)
+	s := snap()
+	if !s.enabled {
+		return text
+	}
+	return wrap("1;"+fgCode(s, roleColor(s.palette, s.appear, Heading)), text)
 }
 
 func Italic(text string) string {
@@ -373,7 +375,7 @@ func HeadingCode() string {
 	if !s.enabled {
 		return ""
 	}
-	return "1;" + fgCode(s, roleColor(s.palette, s.appear, Heading))
+	return fgCode(s, roleColor(s.palette, s.appear, Heading))
 }
 
 func MutedSeq() string {

@@ -23,8 +23,10 @@ const (
 )
 
 type menuResult struct {
-	Action menuAction
-	Line   string
+	Action     menuAction
+	Line       string
+	Cursor     int
+	KeepCursor bool
 }
 
 type slashMenu struct {

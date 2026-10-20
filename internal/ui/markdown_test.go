@@ -60,6 +60,20 @@ func TestMarkdownColorSGR(t *testing.T) {
 	if !strings.Contains(got, "\033[") && !strings.Contains(got, "\x1b[") && !strings.Contains(got, "▍") {
 		t.Fatalf("want accent: %q", got)
 	}
+	head := "Head"
+	i := strings.Index(got, head)
+	if i < 0 || !strings.Contains(got[:i], "\x1b[1;") {
+		t.Fatalf("heading not bold %q", got)
+	}
+	var em bytes.Buffer
+	er := NewRenderer(&em, false)
+	_, _ = er.Write([]byte("say **bold**\n"))
+	_ = er.Flush()
+	emphasis := em.String()
+	j := strings.Index(emphasis, "bold")
+	if j < 0 || strings.Contains(emphasis[:j], "\x1b[1") || strings.Contains(emphasis, ";39m") {
+		t.Fatalf("emphasis %q", emphasis)
+	}
 }
 
 func TestMarkdownChunkedMidTokenFenceBold(t *testing.T) {

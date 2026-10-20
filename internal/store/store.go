@@ -746,38 +746,95 @@ func (s *Store) PruneIfDue(ctx context.Context, retentionDays int) error {
 	return nil
 }
 
-func (s *Store) HistorySessions(ctx context.Context, profile string, projectID *int64, cwd string, limit int) ([]Session, error) {
+// ListedSession is one row of the numbered session list.
+type ListedSession struct {
+	Session
+	FirstUser string
+	Intent    string
+}
+
+// Here reports whether sess belongs to the current project, or to cwd when
+// there is no project.
+func Here(projectID *int64, cwd string, sess Session) bool {
+	if projectID != nil {
+		return sess.ProjectID != nil && *sess.ProjectID == *projectID
+	}
+	return sess.CWD == cwd
+}
+
+// NumberedSessions is the list for /history, /resume, /show, /diff and the
+// welcome RECENT panel. Sessions of the current project (or cwd, when there
+// is no project) come first, then every other open session, newest first
+// inside each group. hereOnly keeps the current project.
+func (s *Store) NumberedSessions(ctx context.Context, profile string, projectID *int64, cwd string, limit int, hereOnly bool) ([]ListedSession, error) {
+	if s == nil || s.pool == nil {
+		return nil, fmt.Errorf("store: list sessions: no pool")
+	}
 	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	if limit < 1 {
 		limit = 10
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT id::text, profile, project_id, cwd, mode, model, title, status,
-		       started_at, last_activity_at, ended_at
-		FROM sessions
-		WHERE profile = $1
-		  AND NOT closed
+		SELECT s.id::text, s.profile, s.project_id, s.cwd, s.mode, s.model, s.title, s.status,
+		       s.started_at, s.last_activity_at, s.ended_at,
+		       COALESCE((
+		         SELECT m.content FROM messages m
+		         WHERE m.session_id = s.id AND m.role = 'user'
+		         ORDER BY m.seq ASC
+		         LIMIT 1
+		       ), ''),
+		       COALESCE((
+		         SELECT t.intent FROM turn_stats t
+		         WHERE t.session_id = s.id
+		         ORDER BY t.created_at DESC, t.id DESC
+		         LIMIT 1
+		       ), s.mode)
+		FROM sessions s
+		WHERE s.profile = $1
+		  AND NOT s.closed
 		  AND (
-		    ($2::bigint IS NOT NULL AND project_id = $2)
-		    OR ($2::bigint IS NULL AND cwd = $3)
+		    NOT $4::bool
+		    OR ($2::bigint IS NOT NULL AND s.project_id = $2)
+		    OR ($2::bigint IS NULL AND s.cwd = $3)
 		  )
-		ORDER BY last_activity_at DESC
-		LIMIT $4`, profile, projectID, cwd, limit)
+		ORDER BY (
+		  CASE
+		    WHEN $2::bigint IS NOT NULL AND s.project_id = $2 THEN 0
+		    WHEN $2::bigint IS NULL AND s.cwd = $3 THEN 0
+		    ELSE 1
+		  END
+		), s.last_activity_at DESC
+		LIMIT $5`, profile, projectID, cwd, hereOnly, limit)
 	if err != nil {
-		return nil, fmt.Errorf("store: history sessions: %w", err)
+		return nil, fmt.Errorf("store: list sessions: %w", err)
 	}
 	defer rows.Close()
-	var out []Session
+	var out []ListedSession
 	for rows.Next() {
-		var sess Session
-		if err := rows.Scan(&sess.ID, &sess.Profile, &sess.ProjectID, &sess.CWD, &sess.Mode, &sess.Model, &sess.Title, &sess.Status,
-			&sess.StartedAt, &sess.LastActivity, &sess.EndedAt); err != nil {
-			return nil, fmt.Errorf("store: scan history session: %w", err)
+		var row ListedSession
+		if err := rows.Scan(&row.ID, &row.Profile, &row.ProjectID, &row.CWD, &row.Mode, &row.Model, &row.Title, &row.Status,
+			&row.StartedAt, &row.LastActivity, &row.EndedAt, &row.FirstUser, &row.Intent); err != nil {
+			return nil, fmt.Errorf("store: scan list session: %w", err)
 		}
-		out = append(out, sess)
+		out = append(out, row)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list sessions: %w", err)
+	}
+	return out, nil
+}
+
+func (s *Store) HistorySessions(ctx context.Context, profile string, projectID *int64, cwd string, limit int) ([]Session, error) {
+	rows, err := s.NumberedSessions(ctx, profile, projectID, cwd, limit, true)
+	if err != nil {
+		return nil, err
+	}
+	var out []Session
+	for _, row := range rows {
+		out = append(out, row.Session)
+	}
+	return out, nil
 }
 
 func (s *Store) CloseSessions(ctx context.Context, profile string, projectID *int64, cwd string) (int64, error) {

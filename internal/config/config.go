@@ -192,9 +192,12 @@ type UI struct {
 	CursorColor         bool     `yaml:"cursor_color"`
 	CodeHighlight       bool     `yaml:"code_highlight"`
 	ClearOnStart        bool     `yaml:"clear_on_start"`
+	ClearHeader         string   `yaml:"clear_header"`
+	PinnedHeader        bool     `yaml:"pinned_header"`
 	StripEmoji          bool     `yaml:"strip_emoji"`
 	ProbeDeadlineMS     int      `yaml:"probe_deadline_ms"`
 	ProbeTimeoutMS      int      `yaml:"probe_timeout_ms"`
+	EscTimeoutMS        int      `yaml:"esc_timeout_ms"`
 	GitQueryMS          int      `yaml:"git_query_ms"`
 	MemoryQueryMS       int      `yaml:"memory_query_ms"`
 	StartupCapMS        int      `yaml:"startup_cap_ms"`
@@ -669,6 +672,12 @@ func (c Config) ProbeTimeout() time.Duration {
 	return time.Duration(nonzero(c.UI.ProbeTimeoutMS, 300)) * time.Millisecond
 }
 
+// EscTimeout is the gap allowed between bytes of one escape sequence.
+// Omitted config keeps 30ms. A lone Esc is the sequence that never continues.
+func (c Config) EscTimeout() time.Duration {
+	return time.Duration(nonzero(c.UI.EscTimeoutMS, 30)) * time.Millisecond
+}
+
 // GitQueryTimeout bounds git status checks. Omitted config keeps 200ms.
 func (c Config) GitQueryTimeout() time.Duration {
 	return time.Duration(nonzero(c.UI.GitQueryMS, 200)) * time.Millisecond
@@ -776,6 +785,20 @@ func (c Config) CodeHighlightOn() bool {
 
 func (c Config) ClearOnStart() bool {
 	return c.UI.ClearOnStart
+}
+
+// ClearHeader is ui.clear_header: full, compact, or none. Anything else is full.
+func (c Config) ClearHeader() string {
+	switch strings.ToLower(strings.TrimSpace(c.UI.ClearHeader)) {
+	case "compact", "none", "full":
+		return strings.ToLower(strings.TrimSpace(c.UI.ClearHeader))
+	default:
+		return "full"
+	}
+}
+
+func (c Config) PinnedHeader() bool {
+	return c.UI.PinnedHeader
 }
 
 func (c Config) StripEmojiOn() bool {

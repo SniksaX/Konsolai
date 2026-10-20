@@ -80,37 +80,39 @@ func validN(min, max int) func(string) error {
 // friendlyPaths maps each /set name to the key whose doc and current value
 // the first level shows. Sub-arguments use their own keys.
 var friendlyPaths = map[string]string{
-	"model":       "roles.main",
-	"embed":       "roles.embed",
-	"rerank":      "roles.rerank",
-	"database":    "database.url",
-	"theme":       "ui.theme",
-	"appearance":  "ui.appearance",
-	"welcome":     "ui.welcome",
-	"banner":      "ui.banner",
-	"emoji":       "ui.strip_emoji",
-	"highlight":   "ui.code_highlight",
-	"cursor":      "ui.cursor_color",
-	"steps":       "agent.max_steps.act",
-	"budget":      "agent.explore_budget.lookup",
-	"think":       "agent.think_mode",
-	"temperature": "llm.temperature.answer",
-	"top_p":       "llm.top_p",
-	"approve":     "agent.approve",
-	"plan":        "agent.plan.act_low",
-	"trace":       "ui.trace",
-	"stats":       "ui.stats",
-	"badge":       "ui.badge",
-	"language":    "language.mode",
-	"languages":   "language.languages",
-	"web":         "tools.web.enabled",
-	"memory":      "memory.enabled",
-	"rag":         "rag.enabled",
-	"idle":        "memory.session_idle_minutes",
-	"retention":   "memory.retention_days",
-	"elide":       "context.elide_trigger",
-	"ctx":         "ui.ctx_warn_pct",
-	"timeout":     "tools.shell.default_timeout_sec",
+	"model":         "roles.main",
+	"embed":         "roles.embed",
+	"rerank":        "roles.rerank",
+	"database":      "database.url",
+	"theme":         "ui.theme",
+	"appearance":    "ui.appearance",
+	"welcome":       "ui.welcome",
+	"banner":        "ui.banner",
+	"clear":         "ui.clear_header",
+	"pinned_header": "ui.pinned_header",
+	"emoji":         "ui.strip_emoji",
+	"highlight":     "ui.code_highlight",
+	"cursor":        "ui.cursor_color",
+	"steps":         "agent.max_steps.act",
+	"budget":        "agent.explore_budget.lookup",
+	"think":         "agent.think_mode",
+	"temperature":   "llm.temperature.answer",
+	"top_p":         "llm.top_p",
+	"approve":       "agent.approve",
+	"plan":          "agent.plan.act_low",
+	"trace":         "ui.trace",
+	"stats":         "ui.stats",
+	"badge":         "ui.badge",
+	"language":      "language.mode",
+	"languages":     "language.languages",
+	"web":           "tools.web.enabled",
+	"memory":        "memory.enabled",
+	"rag":           "rag.enabled",
+	"idle":          "memory.session_idle_minutes",
+	"retention":     "memory.retention_days",
+	"elide":         "context.elide_trigger",
+	"ctx":           "ui.ctx_warn_pct",
+	"timeout":       "tools.shell.default_timeout_sec",
 }
 
 func friendlyNames() []string {
@@ -716,7 +718,10 @@ func cdTree(env *Env) []Choice {
 }
 
 func cmdTree(*Env) []Choice {
-	return []Choice{{Value: "clear", Description: "clear the shell history", Terminal: true}}
+	return []Choice{
+		{Value: "clear", Description: "clear the screen", Terminal: true},
+		{Value: "forget", Description: "drop the shell context", Terminal: true},
+	}
 }
 
 func onOffTree(onDesc, offDesc string) func(*Env) []Choice {

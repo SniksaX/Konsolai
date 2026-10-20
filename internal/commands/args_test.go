@@ -116,6 +116,7 @@ func TestSetTreeEnumsMatchAllowed(t *testing.T) {
 		"agent.approve":        {"approve"},
 		"ui.appearance":        {"appearance"},
 		"ui.welcome":           {"welcome"},
+		"ui.clear_header":      {"clear"},
 		"language.mode":        {"language"},
 	}
 	for _, k := range config.Keys() {
@@ -269,7 +270,7 @@ func TestConfigAndRecallTrees(t *testing.T) {
 		t.Fatalf("forget %v", choiceValues(forget))
 	}
 	cmd := Default().Lookup("cmd").Tree(nil)
-	if strings.Join(choiceValues(cmd), ",") != "clear" {
+	if strings.Join(choiceValues(cmd), ",") != "clear,forget" {
 		t.Fatalf("cmd %v", choiceValues(cmd))
 	}
 }

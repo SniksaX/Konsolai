@@ -65,7 +65,7 @@ func TestWelcomeMemoryAndRecent(t *testing.T) {
 		t.Fatalf("facts %d sessions %d", facts, sessions)
 	}
 
-	display, latest, ok, err := s.WelcomeRecent(ctx, "home", "/tmp/welcome", 4)
+	display, latest, ok, err := s.WelcomeRecent(ctx, "home", nil, "/tmp/welcome", 4)
 	if err != nil || !ok {
 		t.Fatalf("recent ok=%v err=%v", ok, err)
 	}
@@ -83,5 +83,37 @@ func TestWelcomeMemoryAndRecent(t *testing.T) {
 	}
 	if display[0].Intent != "lookup" || display[2].Intent != "act" {
 		t.Fatalf("intents %+v %+v", display[0], display[2])
+	}
+	if !display[0].Here || !display[1].Here || display[2].Here {
+		t.Fatalf("here %+v", display)
+	}
+
+	listed, err := s.NumberedSessions(ctx, "home", nil, "/tmp/welcome", 4, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != len(display) {
+		t.Fatalf("list %d welcome %d", len(listed), len(display))
+	}
+	for i := range display {
+		if listed[i].Title != display[i].Title || listed[i].CWD != display[i].CWD {
+			t.Fatalf("number %d list %+v welcome %+v", i+1, listed[i], display[i])
+		}
+	}
+
+	empty, err := s.UpsertProject(ctx, "/tmp/empty-project", []string{"go"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	global, _, _, err := s.WelcomeRecent(ctx, "home", &empty, "/tmp/empty-project", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(global) != 3 || global[0].Title != "local new" || global[0].Here {
+		t.Fatalf("empty project %+v", global)
+	}
+	only, err := s.NumberedSessions(ctx, "home", &empty, "/tmp/empty-project", 4, true)
+	if err != nil || len(only) != 0 {
+		t.Fatalf("here only %d err=%v", len(only), err)
 	}
 }
