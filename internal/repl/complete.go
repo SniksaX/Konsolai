@@ -1,17 +1,13 @@
 package repl
 
 import (
-	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/SniksaX/Konsolai/internal/commands"
 	"github.com/SniksaX/Konsolai/internal/config"
-	"github.com/SniksaX/Konsolai/internal/repo"
 	"github.com/SniksaX/Konsolai/internal/ui/theme"
 	"github.com/reeflective/readline"
 )
@@ -42,12 +38,10 @@ func Completer(reg *commands.Registry, cwdFn func() string) func(line []rune, cu
 		}
 		start := lastTokenStart(s)
 		tok := s[start:]
-		cwd := ""
-		if cwdFn != nil {
-			cwd = cwdFn()
-		}
+		_ = cwdFn
 		if strings.HasPrefix(tok, "@") {
-			return completeAt(cwd, tok)
+			// The @ menu owns file completion. Tab must not cycle readline candidates.
+			return readline.Completions{}
 		}
 		return readline.Completions{}
 	}
@@ -232,73 +226,4 @@ func cap50items(s []slashItem) []slashItem {
 		return s[:50]
 	}
 	return s
-}
-
-func completeAt(cwd, tok string) readline.Completions {
-	pref := strings.TrimPrefix(tok, "@")
-	dir := cwd
-	base := pref
-	if i := strings.LastIndex(pref, "/"); i >= 0 {
-		dir = filepath.Join(cwd, pref[:i])
-		base = pref[i+1:]
-	}
-	var cands []string
-	root := repo.Root(cwd)
-	if _, err := os.Stat(filepath.Join(root, ".git")); err == nil {
-		files, err := repo.Files(context.Background(), root)
-		if err == nil {
-			relCwd, _ := filepath.Rel(root, cwd)
-			for _, f := range files {
-				rel := f
-				if relCwd != "" && relCwd != "." {
-					if !strings.HasPrefix(f, filepath.ToSlash(relCwd)+"/") {
-						continue
-					}
-					rel = strings.TrimPrefix(f, filepath.ToSlash(relCwd)+"/")
-				}
-				if strings.HasPrefix(rel, pref) || (base != "" && strings.HasPrefix(filepath.Base(rel), base)) {
-					cands = append(cands, "@"+rel)
-				}
-			}
-		}
-	}
-	ents, err := os.ReadDir(dir)
-	if err == nil {
-		prefixDir := ""
-		if i := strings.LastIndex(pref, "/"); i >= 0 {
-			prefixDir = pref[:i+1]
-		}
-		for _, e := range ents {
-			name := e.Name()
-			if base != "" && !strings.HasPrefix(name, base) {
-				continue
-			}
-			p := "@" + prefixDir + name
-			if e.IsDir() {
-				p += "/"
-			}
-			cands = append(cands, p)
-		}
-	}
-	return readline.CompleteValues(cap50(unique(cands))...)
-}
-
-func cap50(s []string) []string {
-	if len(s) > 50 {
-		return s[:50]
-	}
-	return s
-}
-
-func unique(s []string) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, x := range s {
-		if seen[x] {
-			continue
-		}
-		seen[x] = true
-		out = append(out, x)
-	}
-	return out
 }
