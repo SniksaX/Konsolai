@@ -113,7 +113,7 @@ Compose-only variables are not config keys. `/set` does not write them.
 | `KONSOLAI_TARGET` | `base` | image stage, `base` or `full` |
 | `KONSOLAI_WORKDIR` | `.` | host directory mounted at `/work` |
 | `KONSOLAI_CONFIG_FILE` | `./config.yaml` | config file mounted at `/config/config.yaml` |
-| `KONSOLAI_EMBED_MODEL` | `BAAI/bge-base-en-v1.5` | embedding service model id |
+| `KONSOLAI_EMBED_MODEL` | `BAAI/bge-m3` | embedding service model id |
 | `KONSOLAI_EMBED_PORT` | `8080` | published embedding port |
 
 Friendly names:
@@ -325,7 +325,7 @@ scripts/docker.sh run
 
 The app service is profile `app`. Inside Compose the database hostname is `db`. [compose.yaml](compose.yaml) sets `KONSOLAI_DATABASE_URL` to `postgres://postgres:<password>@db:5432/konsolai?sslmode=disable`, with the same password. That variable overrides `database.url` in the mounted file, so `docker compose run` reaches the Compose database even when the file's URL is empty. The mounted `config.yaml` still holds models and roles. A host database URL in that file stays for use outside Compose. `scripts/docker.sh run` is `docker compose run --rm konsolai` with the current directory mounted. `scripts/docker.sh shell` opens bash in the image.
 
-From inside the container, a model server on the host is `http://host.docker.internal:<port>/v1`. `localhost` is the container itself. [compose.yaml](compose.yaml) comments the `network_mode: host` alternative. The optional embedding service is profile `rag` (`docker compose --profile rag up -d`). Set `KONSOLAI_EMBED_MODEL` to choose its model; the default is `BAAI/bge-base-en-v1.5`.
+From inside the container, a model server on the host is `http://host.docker.internal:<port>/v1`. `localhost` is the container itself. [compose.yaml](compose.yaml) comments the `network_mode: host` alternative. The optional embedding service is profile `rag` (`docker compose --profile rag up -d`). Set `KONSOLAI_EMBED_MODEL` to choose its model; the default is `BAAI/bge-m3` (1024-wide, matching `memory_chunks`). `BAAI/bge-base-en-v1.5` is a 768-wide alternative.
 
 ## Development
 
