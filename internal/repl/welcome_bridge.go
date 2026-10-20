@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -46,6 +47,7 @@ type welcomeState struct {
 	onPlaceholder func(string)
 	gatherLimit   time.Duration
 	freshFor      time.Duration
+	rows          int
 }
 
 func (s *welcomeState) retarget(cwd, dir, branch string, projectID *int64) {
@@ -373,7 +375,7 @@ func openWelcome(ctx context.Context, w io.Writer, env *commands.Env, info banne
 	// The interim banner was the splash while probes ran. The welcome render
 	// includes its own wordmark and the panels, so replace that splash once.
 	fmt.Fprint(w, theme.ClearHome)
-	paintWelcome(w, st.snapshot())
+	st.rows = writeWelcome(w, st.snapshot())
 	return st, nil
 }
 
@@ -384,12 +386,30 @@ func paintWelcome(w io.Writer, snap welcomeSnap) {
 	welcome.Render(w, d, snap.layout, width, height)
 }
 
+func writeWelcome(w io.Writer, snap welcomeSnap) int {
+	var buf bytes.Buffer
+	paintWelcome(&buf, snap)
+	_, _ = w.Write(buf.Bytes())
+	return paintedRows(buf.Bytes())
+}
+
+func paintedRows(b []byte) int {
+	if len(b) == 0 {
+		return 0
+	}
+	n := bytes.Count(b, []byte("\n"))
+	if !bytes.HasSuffix(b, []byte("\n")) {
+		n++
+	}
+	return n
+}
+
 // redraw paints the full welcome from the cached startup data. A cache older
 // than the welcome cache window refreshes in the background and does not
-// delay this paint.
-func (s *welcomeState) redraw(w io.Writer) {
+// delay this paint. The return value is the number of rows painted.
+func (s *welcomeState) redraw(w io.Writer) int {
 	if s == nil {
-		return
+		return 0
 	}
 	if w == nil {
 		w = os.Stdout
@@ -398,7 +418,11 @@ func (s *welcomeState) redraw(w io.Writer) {
 	if !snap.at.IsZero() && time.Since(snap.at) > s.cacheFor() {
 		go s.refresh()
 	}
-	paintWelcome(w, snap)
+	n := writeWelcome(w, snap)
+	s.mu.Lock()
+	s.rows = n
+	s.mu.Unlock()
+	return n
 }
 
 func (s *welcomeState) refresh() {
