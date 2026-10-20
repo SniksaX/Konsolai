@@ -27,6 +27,35 @@ func testPrompter(t *testing.T) (p *Prompter, write *os.File, out *bytes.Buffer)
 	return p, w, out
 }
 
+func TestConfirmSummaryUsesHeading(t *testing.T) {
+	restore := ForceTheme(Palette{Enabled: true, Truecolor: true, Scheme: "glacier"})
+	defer restore()
+	p, w, out := testPrompter(t)
+	done := make(chan Decision, 1)
+	go func() {
+		d, _, err := p.Confirm("plan: add a file", "")
+		if err != nil {
+			t.Error(err)
+		}
+		done <- d
+	}()
+	waitPrompt(t, out, "plan: add a file")
+	if _, err := w.Write([]byte("n")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout")
+	}
+	s := out.String()
+	mark := "plan: add a file"
+	i := strings.Index(s, mark)
+	if i < 0 || strings.Contains(s[:i], "\x1b[1") || strings.Contains(s, ";39m") {
+		t.Fatalf("summary %q", s)
+	}
+}
+
 func TestConfirmKeepsTypedAhead(t *testing.T) {
 	p, w, _ := testPrompter(t)
 	if _, err := w.Write([]byte("y")); err != nil {
