@@ -586,6 +586,7 @@ func (r *rlReader) undoOrExpand() {
 func (r *rlReader) SetOnClear(fn func()) { r.onClear = fn }
 
 func (r *rlReader) clearScreen() {
+	fmt.Fprint(os.Stdout, theme.ResetScroll)
 	fmt.Fprint(os.Stdout, theme.ClearScroll)
 	if r.onClear != nil {
 		r.onClear()
