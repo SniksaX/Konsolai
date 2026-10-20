@@ -3,7 +3,6 @@ package docrender
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -21,7 +20,6 @@ import (
 )
 
 const (
-	mmdcTimeout   = 60 * time.Second
 	chromeTimeout = 90 * time.Second
 	stderrCap     = 4 << 10
 )
@@ -31,13 +29,8 @@ type Result struct {
 	Diagrams int
 }
 
-var lookMmdc = exec.LookPath
-
 func Render(ctx context.Context, format, fileName, content string) (Result, error) {
-	expanded, n, err := expandMermaid(ctx, content)
-	if err != nil {
-		return Result{}, err
-	}
+	n := countMermaid(content)
 	title := firstH1(content)
 	if title == "" {
 		title = filepath.Base(fileName)
@@ -45,9 +38,15 @@ func Render(ctx context.Context, format, fileName, content string) (Result, erro
 			title = "Document"
 		}
 	}
-	page, err := markdownHTML(title, expanded)
+	page, err := markdownHTML(title, content)
 	if err != nil {
 		return Result{}, err
+	}
+	if n > 0 {
+		page, err = applyMermaid(ctx, page)
+		if err != nil {
+			return Result{}, err
+		}
 	}
 	if format == "html" {
 		return Result{Bytes: []byte(page), Diagrams: n}, nil
@@ -59,43 +58,14 @@ func Render(ctx context.Context, format, fileName, content string) (Result, erro
 	return Result{Bytes: pdf, Diagrams: n}, nil
 }
 
-func expandMermaid(ctx context.Context, content string) (string, int, error) {
-	parts := splitMermaid(content)
+func countMermaid(content string) int {
 	n := 0
-	for _, p := range parts {
+	for _, p := range splitMermaid(content) {
 		if p.diagram {
 			n++
 		}
 	}
-	if n == 0 {
-		return content, 0, nil
-	}
-	if _, err := lookMmdc("mmdc"); err != nil {
-		return "", 0, errors.New("mmdc not found; install with: npm i -g @mermaid-js/mermaid-cli")
-	}
-	dir, err := os.MkdirTemp("", "konsolai-mmd-")
-	if err != nil {
-		return "", 0, fmt.Errorf("docrender: mermaid temp: %w", err)
-	}
-	defer os.RemoveAll(dir)
-	var b strings.Builder
-	di := 0
-	for i, p := range parts {
-		if i > 0 {
-			b.WriteByte('\n')
-		}
-		if !p.diagram {
-			b.WriteString(p.src)
-			continue
-		}
-		svg, err := renderMermaid(ctx, dir, di, p.src)
-		if err != nil {
-			return "", 0, err
-		}
-		b.WriteString(inlineSVG(svg))
-		di++
-	}
-	return b.String(), n, nil
+	return n
 }
 
 type mermaidPart struct {
@@ -144,31 +114,6 @@ func isMermaidOpen(line string) bool {
 	}
 	fields := strings.Fields(strings.ToLower(strings.TrimSpace(strings.TrimPrefix(t, "```"))))
 	return len(fields) > 0 && fields[0] == "mermaid"
-}
-
-func renderMermaid(ctx context.Context, dir string, index int, src string) ([]byte, error) {
-	in := filepath.Join(dir, fmt.Sprintf("d%d.mmd", index))
-	out := filepath.Join(dir, fmt.Sprintf("d%d.svg", index))
-	cfg := filepath.Join(dir, "puppeteer.json")
-	if err := os.WriteFile(in, []byte(src), 0600); err != nil {
-		return nil, fmt.Errorf("docrender: mermaid write: %w", err)
-	}
-	if err := os.WriteFile(cfg, []byte(`{"args":["--no-sandbox","--disable-gpu"]}`), 0600); err != nil {
-		return nil, fmt.Errorf("docrender: mermaid write: %w", err)
-	}
-	bin, err := lookMmdc("mmdc")
-	if err != nil {
-		return nil, errors.New("mmdc not found; install with: npm i -g @mermaid-js/mermaid-cli")
-	}
-	_, stderr, err := runGrouped(ctx, mmdcTimeout, dir, mermaidEnv(), true, bin, "-i", in, "-o", out, "-b", "transparent", "-p", cfg)
-	if err != nil {
-		return nil, fmt.Errorf("docrender: mermaid diagram %d: %s", index+1, tailErr(stderr, err))
-	}
-	svg, err := os.ReadFile(out)
-	if err != nil {
-		return nil, fmt.Errorf("docrender: mermaid diagram %d: %w", index+1, err)
-	}
-	return svg, nil
 }
 
 var (
@@ -266,22 +211,16 @@ func printPDF(ctx context.Context, page string) ([]byte, error) {
 	if err := os.Mkdir(profile, 0700); err != nil {
 		return nil, fmt.Errorf("docrender: pdf profile: %w", err)
 	}
-	abs, err := filepath.Abs(htmlPath)
+	pageURL, err := fileURL(htmlPath)
 	if err != nil {
 		return nil, fmt.Errorf("docrender: pdf path: %w", err)
 	}
-	fileURL := (&url.URL{Scheme: "file", Path: abs}).String()
-	_, stderr, err := runGrouped(ctx, chromeTimeout, dir, chromeEnv(), true, bin,
-		"--headless=new",
-		"--disable-gpu",
-		"--no-sandbox",
-		"--disable-extensions",
-		"--ozone-platform=headless",
+	args := append(headlessArgs(profile),
 		"--no-pdf-header-footer",
-		"--user-data-dir="+profile,
 		"--print-to-pdf="+pdfPath,
-		fileURL,
+		pageURL,
 	)
+	_, stderr, err := runGrouped(ctx, chromeTimeout, dir, chromeEnv(), true, bin, args...)
 	if err != nil {
 		return nil, fmt.Errorf("docrender: chrome: %s", tailErr(stderr, err))
 	}
@@ -341,6 +280,14 @@ func runGrouped(ctx context.Context, timeout time.Duration, dir string, env []st
 	}
 }
 
+func fileURL(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return (&url.URL{Scheme: "file", Path: abs}).String(), nil
+}
+
 func tailErr(stderr []byte, err error) string {
 	s := strings.TrimSpace(string(stderr))
 	if len(stderr) > stderrCap {
@@ -350,41 +297,4 @@ func tailErr(stderr []byte, err error) string {
 		return err.Error()
 	}
 	return s
-}
-
-func mermaidEnv() []string {
-	cache := os.Getenv("PUPPETEER_CACHE_DIR")
-	if cache == "" || !puppeteerHasChrome(cache) {
-		if home, err := os.UserHomeDir(); err == nil {
-			fallback := filepath.Join(home, ".cache", "puppeteer")
-			if puppeteerHasChrome(fallback) {
-				cache = fallback
-			}
-		}
-	}
-	env := os.Environ()
-	out := make([]string, 0, len(env)+1)
-	for _, e := range env {
-		if strings.HasPrefix(e, "PUPPETEER_CACHE_DIR=") {
-			continue
-		}
-		out = append(out, e)
-	}
-	if cache != "" {
-		out = append(out, "PUPPETEER_CACHE_DIR="+cache)
-	}
-	return out
-}
-
-func puppeteerHasChrome(dir string) bool {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false
-	}
-	for _, e := range entries {
-		if strings.Contains(strings.ToLower(e.Name()), "chrome") {
-			return true
-		}
-	}
-	return false
 }

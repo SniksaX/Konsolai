@@ -24,7 +24,6 @@ import (
 
 const (
 	chromeFix = "install chromium (sudo pacman -S chromium) or set KONSOLAI_CHROME"
-	mmdcFix   = "npm i -g @mermaid-js/mermaid-cli"
 )
 
 var doctorChromeBins = []string{
@@ -85,7 +84,6 @@ func doctorChecks(ctx context.Context, env *Env) []doctorCheck {
 		checkDatabase(ctx, env),
 		checkPgpass(),
 		checkBinary("chromium", locateChrome(), chromeFix),
-		checkBinary("mmdc", findMmdc(), mmdcFix),
 		doctorCheck{mark: "✓", name: "clipboard", detail: clipBackend(os.Environ())},
 		checkBinary("git", findGit(), "install git"),
 		checkTerminal(),
@@ -254,13 +252,6 @@ func locateChrome() string {
 		if p, err := doctorLookPath(name); err == nil && p != "" {
 			return name
 		}
-	}
-	return ""
-}
-
-func findMmdc() string {
-	if p, err := doctorLookPath("mmdc"); err == nil && p != "" {
-		return "mmdc"
 	}
 	return ""
 }

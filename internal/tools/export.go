@@ -25,7 +25,7 @@ func (t *exportDocTool) Spec() llm.ToolSpec {
 		Type: "function",
 		Function: llm.FunctionSpec{
 			Name:        "export_doc",
-			Description: "Write an HTML or PDF document to path. Arguments are only path and format; it reads the Markdown file you already wrote.",
+			Description: "Write an HTML or PDF document to path. Arguments are only path and format; it reads the Markdown file you already wrote. Mermaid fences render in Chromium. HTML output inlines those diagrams and has no script. PDF needs Chromium.",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Output path relative to the current directory."},"format":{"type":"string","enum":["html","pdf"]}},"required":["path","format"]}`),
 		},
 	}

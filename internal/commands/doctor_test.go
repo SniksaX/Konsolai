@@ -129,7 +129,7 @@ func TestDoctorThinkingReject(t *testing.T) {
 func TestDoctorMissingBinaryAndModes(t *testing.T) {
 	restoreDoctorHooks(t)
 	doctorLookPath = func(name string) (string, error) {
-		if name == "chromium" || name == "mmdc" || name == "git" || name == "chromium-browser" ||
+		if name == "chromium" || name == "git" || name == "chromium-browser" ||
 			name == "google-chrome-stable" || name == "google-chrome" || name == "brave" || name == "brave-browser" {
 			return "", exec.ErrNotFound
 		}
@@ -152,13 +152,16 @@ func TestDoctorMissingBinaryAndModes(t *testing.T) {
 		t.Fatalf("exit %d\n%s", code, out.String())
 	}
 	text := out.String()
-	for _, want := range []string{"0644", "chmod 0600", "not found", chromeFix, mmdcFix, "install git", "chmod 0600 ~/.pgpass"} {
+	for _, want := range []string{"0644", "chmod 0600", "not found", chromeFix, "install git", "chmod 0600 ~/.pgpass"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q\n%s", want, text)
 		}
 	}
 	if strings.Contains(text, secret) {
 		t.Fatal("pgpass secret leaked")
+	}
+	if strings.Contains(text, "mmdc") || strings.Contains(text, "mermaid-cli") {
+		t.Fatalf("mmdc still checked\n%s", text)
 	}
 }
 

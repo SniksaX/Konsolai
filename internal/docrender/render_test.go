@@ -2,6 +2,7 @@ package docrender
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,24 +11,12 @@ import (
 )
 
 func TestHTMLGoldenStructure(t *testing.T) {
-	bin := fakeMmdc(t, `#!/bin/sh
-out=""
-while [ $# -gt 0 ]; do
-  if [ "$1" = "-o" ]; then out="$2"; fi
-  shift
-done
-printf '%s\n' '<svg xmlns="http://www.w3.org/2000/svg" id="diagram"></svg>' > "$out"
-`)
-	lookMmdc = func(string) (string, error) { return bin, nil }
-	t.Cleanup(func() { lookMmdc = exec.LookPath })
-
 	src := `# Architecture
 
 | Fn | Role |
 |----|------|
 | Add | plus |
-
-` + "```mermaid\nflowchart TD\n  A-->B\n```\n"
+`
 	res, err := Render(context.Background(), "html", "ARCHITECTURE.md", src)
 	if err != nil {
 		t.Fatal(err)
@@ -39,40 +28,62 @@ printf '%s\n' '<svg xmlns="http://www.w3.org/2000/svg" id="diagram"></svg>' > "$
 	if !strings.Contains(html, "<table") || !strings.Contains(html, "<th") {
 		t.Fatalf("table missing: %s", html)
 	}
-	if !strings.Contains(html, "<svg") || !strings.Contains(html, `id="diagram"`) {
-		t.Fatalf("svg missing: %s", html)
-	}
 	if !strings.Contains(html, `id="architecture"`) && !strings.Contains(html, `id="Architecture"`) {
 		t.Fatalf("heading id missing: %s", html)
 	}
-	if res.Diagrams != 1 {
+	if strings.Contains(strings.ToLower(html), "<script") {
+		t.Fatalf("script in plain html: %s", html)
+	}
+	if res.Diagrams != 0 {
 		t.Fatalf("diagrams %d", res.Diagrams)
 	}
 }
 
-func TestMermaidErrorPropagatesIndexAndStderr(t *testing.T) {
-	bin := fakeMmdc(t, `#!/bin/sh
-echo "parse error at line 2: bad node" >&2
-exit 1
-`)
-	lookMmdc = func(string) (string, error) { return bin, nil }
-	t.Cleanup(func() { lookMmdc = exec.LookPath })
-	src := "# T\n\n```mermaid\nnot a diagram\n```\n"
-	_, err := Render(context.Background(), "html", "t.md", src)
-	if err == nil {
-		t.Fatal("want error")
+func TestMarkMermaidFence(t *testing.T) {
+	page, err := markdownHTML("T", "```mermaid\nflowchart TD\n  A-->B\n```\n")
+	if err != nil {
+		t.Fatal(err)
 	}
-	msg := err.Error()
-	if !strings.Contains(msg, "diagram 1") || !strings.Contains(msg, "parse error at line 2") {
-		t.Fatalf("%q", msg)
+	got := markMermaidBlocks(page)
+	if !strings.Contains(got, `<pre class="mermaid">`) {
+		t.Fatalf("unmarked: %s", got)
+	}
+	if strings.Contains(got, "language-mermaid") {
+		t.Fatalf("code wrapper left: %s", got)
+	}
+	if !strings.Contains(got, "flowchart TD") || !strings.Contains(got, "A--&gt;B") && !strings.Contains(got, "A-->B") {
+		t.Fatalf("source missing: %s", got)
 	}
 }
 
-func TestMermaidMissingListsInstall(t *testing.T) {
-	lookMmdc = func(string) (string, error) { return "", os.ErrNotExist }
-	t.Cleanup(func() { lookMmdc = exec.LookPath })
+func TestMermaidBundleEmbedded(t *testing.T) {
+	if len(mermaidJS) < 1_000_000 {
+		t.Fatalf("mermaid bundle %d bytes", len(mermaidJS))
+	}
+	if !strings.Contains(string(mermaidJS), `globalThis["mermaid"]`) {
+		t.Fatal("bundle does not set the mermaid global")
+	}
+}
+
+func TestMermaidMarkerParsesError(t *testing.T) {
+	const dom = `<div id="mermaid-done" data-status="error" data-index="2">No diagram type detected matching given configuration for text: not a diagram</div>`
+	status, index, message, ok := mermaidMarker(dom)
+	if !ok || status != "error" || index != 2 {
+		t.Fatalf("%q %d %q %v", status, index, message, ok)
+	}
+	if !strings.Contains(message, "No diagram type detected") {
+		t.Fatalf("%q", message)
+	}
+}
+
+func TestMermaidMissingChrome(t *testing.T) {
+	getenv = func(string) string { return "" }
+	lookPath = func(string) (string, error) { return "", errors.New("missing") }
+	userHome = func() (string, error) { return t.TempDir(), nil }
+	glob = func(string) ([]string, error) { return nil, nil }
+	t.Cleanup(restoreChromeHooks)
 	_, err := Render(context.Background(), "html", "t.md", "# T\n\n```mermaid\nA-->B\n```\n")
-	if err == nil || !strings.Contains(err.Error(), "npm i -g @mermaid-js/mermaid-cli") {
+	if err == nil || !strings.Contains(err.Error(), "install chromium") {
 		t.Fatalf("%v", err)
 	}
 }
@@ -87,10 +98,58 @@ func TestTitleFallsBackToFileName(t *testing.T) {
 	}
 }
 
-func TestRenderPDFIntegration(t *testing.T) {
-	if _, err := lookMmdc("mmdc"); err != nil {
-		t.Skip("mmdc not installed")
+func TestMermaidHTMLInlineSVG(t *testing.T) {
+	if _, err := FindChrome(); err != nil {
+		t.Skip("chrome not installed")
 	}
+	src := `# Architecture
+
+| Fn | Role |
+|----|------|
+| Add | plus |
+
+` + "```mermaid\nflowchart TD\n  A[Agent] --> B[Tools]\n```\n"
+	res, err := Render(context.Background(), "html", "ARCHITECTURE.md", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(res.Bytes)
+	if !strings.Contains(html, "<svg") {
+		t.Fatalf("svg missing: %s", html[:min(len(html), 500)])
+	}
+	if strings.Contains(strings.ToLower(html), "<script") {
+		t.Fatalf("script left in html")
+	}
+	if strings.Contains(html, "mermaid.min.js") {
+		t.Fatal("mermaid script src left in html")
+	}
+	if !strings.Contains(html, "<title>Architecture</title>") {
+		t.Fatalf("title missing: %s", html[:min(len(html), 300)])
+	}
+	if res.Diagrams != 1 {
+		t.Fatalf("diagrams %d", res.Diagrams)
+	}
+	if strings.Contains(html, "SIL Open Font License") || strings.Contains(html, "@font-face") {
+		t.Fatalf("font license left in html")
+	}
+}
+
+func TestMermaidSyntaxErrorNamesDiagram(t *testing.T) {
+	if _, err := FindChrome(); err != nil {
+		t.Skip("chrome not installed")
+	}
+	src := "# T\n\n```mermaid\nnot a diagram\n```\n"
+	_, err := Render(context.Background(), "html", "t.md", src)
+	if err == nil {
+		t.Fatal("want error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "diagram 1") || !strings.Contains(msg, "No diagram type detected") {
+		t.Fatalf("%q", msg)
+	}
+}
+
+func TestRenderPDFIntegration(t *testing.T) {
 	if _, err := FindChrome(); err != nil {
 		t.Skip("chrome not installed")
 	}
@@ -111,17 +170,17 @@ func TestRenderPDFIntegration(t *testing.T) {
 	if res.Diagrams != 1 {
 		t.Fatalf("diagrams %d", res.Diagrams)
 	}
+	text := pdfText(t, res.Bytes)
+	if text == "" {
+		return
+	}
+	if !strings.Contains(text, "Agent") && !strings.Contains(text, "Tools") {
+		t.Fatalf("pdf missing diagram text: %q", text)
+	}
 }
 
 func TestSVGStripsFontLicense(t *testing.T) {
-	bin := fakeMmdc(t, `#!/bin/sh
-out=""
-while [ $# -gt 0 ]; do
-  if [ "$1" = "-o" ]; then out="$2"; fi
-  shift
-done
-cat > "$out" <<'SVG'
-<svg xmlns="http://www.w3.org/2000/svg">
+	raw := []byte(`<svg xmlns="http://www.w3.org/2000/svg">
 <!-- generated -->
 <title>chart</title>
 <desc>flowchart</desc>
@@ -129,56 +188,46 @@ cat > "$out" <<'SVG'
 <style>@font-face{font-family:Treemap;src:url(x)} text{font-family:Treemap}</style>
 <text font-family="Treemap">A</text>
 </svg>
-SVG
 `)
-	lookMmdc = func(string) (string, error) { return bin, nil }
-	t.Cleanup(func() { lookMmdc = exec.LookPath })
-
-	src := "# Doc\n\n```mermaid\nflowchart TD\n  A-->B\n```\n"
-	res, err := Render(context.Background(), "html", "A.md", src)
-	if err != nil {
-		t.Fatal(err)
+	got := inlineSVG(raw)
+	if strings.Contains(got, "SIL Open Font License") {
+		t.Fatalf("still has OFL: %s", got)
 	}
-	html := string(res.Bytes)
-	if strings.Contains(html, "SIL Open Font License") {
-		t.Fatalf("html still has OFL: %s", html)
+	if strings.Contains(got, "@font-face") {
+		t.Fatalf("still has @font-face: %s", got)
 	}
-	if strings.Contains(html, "@font-face") {
-		t.Fatalf("html still has @font-face: %s", html)
-	}
-
 	if _, err := FindChrome(); err != nil {
 		return
 	}
-	pdf, err := Render(context.Background(), "pdf", "A.md", src)
+	pdf, err := printPDF(context.Background(), wrapHTML("A", got))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := exec.LookPath("pdftotext"); err != nil {
+	text := pdfText(t, pdf)
+	if text == "" {
 		return
 	}
+	if n := strings.Count(strings.ToLower(text), "font license"); n != 0 {
+		t.Fatalf("pdftotext font license count %d: %s", n, text)
+	}
+	if strings.Contains(text, "SIL Open Font License") {
+		t.Fatalf("pdf text has OFL: %s", text)
+	}
+}
+
+func pdfText(t *testing.T, pdf []byte) string {
+	t.Helper()
+	if _, err := exec.LookPath("pdftotext"); err != nil {
+		return ""
+	}
 	dir := t.TempDir()
-	p := filepath.Join(dir, "A.pdf")
-	if err := os.WriteFile(p, pdf.Bytes, 0644); err != nil {
+	p := filepath.Join(dir, "doc.pdf")
+	if err := os.WriteFile(p, pdf, 0644); err != nil {
 		t.Fatal(err)
 	}
 	out, err := exec.Command("pdftotext", p, "-").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := strings.Count(strings.ToLower(string(out)), "font license"); n != 0 {
-		t.Fatalf("pdftotext font license count %d: %s", n, out)
-	}
-	if strings.Contains(string(out), "SIL Open Font License") {
-		t.Fatalf("pdf text has OFL: %s", out)
-	}
-}
-
-func fakeMmdc(t *testing.T, script string) string {
-	t.Helper()
-	p := filepath.Join(t.TempDir(), "mmdc")
-	if err := os.WriteFile(p, []byte(script), 0755); err != nil {
-		t.Fatal(err)
-	}
-	return p
+	return string(out)
 }
