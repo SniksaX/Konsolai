@@ -8,6 +8,9 @@ func ComposeEnvExample() string {
 		"# Docker Compose. These are not config keys and /set does not write them.\n" +
 		"# compose.yaml reads KONSOLAI_DB_PASSWORD from the environment. Use a private value.\n" +
 		"KONSOLAI_DB_PASSWORD=change-me\n" +
+		"# Uid and gid for the konsolai service. scripts/docker.sh sets these from id.\n" +
+		"KONSOLAI_UID=1000\n" +
+		"KONSOLAI_GID=1000\n" +
 		"# Published host port for the compose database.\n" +
 		"KONSOLAI_DB_PORT=55434\n" +
 		"# Image stage passed to docker build: base or full.\n" +
