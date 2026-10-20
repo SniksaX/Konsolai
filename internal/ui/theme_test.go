@@ -20,6 +20,16 @@ func TestIntentBadgeMargin(t *testing.T) {
 	}
 }
 
+func TestIntentBadgeWordIsBold(t *testing.T) {
+	restore := ForceTheme(Palette{Enabled: true, Truecolor: true, Scheme: "glacier"})
+	defer restore()
+	got := IntentBadge("answer")
+	i := strings.Index(got, "answer")
+	if i < 0 || !strings.Contains(got[:i], "\x1b[1;38;") || strings.Contains(got, ";39m") {
+		t.Fatalf("badge %q", got)
+	}
+}
+
 func TestRejectCallUsesWarn(t *testing.T) {
 	restore := ForceTheme(Palette{Enabled: true, Truecolor: false, Scheme: "amber"})
 	defer restore()
