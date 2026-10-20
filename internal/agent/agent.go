@@ -164,6 +164,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	toolsGone := false
 	goneNoteAdded := false
 	wroteFile := false
+	var verified []VerifiedCall
 	exportedDoc := false
 	docsNudged := false
 	docsWriteNoted := false
@@ -418,6 +419,9 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				fmt.Fprintln(cfg.Out)
 			}
 			writeAnswer(cfg.Out, text, cfg.Plain)
+			for _, claim := range UnverifiedClaims(text, verified) {
+				fmt.Fprintln(cfg.Out, ui.Current().Warn("· not verified: "+claim))
+			}
 			return nil
 		}
 
@@ -695,6 +699,9 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				_ = rec.FileChange(ctx, *result.Change)
 			}
 			if !result.IsError {
+				verified = append(verified, VerifiedCall{
+					Tool: call.Function.Name, Args: call.Function.Arguments, Out: result.Output,
+				})
 				switch call.Function.Name {
 				case "write_file":
 					wroteFile = true
@@ -729,6 +736,9 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					fmt.Fprintln(cfg.Out)
 				}
 				writeAnswer(cfg.Out, text, cfg.Plain)
+				for _, claim := range UnverifiedClaims(text, verified) {
+					fmt.Fprintln(cfg.Out, ui.Current().Warn("· not verified: "+claim))
+				}
 				return nil
 			}
 			pal := ui.Current()
