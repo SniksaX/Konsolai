@@ -195,7 +195,7 @@ func TestAgeAndPlaceholder(t *testing.T) {
 
 func TestGatherGitBranch(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not installed")
+		t.Skip("needs git")
 	}
 	dir := t.TempDir()
 	cmd := exec.Command("git", "init", "-b", "demo")
