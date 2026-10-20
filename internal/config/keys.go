@@ -313,6 +313,8 @@ var keyTable = []Key{
 		func(c *Config, v int) { c.UI.ProbeDeadlineMS = v }, func(c Config) int { return c.UI.ProbeDeadlineMS }),
 	km("ui.probe_timeout_ms", "one endpoint probe", 300,
 		func(c *Config, v int) { c.UI.ProbeTimeoutMS = v }, func(c Config) int { return c.UI.ProbeTimeoutMS }),
+	km("ui.esc_timeout_ms", "gap allowed between bytes of one escape sequence", 30,
+		func(c *Config, v int) { c.UI.EscTimeoutMS = v }, func(c Config) int { return c.UI.EscTimeoutMS }).when(ApplyNow),
 	km("ui.git_query_ms", "git status during welcome and in the footer", 200,
 		func(c *Config, v int) { c.UI.GitQueryMS = v }, func(c Config) int { return c.UI.GitQueryMS }),
 	km("ui.memory_query_ms", "facts and recent sessions on the welcome screen", 200,
