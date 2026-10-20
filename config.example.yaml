@@ -107,6 +107,7 @@ defaults:
     strip_emoji: true   # drop emoji from model text
     probe_deadline_ms: 400   # welcome gather budget
     probe_timeout_ms: 300   # one endpoint probe
+    esc_timeout_ms: 30   # gap allowed between bytes of one escape sequence
     git_query_ms: 200   # git status during welcome and in the footer
     memory_query_ms: 200   # facts and recent sessions on the welcome screen
     startup_cap_ms: 500   # longest wait before the prompt appears
