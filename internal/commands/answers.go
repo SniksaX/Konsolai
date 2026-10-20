@@ -31,6 +31,7 @@ type histItem struct {
 	Mode      string
 	Status    string
 	CWD       string
+	Other     bool
 	Age       time.Duration
 	Msgs      []llm.Message
 	ShellCmds []string
@@ -129,6 +130,10 @@ func projectIDOf(ctx context.Context, env *Env) *int64 {
 }
 
 func loadHistoryFixed(ctx context.Context, env *Env, limit int) []histItem {
+	return loadHistory(ctx, env, limit, false)
+}
+
+func loadHistory(ctx context.Context, env *Env, limit int, hereOnly bool) []histItem {
 	if env != nil && env.LoadHistory != nil {
 		return env.LoadHistory(ctx, limit)
 	}
@@ -139,7 +144,7 @@ func loadHistoryFixed(ctx context.Context, env *Env, limit int) []histItem {
 			if id := projectIDOf(ctx, env); id != nil {
 				pid = id
 			}
-			rows, err := s.HistorySessions(ctx, env.Profile.Name, pid, cwd, limit)
+			rows, err := s.NumberedSessions(ctx, env.Profile.Name, pid, cwd, limit, hereOnly)
 			if err != nil {
 				env.Mem.Fail(err)
 			} else if len(rows) > 0 {
@@ -152,13 +157,19 @@ func loadHistoryFixed(ctx context.Context, env *Env, limit int) []histItem {
 					}
 					out = append(out, histItem{
 						ID: sess.ID, Title: sess.Title, Mode: sess.Mode, Status: sess.Status,
-						CWD: sess.CWD, Age: time.Since(sess.LastActivity), Msgs: memory.ToLLM(msgs),
+						CWD: sess.CWD, Other: !store.Here(pid, cwd, sess.Session),
+						Age: time.Since(sess.LastActivity), Msgs: memory.ToLLM(msgs),
 						ShellCmds: shellCmdsOf(ctx, s, sess.ID), Changes: changesOf(ctx, s, sess.ID),
 					})
 				}
 				return out
+			} else if hereOnly {
+				return nil
 			}
 		}
+	}
+	if hereOnly {
+		return nil
 	}
 	if sess, ok := memory.LoadLast(env.Profile.Name, cwd, 0); ok {
 		age := time.Duration(0)
