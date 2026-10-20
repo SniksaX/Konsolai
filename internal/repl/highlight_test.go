@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/SniksaX/Konsolai/internal/commands"
 	"github.com/SniksaX/Konsolai/internal/ui/theme"
@@ -70,20 +69,18 @@ func TestHighlightSlashOnPTY(t *testing.T) {
 		_ = cmd.Wait()
 	}()
 	_ = pty.Setsize(pt, &pty.Winsize{Rows: 24, Cols: 80})
-	time.Sleep(200 * time.Millisecond)
-	if _, err := pt.Write([]byte("/help")); err != nil {
-		t.Fatal(err)
+	v := startView(t, pt, 24, 80)
+	v.expect("prompt", func(sc *screen) bool { return strings.Contains(sc.dump(), "›") })
+	v.typeKeys("/help", screenHas("/help"))
+	raw := v.raw()
+	if !bytes.Contains(raw, []byte(theme.Style(theme.Accent, "/help"))) || bytes.Contains(raw, []byte(theme.Style(theme.Link, "/help"))) || bytes.Contains(raw, []byte("\x1b[4;")) {
+		failScreen(t, "pty accent", v.shot(), raw)
 	}
-	raw := readFor(t, pt, theme.Style(theme.Accent, "/help"), 3*time.Second)
-	if bytes.Contains(raw, []byte(theme.Style(theme.Link, "/help"))) || bytes.Contains(raw, []byte("\x1b[4;")) {
-		t.Fatalf("pty used link\n%q", raw)
-	}
-	if _, err := pt.Write([]byte("\x15/nope")); err != nil {
-		t.Fatal(err)
-	}
-	raw = readFor(t, pt, theme.Style(theme.Error, "/nope"), 3*time.Second)
-	if bytes.Contains(raw, []byte(theme.Style(theme.Link, "/nope"))) {
-		t.Fatalf("invalid pty used link\n%q", raw)
+	v.typeKeys("\x15", func(sc *screen) bool { return !strings.Contains(screenPrompt(sc), "/help") })
+	v.typeKeys("/nope", screenHas("/nope"))
+	raw = v.raw()
+	if !bytes.Contains(raw, []byte(theme.Style(theme.Error, "/nope"))) || bytes.Contains(raw, []byte(theme.Style(theme.Link, "/nope"))) {
+		failScreen(t, "invalid pty accent", v.shot(), raw)
 	}
 }
 
@@ -96,24 +93,4 @@ func highlightChild() {
 	}
 	_, _ = rd.ReadLine(context.Background(), "› ")
 	os.Exit(0)
-}
-
-func readFor(t *testing.T, pt *os.File, needle string, d time.Duration) []byte {
-	t.Helper()
-	_ = pt.SetReadDeadline(time.Now().Add(d))
-	var raw []byte
-	buf := make([]byte, 4096)
-	deadline := time.Now().Add(d)
-	for time.Now().Before(deadline) {
-		_ = pt.SetReadDeadline(time.Now().Add(80 * time.Millisecond))
-		n, _ := pt.Read(buf)
-		if n > 0 {
-			raw = append(raw, buf[:n]...)
-		}
-		if bytes.Contains(raw, []byte(needle)) {
-			return raw
-		}
-	}
-	t.Fatalf("timeout waiting for %q\n%q", needle, raw)
-	return raw
 }

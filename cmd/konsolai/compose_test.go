@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -48,7 +49,7 @@ func TestComposeConfig(t *testing.T) {
 	pass := randToken(t)
 	cmd := exec.Command("docker", "compose", "-f", filepath.Join(root, "compose.yaml"), "config", "-q")
 	cmd.Dir = root
-	cmd.Env = composeEnv(root, pass, 55434, t.TempDir(), filepath.Join(t.TempDir(), "unused.yaml"), "konsolai-config-check", "konsolai-config-check-embed")
+	cmd.Env = composeEnv(root, pass, freePort(t), t.TempDir(), filepath.Join(t.TempDir(), "unused.yaml"), "konsolai-config-check", "konsolai-config-check-embed")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("compose config: %v\n%s", err, scrub(string(out), pass))
@@ -107,6 +108,8 @@ func TestComposeConfigNoDotEnv(t *testing.T) {
 	for _, want := range []string{
 		"POSTGRES_PASSWORD: konsolai",
 		"postgres://postgres:konsolai@db:5432/konsolai?sslmode=disable",
+		// File default when KONSOLAI_DB_PORT is unset. Tests must not bind it;
+		// a database stack listens on :0 and passes that port instead.
 		`published: "55434"`,
 		"target: 5432",
 		"user: 1000:1000",
@@ -141,6 +144,7 @@ func TestComposePasswordAppearsTwice(t *testing.T) {
 
 func TestComposeDatabaseRoundTrip(t *testing.T) {
 	requireDocker(t)
+	lockCompose(t)
 	root := moduleRoot(t)
 	hideDotEnv(t, root)
 	token := randToken(t)
@@ -295,18 +299,83 @@ func randToken(t *testing.T) string {
 	return hex.EncodeToString(b[:])
 }
 
-func freePort(t *testing.T) int {
+// composeContainers keeps tests that start containers from running together.
+var composeContainers sync.Mutex
+
+func lockCompose(t *testing.T) {
 	t.Helper()
-	for p := 55434; p < 55500; p++ {
-		ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p))
+	composeContainers.Lock()
+	t.Cleanup(func() { composeContainers.Unlock() })
+}
+
+// listenFree binds :0 and returns the chosen port. The listener stays open
+// so two calls cannot receive the same port. 55434 is the compose file
+// default and is never returned.
+func listenFree(t *testing.T) (net.Listener, int) {
+	t.Helper()
+	for {
+		ln, err := net.Listen("tcp", ":0")
 		if err != nil {
+			t.Fatal(err)
+		}
+		port := ln.Addr().(*net.TCPAddr).Port
+		if port == 55434 {
+			_ = ln.Close()
 			continue
 		}
-		_ = ln.Close()
-		return p
+		return ln, port
 	}
-	t.Fatal("no free database port")
-	return 0
+}
+
+func freePort(t *testing.T) int {
+	t.Helper()
+	ln, port := listenFree(t)
+	_ = ln.Close()
+	return port
+}
+
+func TestListenPortsDiffer(t *testing.T) {
+	a, pa := listenFree(t)
+	defer a.Close()
+	b, pb := listenFree(t)
+	defer b.Close()
+	if pa == pb || pa == 0 || pb == 0 {
+		t.Fatalf("ports %d and %d", pa, pb)
+	}
+}
+
+func TestComposePublishesDistinctFreePorts(t *testing.T) {
+	requireDocker(t)
+	root := moduleRoot(t)
+	hideDotEnv(t, root)
+	ln1, p1 := listenFree(t)
+	ln2, p2 := listenFree(t)
+	_ = ln1.Close()
+	_ = ln2.Close()
+	if p1 == p2 {
+		t.Fatalf("ports %d and %d", p1, p2)
+	}
+	seen := map[int]bool{}
+	for _, port := range []int{p1, p2} {
+		cmd := exec.Command("docker", "compose", "-f", filepath.Join(root, "compose.yaml"), "config")
+		cmd.Dir = root
+		cmd.Env = composeEnv(root, "port-check", port, t.TempDir(), filepath.Join(t.TempDir(), "unused.yaml"), "konsolai-port-"+fmt.Sprint(port), "konsolai-port-embed-"+fmt.Sprint(port))
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("compose config port %d: %v\n%s", port, err, out)
+		}
+		want := fmt.Sprintf("published: \"%d\"", port)
+		if !strings.Contains(string(out), want) {
+			t.Fatalf("config missing %s\n%s", want, out)
+		}
+		if strings.Contains(string(out), "published: \"55434\"") {
+			t.Fatalf("config for port %d still publishes the file default\n%s", port, out)
+		}
+		seen[port] = true
+	}
+	if len(seen) != 2 {
+		t.Fatalf("published ports %v", seen)
+	}
 }
 
 func waitHealthy(ctx context.Context, project, service string) error {

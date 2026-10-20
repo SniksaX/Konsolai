@@ -10,15 +10,40 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/creack/pty"
 )
 
-var ansiReE2E = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`)
+var ansiReE2E = regexp.MustCompile(`\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]`)
+
+func e2eScale() int {
+	s := os.Getenv("KONSOLAI_TEST_TIMEOUT_SCALE")
+	if s == "" {
+		return 1
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 1 {
+		return 1
+	}
+	return n
+}
+
+func ptyTimeout() time.Duration {
+	return 3 * time.Second * time.Duration(e2eScale())
+}
+
+func e2eRawTail(b []byte) string {
+	if len(b) > 2048 {
+		b = b[len(b)-2048:]
+	}
+	return strconv.Quote(string(b))
+}
 
 var (
 	e2eBinOnce sync.Once
@@ -58,17 +83,14 @@ func TestE2EConfirmSingleY(t *testing.T) {
 	srv := e2eLLM(t)
 	s := startE2E(t, srv.URL+"/v1", t.TempDir())
 	defer s.close()
-	mark := s.wait("›", 10*time.Second)
-	s.send("touch the e2e confirm file\r")
-	s.waitNew(mark, "[y]es", 15*time.Second)
-	if !strings.Contains(s.plain(), "run: touch") {
-		t.Fatalf("want run: touch, got\n%s", s.plain())
+	s.expect("prompt", slashHas("›"))
+	s.typeKeysWithin("touch the e2e confirm file\r", slashHas("[y]es"), ptyTimeout()*5)
+	if !strings.Contains(s.screen().dump(), "run: touch") {
+		s.failDump("want run: touch")
 	}
-	mark = s.len()
-	s.send("y")
-	s.waitNew(mark, "done", 10*time.Second)
-	s.send("/exit\r")
-	s.waitExit(5 * time.Second)
+	s.typeKeysWithin("y", slashHas("done"), ptyTimeout()*5)
+	s.typeKeys("/exit\r", nil)
+	s.waitExit(ptyTimeout())
 }
 
 func TestE2EProdClarificationThenN(t *testing.T) {
@@ -78,28 +100,24 @@ func TestE2EProdClarificationThenN(t *testing.T) {
 	srv := e2eLLM(t)
 	s := startE2E(t, srv.URL+"/v1", t.TempDir())
 	defer s.close()
-	mark := s.wait("›", 10*time.Second)
-	s.send("i'd like you to switch to prod\r")
-	s.waitNew(mark, "Which one", 15*time.Second)
-	mark = s.len()
-	s.send("yes first one\r")
-	s.waitNew(mark, "[y]es", 15*time.Second)
-	if !strings.Contains(s.plain(), "git checkout prod") {
-		t.Fatalf("want checkout confirm, got\n%s", s.plain())
+	s.expect("prompt", slashHas("›"))
+	s.typeKeysWithin("i'd like you to switch to prod\r", slashHas("Which one"), ptyTimeout()*5)
+	s.typeKeysWithin("yes first one\r", slashHas("[y]es"), ptyTimeout()*5)
+	if !strings.Contains(s.screen().dump(), "git checkout prod") {
+		s.failDump("want checkout confirm")
 	}
-	mark = s.len()
-	s.send("n")
-	s.waitNew(mark, "done", 15*time.Second)
-	s.send("/exit\r")
-	s.waitExit(5 * time.Second)
+	s.typeKeysWithin("n", slashHas("done"), ptyTimeout()*5)
+	s.typeKeys("/exit\r", nil)
+	s.waitExit(ptyTimeout())
 }
 
 type e2eSess struct {
-	t    *testing.T
-	cmd  *exec.Cmd
-	ptmx *os.File
-	mu   sync.Mutex
-	buf  bytes.Buffer
+	t          *testing.T
+	cmd        *exec.Cmd
+	ptmx       *os.File
+	mu         sync.Mutex
+	buf        bytes.Buffer
+	rows, cols int
 }
 
 func startE2E(t *testing.T, endpoint, cwd string) *e2eSess {
@@ -135,15 +153,15 @@ func startE2E(t *testing.T, endpoint, cwd string) *e2eSess {
 		"INPUTRC=/dev/null",
 		"TERM=xterm-256color",
 		"NO_COLOR=1",
-		"COLUMNS=80",
-		"LINES=24",
+		"COLUMNS=100",
+		"LINES=40",
 	)
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 24, Cols: 80})
-	s := &e2eSess{t: t, cmd: cmd, ptmx: ptmx}
+	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 40, Cols: 100})
+	s := &e2eSess{t: t, cmd: cmd, ptmx: ptmx, rows: 40, cols: 100}
 	go func() {
 		tmp := make([]byte, 4096)
 		for {
@@ -169,32 +187,107 @@ func (s *e2eSess) plain() string {
 	return ansiReE2E.ReplaceAllString(raw, "")
 }
 
-func (s *e2eSess) len() int {
+func (s *e2eSess) raw() []byte {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.buf.Len()
+	return append([]byte(nil), s.buf.Bytes()...)
 }
 
-func (s *e2eSess) wait(needle string, d time.Duration) int {
+func (s *e2eSess) failDump(why string) {
 	s.t.Helper()
-	s.waitNew(0, needle, d)
-	return s.len()
+	sc := s.screen()
+	s.t.Fatalf("%s\n--- screen ---\n%s\n--- raw ---\n%s", why, sc.dump(), e2eRawTail(s.raw()))
 }
 
-func (s *e2eSess) waitNew(from int, needle string, d time.Duration) {
+func slashHas(needle string) func(*slashScreen) bool {
+	return func(sc *slashScreen) bool { return strings.Contains(sc.dump(), needle) }
+}
+
+func slashHasAll(parts ...string) func(*slashScreen) bool {
+	return func(sc *slashScreen) bool {
+		d := sc.dump()
+		for _, p := range parts {
+			if !strings.Contains(d, p) {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+func (s *e2eSess) expectWithin(why string, d time.Duration, ok func(*slashScreen) bool) *slashScreen {
 	s.t.Helper()
 	deadline := time.Now().Add(d)
+	var last *slashScreen
+	var raw []byte
 	for time.Now().Before(deadline) {
-		s.mu.Lock()
-		raw := append([]byte(nil), s.buf.Bytes()[min(from, s.buf.Len()):]...)
-		s.mu.Unlock()
-		plain := ansiReE2E.ReplaceAllString(strings.ReplaceAll(string(raw), "\r", ""), "")
-		if strings.Contains(plain, needle) {
-			return
+		raw = s.raw()
+		last = newSlashScreen(s.rows, s.cols)
+		last.feed(raw)
+		if ok(last) {
+			return last
 		}
 		time.Sleep(15 * time.Millisecond)
 	}
-	s.t.Fatalf("timeout waiting for %q after %d\n%s", needle, from, s.plain())
+	dump := ""
+	if last != nil {
+		dump = last.dump()
+	}
+	s.t.Fatalf("timeout %s\n--- screen ---\n%s\n--- raw ---\n%s", why, dump, e2eRawTail(raw))
+	return nil
+}
+
+func (s *e2eSess) expect(why string, ok func(*slashScreen) bool) *slashScreen {
+	s.t.Helper()
+	return s.expectWithin(why, ptyTimeout(), ok)
+}
+
+func splitE2EKeys(keys string) []string {
+	b := []byte(keys)
+	var out []string
+	for i := 0; i < len(b); {
+		if b[i] == 0x1b && i+2 < len(b) && b[i+1] == '[' {
+			f := b[i+2]
+			if f == 'A' || f == 'B' || f == 'C' || f == 'D' || f == 'F' || f == 'H' {
+				out = append(out, string(b[i:i+3]))
+				i += 3
+				continue
+			}
+		}
+		_, n := utf8.DecodeRune(b[i:])
+		if n < 1 {
+			n = 1
+		}
+		out = append(out, string(b[i:i+n]))
+		i += n
+	}
+	return out
+}
+
+func (s *e2eSess) typeKeysWithin(keys string, done func(*slashScreen) bool, d time.Duration) {
+	s.t.Helper()
+	parts := splitE2EKeys(keys)
+	for i, part := range parts {
+		beforeN := len(s.raw())
+		beforeDump := s.screen().dump()
+		s.send(part)
+		last := i == len(parts)-1
+		s.expectWithin(strconv.Quote(part), d, func(sc *slashScreen) bool {
+			moved := sc.dump() != beforeDump || len(s.raw()) > beforeN
+			if !moved {
+				return false
+			}
+			if last && done != nil {
+				return done(sc)
+			}
+			return true
+		})
+	}
+}
+
+func (s *e2eSess) typeKeys(keys string, done func(*slashScreen) bool) {
+	s.t.Helper()
+	s.typeKeysWithin(keys, done, ptyTimeout())
 }
 
 func (s *e2eSess) send(keys string) {
@@ -211,10 +304,10 @@ func (s *e2eSess) waitExit(d time.Duration) {
 	select {
 	case err := <-done:
 		if err != nil {
-			s.t.Fatalf("exit: %v\n%s", err, s.plain())
+			s.failDump("exit: " + err.Error())
 		}
 	case <-time.After(d):
-		s.t.Fatalf("exit timeout\n%s", s.plain())
+		s.failDump("exit timeout")
 	}
 }
 

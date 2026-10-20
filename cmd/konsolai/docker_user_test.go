@@ -19,6 +19,7 @@ func TestDockerArbitraryUser(t *testing.T) {
 	if !dockerDaemon(t) {
 		t.Skip("docker daemon is not available")
 	}
+	lockCompose(t)
 	root := moduleRoot(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
