@@ -104,6 +104,8 @@ defaults:
     welcome: split   # split | frame | minimal
     code_highlight: true   # highlight fenced code
     clear_on_start: true   # clear the terminal when the REPL starts
+    clear_header: full   # full redraws the welcome after a clear; compact keeps one line; none leaves the screen blank
+    pinned_header: false   # pin the welcome; lines scrolled inside the region may not enter scrollback
     strip_emoji: true   # drop emoji from model text
     probe_deadline_ms: 400   # welcome gather budget
     probe_timeout_ms: 300   # one endpoint probe
