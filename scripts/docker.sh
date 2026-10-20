@@ -7,6 +7,10 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 
+# Bash does not export UID. Compose reads these for the konsolai service user.
+export KONSOLAI_UID="$(id -u)"
+export KONSOLAI_GID="$(id -g)"
+
 usage() {
 	cat <<'EOF'
 usage: scripts/docker.sh build [base|full]
