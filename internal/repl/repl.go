@@ -467,8 +467,7 @@ func echoInput(w io.Writer, text string) {
 	fmt.Fprintln(w, "  "+theme.Style(theme.Accent, "›")+" "+echoBody(text))
 }
 
-// echoBody is the submitted line: primary (default foreground, never Accent
-// or Link) plus bold. 39 keeps a surrounding accent color from sticking.
+// echoBody is the submitted line in the heading color, without bold.
 func echoBody(text string) string {
 	if text == "" || !theme.Enabled() {
 		return text
