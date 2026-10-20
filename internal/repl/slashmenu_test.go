@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/SniksaX/Konsolai/internal/commands"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 )
 
 func testMenuReg() *commands.Registry {
@@ -359,4 +360,30 @@ func themeStrip(s string) string {
 		i++
 	}
 	return b.String()
+}
+
+func TestSlashMenuSummariesAlign(t *testing.T) {
+	m := newSlashMenu(testMenuReg())
+	m.Sync("/")
+	m.Down()
+	reg := testMenuReg()
+	col := -1
+	for _, line := range strings.Split(stripANSI(m.Render(80)), "\n") {
+		name, _, ok := strings.Cut(strings.TrimLeft(strings.TrimPrefix(line, "›"), " "), " ")
+		if !ok || !strings.HasPrefix(name, "/") {
+			continue
+		}
+		c := reg.Lookup(strings.TrimSuffix(name, ","))
+		if c == nil {
+			t.Fatalf("no command for %q", line)
+		}
+		at := theme.DisplayWidth(line[:strings.Index(line, c.Summary)])
+		if col >= 0 && at != col {
+			t.Fatalf("summary at %d, want %d:\n%s", at, col, stripANSI(m.Render(80)))
+		}
+		col = at
+	}
+	if col < 0 {
+		t.Fatal("no rows rendered")
+	}
 }
