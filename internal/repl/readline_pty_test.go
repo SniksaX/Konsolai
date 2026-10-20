@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -19,7 +20,191 @@ import (
 	"github.com/creack/pty"
 )
 
-var ansiRe = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`)
+// CSI with parameters, intermediates, and one final byte. DECSCUSR is
+// ESC [ n SP q, which a letter-only final class leaves in the text.
+var ansiRe = regexp.MustCompile(`\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]`)
+
+func ptyScale() int {
+	s := os.Getenv("KONSOLAI_TEST_TIMEOUT_SCALE")
+	if s == "" {
+		return 1
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 1 {
+		return 1
+	}
+	return n
+}
+
+func ptyTimeout() time.Duration {
+	return 3 * time.Second * time.Duration(ptyScale())
+}
+
+func rawTail(b []byte) string {
+	if len(b) > 2048 {
+		b = b[len(b)-2048:]
+	}
+	return strconv.Quote(string(b))
+}
+
+func failScreen(t *testing.T, why string, sc *screen, raw []byte) {
+	t.Helper()
+	dump := ""
+	if sc != nil {
+		dump = sc.dump()
+	}
+	t.Fatalf("%s\n--- screen ---\n%s\n--- raw ---\n%s", why, dump, rawTail(raw))
+}
+
+// ptyView is a PTY whose expect helper reads the rendered screen.
+type ptyView struct {
+	t    *testing.T
+	pt   *os.File
+	mu   *sync.Mutex
+	buf  *bytes.Buffer
+	rows int
+	cols int
+}
+
+func (v *ptyView) raw() []byte {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return append([]byte(nil), v.buf.Bytes()...)
+}
+
+func (v *ptyView) shot() *screen {
+	sc := newScreen(v.rows, v.cols)
+	sc.feed(v.raw())
+	return sc
+}
+
+func (v *ptyView) expect(why string, ok func(*screen) bool) *screen {
+	v.t.Helper()
+	deadline := time.Now().Add(ptyTimeout())
+	var last *screen
+	var raw []byte
+	for time.Now().Before(deadline) {
+		raw = v.raw()
+		last = newScreen(v.rows, v.cols)
+		last.feed(raw)
+		if ok(last) {
+			return last
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	failScreen(v.t, "timeout "+why, last, raw)
+	return nil
+}
+
+func (v *ptyView) write(keys string) {
+	v.t.Helper()
+	if _, err := v.pt.Write([]byte(keys)); err != nil {
+		v.t.Fatal(err)
+	}
+}
+
+// splitKeys breaks a byte string into terminal keys. An arrow is one key.
+func splitKeys(s string) []string {
+	b := []byte(s)
+	var out []string
+	for i := 0; i < len(b); {
+		if b[i] == 0x1b && i+2 < len(b) && b[i+1] == '[' {
+			f := b[i+2]
+			if f == 'A' || f == 'B' || f == 'C' || f == 'D' || f == 'F' || f == 'H' {
+				out = append(out, string(b[i:i+3]))
+				i += 3
+				continue
+			}
+		}
+		_, n := utf8.DecodeRune(b[i:])
+		if n < 1 {
+			n = 1
+		}
+		out = append(out, string(b[i:i+n]))
+		i += n
+	}
+	return out
+}
+
+// typeKeys writes one key at a time. The next key is sent only after the
+// screen or the raw stream shows the app handled the previous one. done is
+// checked on the rendered screen after the last key.
+func (v *ptyView) typeKeys(keys string, done func(*screen) bool) {
+	v.t.Helper()
+	parts := splitKeys(keys)
+	if len(parts) == 0 {
+		if done != nil {
+			v.expect("screen", done)
+		}
+		return
+	}
+	for i, part := range parts {
+		beforeN := len(v.raw())
+		beforeDump := v.shot().dump()
+		v.write(part)
+		last := i == len(parts)-1
+		v.expect(strconv.Quote(part), func(sc *screen) bool {
+			moved := sc.dump() != beforeDump || len(v.raw()) > beforeN
+			if !moved {
+				return false
+			}
+			if last && done != nil {
+				return done(sc)
+			}
+			return true
+		})
+	}
+}
+
+func screenHas(s string) func(*screen) bool {
+	return func(sc *screen) bool { return strings.Contains(sc.dump(), s) }
+}
+
+func screenHasAll(parts ...string) func(*screen) bool {
+	return func(sc *screen) bool {
+		d := sc.dump()
+		for _, p := range parts {
+			if !strings.Contains(d, p) {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+func startView(t *testing.T, pt *os.File, rows, cols int) *ptyView {
+	t.Helper()
+	v := &ptyView{t: t, pt: pt, mu: &sync.Mutex{}, buf: &bytes.Buffer{}, rows: rows, cols: cols}
+	go func() {
+		tmp := make([]byte, 4096)
+		for {
+			n, err := pt.Read(tmp)
+			if n > 0 {
+				v.mu.Lock()
+				v.buf.Write(tmp[:n])
+				v.mu.Unlock()
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	return v
+}
+
+func screenPrompt(sc *screen) string {
+	if sc == nil || sc.r < 0 || sc.r >= sc.h {
+		return ""
+	}
+	end := sc.c
+	if end < 0 {
+		end = 0
+	}
+	if end > len(sc.cell[sc.r]) {
+		end = len(sc.cell[sc.r])
+	}
+	return strings.TrimRight(string(sc.cell[sc.r][:end]), " ")
+}
 
 func TestReadlineSubmittedOnceOnPTY(t *testing.T) {
 	if _, err := os.Stat("/dev/ptmx"); err != nil && os.Getenv("KONSOLAI_PTY_CHILD") == "" {
@@ -51,22 +236,31 @@ func TestReadlineSubmittedOnceOnPTY(t *testing.T) {
 	}
 	defer ptmx.Close()
 	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 24, Cols: 80})
-
-	time.Sleep(80 * time.Millisecond)
-	if _, err := ptmx.Write([]byte("hii\n")); err != nil {
-		t.Fatal(err)
+	v := startView(t, ptmx, 24, 80)
+	v.expect("prompt", func(sc *screen) bool { return strings.Contains(sc.dump(), "›") })
+	v.typeKeys("hii", func(sc *screen) bool { return strings.Contains(screenPrompt(sc), "hii") })
+	v.typeKeys("\n", func(sc *screen) bool { return strings.Contains(sc.dump(), "hii") })
+	deadline := time.Now().Add(ptyTimeout())
+	var waitErr error
+	done := make(chan struct{})
+	go func() {
+		waitErr = cmd.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Until(deadline)):
+		failScreen(t, "child still running", v.shot(), v.raw())
 	}
-
-	_ = ptmx.SetReadDeadline(time.Now().Add(3 * time.Second))
-	raw, _ := io.ReadAll(ptmx)
+	raw := v.raw()
 	plain := ansiRe.ReplaceAll(raw, nil)
 	plain = bytes.ReplaceAll(plain, []byte{'\r'}, nil)
 	n := strings.Count(string(plain), "hii")
 	if n != 1 {
-		t.Fatalf("submitted text appeared %d times; raw=%q plain=%q", n, raw, plain)
+		failScreen(t, "submitted text appeared "+strconv.Itoa(n)+" times", v.shot(), raw)
 	}
-	if err := cmd.Wait(); err != nil {
-		t.Fatalf("child: %v raw=%q", err, raw)
+	if waitErr != nil {
+		failScreen(t, "child: "+waitErr.Error(), v.shot(), raw)
 	}
 }
 
@@ -103,53 +297,16 @@ func TestSlashMenuDownReplacesLineOnPTY(t *testing.T) {
 		_ = cmd.Wait()
 	}()
 	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 24, Cols: 80})
-	var mu sync.Mutex
-	var buf bytes.Buffer
-	go func() {
-		tmp := make([]byte, 4096)
-		for {
-			n, err := ptmx.Read(tmp)
-			if n > 0 {
-				mu.Lock()
-				buf.Write(tmp[:n])
-				mu.Unlock()
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
-	time.Sleep(150 * time.Millisecond)
-	if _, err := ptmx.Write([]byte("/")); err != nil {
-		t.Fatal(err)
+	v := startView(t, ptmx, 24, 80)
+	v.expect("prompt", func(sc *screen) bool { return strings.Contains(sc.dump(), "›") })
+	v.typeKeys("/", screenHas("/help"))
+	v.typeKeys("\x1b[B", func(sc *screen) bool { return strings.Contains(screenPrompt(sc), "/help") })
+	v.typeKeys("\r", func(sc *screen) bool { return strings.Contains(sc.dump(), "SUBMIT=/help") })
+	if !strings.Contains(v.shot().dump(), "SUBMIT=/help") {
+		logb, _ := os.ReadFile(logf)
+		loga, _ := os.ReadFile(logf + ".after")
+		failScreen(t, "submitted\nlog="+string(logb)+" after="+string(loga), v.shot(), v.raw())
 	}
-	time.Sleep(200 * time.Millisecond)
-	if _, err := ptmx.Write([]byte("\x1b[B")); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(200 * time.Millisecond)
-	if _, err := ptmx.Write([]byte("\r")); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		mu.Lock()
-		plain := ansiRe.ReplaceAllString(strings.ReplaceAll(buf.String(), "\r", ""), "")
-		mu.Unlock()
-		if strings.Contains(plain, "SUBMIT=") {
-			if !strings.Contains(plain, "SUBMIT=/help") {
-				logb, _ := os.ReadFile(logf)
-				loga, _ := os.ReadFile(logf + ".after")
-				t.Fatalf("submitted %q\nlog=%q after=%q\n%s", plain, logb, loga, plain)
-			}
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	mu.Lock()
-	plain := buf.String()
-	mu.Unlock()
-	t.Fatalf("timeout\n%s", ansiRe.ReplaceAllString(plain, ""))
 }
 
 func TestFrameSlashBackspaceClearsMenu(t *testing.T) {
@@ -232,53 +389,18 @@ func TestFrameNoPartialRuleAfterTurn(t *testing.T) {
 	}
 	defer ptmx.Close()
 	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 24, Cols: 80})
-	var mu sync.Mutex
-	var buf bytes.Buffer
-	go func() {
-		tmp := make([]byte, 4096)
-		for {
-			n, err := ptmx.Read(tmp)
-			if n > 0 {
-				mu.Lock()
-				buf.Write(tmp[:n])
-				mu.Unlock()
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
-	time.Sleep(150 * time.Millisecond)
-	if _, err := ptmx.Write([]byte("hello\n")); err != nil {
-		t.Fatal(err)
+	v := startView(t, ptmx, 24, 80)
+	v.expect("prompt", func(sc *screen) bool { return strings.Contains(sc.dump(), "›") })
+	v.typeKeys("hello", func(sc *screen) bool { return strings.Contains(screenPrompt(sc), "hello") })
+	v.typeKeys("\n", screenHas("TURN_DONE"))
+	_ = cmd.Wait()
+	sc := v.shot()
+	if short := partialRules(sc, 80); len(short) > 0 {
+		failScreen(t, "partial rules in scrollback", sc, v.raw())
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		mu.Lock()
-		if bytes.Contains(buf.Bytes(), []byte("TURN_DONE")) {
-			raw := append([]byte(nil), buf.Bytes()...)
-			mu.Unlock()
-			_ = cmd.Wait()
-			sc := newScreen(24, 80)
-			sc.feed(raw)
-			if short := partialRules(sc, 80); len(short) > 0 {
-				t.Fatalf("partial rules in scrollback %v\n%s", short, sc.dump())
-			}
-			if !strings.Contains(sc.dump(), "hello") {
-				t.Fatalf("missing echo:\n%s", sc.dump())
-			}
-			return
-		}
-		mu.Unlock()
-		time.Sleep(20 * time.Millisecond)
+	if !strings.Contains(sc.dump(), "hello") {
+		failScreen(t, "missing echo", sc, v.raw())
 	}
-	if cmd.Process != nil {
-		_ = cmd.Process.Kill()
-	}
-	mu.Lock()
-	raw := append([]byte(nil), buf.Bytes()...)
-	mu.Unlock()
-	t.Fatalf("timeout waiting for TURN_DONE raw=%q", raw)
 }
 
 func runSlashChild() {
@@ -313,39 +435,22 @@ func driveSlashPTY(t *testing.T, testName string, keys []byte) *screen {
 		_ = cmd.Wait()
 	}()
 	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 24, Cols: 80})
-	var mu sync.Mutex
-	var buf bytes.Buffer
-	go func() {
-		tmp := make([]byte, 4096)
-		for {
-			n, err := ptmx.Read(tmp)
-			if n > 0 {
-				mu.Lock()
-				buf.Write(tmp[:n])
-				mu.Unlock()
+	v := startView(t, ptmx, 24, 80)
+	v.expect("prompt", func(sc *screen) bool { return strings.Contains(sc.dump(), "›") })
+	if len(keys) > 0 {
+		v.typeKeys(string(keys[:1]), func(sc *screen) bool {
+			if keys[0] == '/' {
+				return strings.Contains(sc.dump(), "/help")
 			}
-			if err != nil {
-				return
-			}
-		}
-	}()
-	time.Sleep(150 * time.Millisecond)
-	if _, err := ptmx.Write(keys[:1]); err != nil {
-		t.Fatal(err)
+			return true
+		})
 	}
-	time.Sleep(250 * time.Millisecond)
 	if len(keys) > 1 {
-		if _, err := ptmx.Write(keys[1:]); err != nil {
-			t.Fatal(err)
-		}
-		time.Sleep(250 * time.Millisecond)
+		v.typeKeys(string(keys[1:]), func(sc *screen) bool {
+			return menuLeftover(sc) == ""
+		})
 	}
-	mu.Lock()
-	raw := append([]byte(nil), buf.Bytes()...)
-	mu.Unlock()
-	sc := newScreen(24, 80)
-	sc.feed(raw)
-	return sc
+	return v.shot()
 }
 
 func promptCursor(sc *screen) (row, col int, ok bool) {
@@ -527,9 +632,11 @@ func (s *screen) feed(p []byte) {
 	}
 }
 
+// csi consumes one escape. CSI is parameters (0x30-0x3F), intermediates
+// (0x20-0x2F), then one final byte (0x40-0x7E). DECSCUSR is ESC [ n SP q.
 func (s *screen) csi(p []byte, i int) int {
 	if i+1 >= len(p) {
-		return i + 1
+		return len(p)
 	}
 	switch p[i+1] {
 	case ']':
@@ -546,15 +653,20 @@ func (s *screen) csi(p []byte, i int) int {
 		return len(p)
 	case '[':
 		j := i + 2
-		for j < len(p) && !((p[j] >= 'A' && p[j] <= 'Z') || (p[j] >= 'a' && p[j] <= 'z')) {
+		for j < len(p) && p[j] >= 0x30 && p[j] <= 0x3F {
+			j++
+		}
+		paramEnd := j
+		for j < len(p) && p[j] >= 0x20 && p[j] <= 0x2F {
 			j++
 		}
 		if j >= len(p) {
 			return len(p)
 		}
-		cmd := p[j]
-		args := parseCSIArgs(string(p[i+2 : j]))
-		s.applyCSI(cmd, args)
+		if p[j] < 0x40 || p[j] > 0x7E {
+			return j
+		}
+		s.applyCSI(p[j], parseCSIArgs(string(p[i+2:paramEnd])))
 		return j + 1
 	default:
 		return i + 2
@@ -648,6 +760,33 @@ func (s *screen) applyCSI(cmd byte, args []int) {
 		}
 	case 'K':
 		s.clearLine()
+	}
+}
+
+func TestSplitKeysKeepsArrows(t *testing.T) {
+	got := splitKeys("\x1b[C\r")
+	if len(got) != 2 || got[0] != "\x1b[C" || got[1] != "\r" {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestScreenSkipsDECSCUSR(t *testing.T) {
+	sc := newScreen(2, 40)
+	sc.feed([]byte("ab\x1b[1 qcd"))
+	if strings.Contains(sc.dump(), "[1 q") {
+		t.Fatalf("cursor sequence leaked\n%s", sc.dump())
+	}
+	if !strings.Contains(sc.dump(), "abcd") {
+		t.Fatalf("text\n%s", sc.dump())
+	}
+	sc = newScreen(3, 20)
+	sc.feed([]byte("\x1b[2;3Hxy"))
+	if sc.r != 1 || sc.c != 4 {
+		t.Fatalf("cup r=%d c=%d\n%s", sc.r, sc.c, sc.dump())
+	}
+	row := strings.TrimRight(string(sc.cell[1]), " ")
+	if !strings.HasSuffix(row, "xy") {
+		t.Fatalf("row %q", row)
 	}
 }
 
@@ -748,49 +887,32 @@ func driveKeys(t *testing.T, testName, child, keys, done string) string {
 		_ = cmd.Wait()
 	}()
 	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 24, Cols: 80})
-	var mu sync.Mutex
-	var buf bytes.Buffer
-	go func() {
-		tmp := make([]byte, 4096)
-		for {
-			n, err := ptmx.Read(tmp)
-			if n > 0 {
-				mu.Lock()
-				buf.Write(tmp[:n])
-				mu.Unlock()
+	v := startView(t, ptmx, 24, 80)
+	ready := "›"
+	if strings.Contains(done, "SUBMIT") && strings.Contains(keys, "ask") {
+		ready = "ask anything"
+	}
+	v.expect("prompt", func(sc *screen) bool {
+		d := sc.dump()
+		return strings.Contains(d, ready) || strings.Contains(d, "ask anything") || strings.Contains(d, "FOOTER_MARK")
+	})
+	// Right and End are ambiguous CSI prefixes until the following byte is
+	// buffered. Send that gesture in one write, then wait for the screen.
+	if keys == "\x1b[C\r" || keys == "\x1b[F\r" {
+		v.write(keys)
+		v.expect(done, screenHas(done))
+	} else {
+		parts := splitKeys(keys)
+		for i, part := range parts {
+			var step func(*screen) bool
+			switch {
+			case i == len(parts)-1:
+				step = screenHas(done)
+			case part == "/":
+				step = screenHas("/help")
 			}
-			if err != nil {
-				return
-			}
+			v.typeKeys(part, step)
 		}
-	}()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		mu.Lock()
-		plain := ansiRe.ReplaceAllString(strings.ReplaceAll(buf.String(), "\r", ""), "")
-		mu.Unlock()
-		if strings.Contains(plain, "›") || strings.Contains(plain, "ask anything") || strings.Contains(plain, "FOOTER_MARK") {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
 	}
-	time.Sleep(80 * time.Millisecond)
-	if _, err := ptmx.Write([]byte(keys)); err != nil {
-		t.Fatal(err)
-	}
-	deadline = time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		mu.Lock()
-		plain := ansiRe.ReplaceAllString(strings.ReplaceAll(buf.String(), "\r", ""), "")
-		mu.Unlock()
-		if strings.Contains(plain, done) {
-			return plain
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	mu.Lock()
-	plain := ansiRe.ReplaceAllString(strings.ReplaceAll(buf.String(), "\r", ""), "")
-	mu.Unlock()
-	t.Fatalf("timeout waiting for %q\n%s", done, plain)
-	return plain
+	return ansiRe.ReplaceAllString(strings.ReplaceAll(string(v.raw()), "\r", ""), "")
 }
