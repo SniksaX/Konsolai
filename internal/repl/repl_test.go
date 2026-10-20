@@ -257,24 +257,44 @@ func TestEchoPrimaryBoldNotLink(t *testing.T) {
 	}
 }
 
-func TestClearDrawsCompactHeader(t *testing.T) {
-	var out, errb bytes.Buffer
-	env := &commands.Env{
-		Profile: namedMain("p", "http://127.0.0.1:9/v1", "m"),
-		Out:     &out, Err: &errb, Cwd: t.TempDir(), Version: "vtest",
-	}
-	code := Run(context.Background(), Config{
-		Env: env, Reg: commands.Default(), Reader: &scriptReader{lines: []string{"/clear", "/exit"}},
-		Version: "vtest", Model: "m", Out: &out, Err: &errb,
-	})
-	if code != 0 {
-		t.Fatalf("exit %d %s", code, errb.String())
-	}
-	if !strings.Contains(out.String(), "KONSOLAI") {
-		t.Fatalf("missing compact header %q", out.String())
-	}
-	if strings.Contains(out.String(), "╭") {
-		t.Fatalf("full welcome on /clear %q", out.String())
+func TestClearHeaderModes(t *testing.T) {
+	for _, mode := range []string{"full", "compact", "none"} {
+		t.Run(mode, func(t *testing.T) {
+			var out, errb bytes.Buffer
+			prof := namedMain("p", "http://127.0.0.1:9/v1", "m")
+			prof.UI.ClearHeader = mode
+			env := &commands.Env{
+				Profile: prof,
+				Out:     &out, Err: &errb, Cwd: t.TempDir(), Version: "vtest",
+			}
+			code := Run(context.Background(), Config{
+				Env: env, Reg: commands.Default(), Reader: &scriptReader{lines: []string{"/clear", "/exit"}},
+				Version: "vtest", Model: "m", Out: &out, Err: &errb,
+			})
+			if code != 0 {
+				t.Fatalf("exit %d %s", code, errb.String())
+			}
+			raw := out.String()
+			i := strings.LastIndex(raw, "\x1b[3J")
+			if i < 0 {
+				t.Fatalf("clear did not wipe scrollback %q", raw)
+			}
+			after := raw[i:]
+			switch mode {
+			case "full":
+				if !strings.Contains(after, "▀▄") {
+					t.Fatalf("full header missing %q", after)
+				}
+			case "compact":
+				if !strings.Contains(after, "KONSOLAI") || strings.Contains(after, "▀▄") || strings.Contains(after, "╭") {
+					t.Fatalf("compact header %q", after)
+				}
+			default:
+				if strings.Contains(after, "KONSOLAI") || strings.Contains(after, "▀▄") || strings.Contains(after, "╭") {
+					t.Fatalf("blank header %q", after)
+				}
+			}
+		})
 	}
 }
 
