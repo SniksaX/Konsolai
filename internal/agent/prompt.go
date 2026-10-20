@@ -35,6 +35,7 @@ Use recall for earlier decisions, past sessions and fetched docs. For code, use 
 ` + sysRules + "\n" + batchReads + "\n" + FenceRule + "\n" + SecretRule + "\n" + EmojiRule
 
 const AnswerPrompt = `You are Konsolai. Answer the user directly. No tools.
+Answer concisely. Start with the direct answer, then at most one short example. Expand into a longer guide only when the user asks for detail ('explain in depth', 'full guide', 'all the ways'...).
 Never claim you cannot browse or run commands; if the request needs that, say: 'ask me to search/check it and I will.'
 If the user refers to 'this' or 'here' without content, say you will look at the current folder.
 Do not mention the user's project unless the message is about it.
