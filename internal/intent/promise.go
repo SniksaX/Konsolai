@@ -97,6 +97,24 @@ func IsPromiseContinue(s string) bool {
 	}
 }
 
+var contradictRes = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\byou didn't\b`),
+	regexp.MustCompile(`(?i)\byou did not\b`),
+	regexp.MustCompile(`(?i)\bit'?s still running\b`),
+	regexp.MustCompile(`(?i)\bstill (running|there|alive)\b`),
+	regexp.MustCompile(`(?i)ça marche pas`),
+	regexp.MustCompile(`(?i)ca marche pas`),
+	regexp.MustCompile(`(?i)t'as rien fait`),
+	regexp.MustCompile(`(?i)tu n'as rien fait`),
+	regexp.MustCompile(`(?i)\bnothing happened\b`),
+	regexp.MustCompile(`(?i)\bstill listening\b`),
+}
+
+// IsContradiction reports a short reply that disputes a claimed action.
+func IsContradiction(s string) bool {
+	return matchAny(stripProtected(s), contradictRes)
+}
+
 // EscalateIntent picks lookup for state questions and the action floor otherwise.
 func EscalateIntent(text string, verbs, targets []string) Intent {
 	if floor, ok := ActionFloor(text, verbs, targets); ok {
