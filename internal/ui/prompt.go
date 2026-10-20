@@ -75,7 +75,7 @@ func (p *Prompter) confirm(summary, preview string, force bool) (Decision, strin
 	BeforeOutput()
 	for {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, Current().Strong(summary))
+		fmt.Fprintln(w, Current().Heading(summary))
 		if preview != "" {
 			body := preview
 			if isDiffPreview(preview) {
