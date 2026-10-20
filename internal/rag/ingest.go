@@ -72,6 +72,7 @@ func (i *Ingester) SetNotice(w io.Writer) {
 		return
 	}
 	i.notice = w
+	setProcessNotice(w)
 }
 
 func (i *Ingester) Paused() bool {
@@ -229,7 +230,7 @@ func (i *Ingester) dropPending() int {
 }
 
 func (i *Ingester) ingest(ctx context.Context, item Item) {
-	if i.store == nil || i.embed == nil || i.paused {
+	if i.store == nil || i.embed == nil || i.paused || ragBlocked(i.notice) {
 		return
 	}
 	if !i.store.RAGAvailable(ctx) {
@@ -242,7 +243,10 @@ func (i *Ingester) ingest(ctx context.Context, item Item) {
 		}
 		return
 	}
-	if len(vecs) == 0 {
+	if len(vecs) == 0 || len(vecs[0]) == 0 {
+		return
+	}
+	if !acceptDims(ctx, chunkCatalog(i.store), len(vecs[0]), i.notice) {
 		return
 	}
 	_, _ = i.store.InsertChunk(ctx, store.ChunkIn{
