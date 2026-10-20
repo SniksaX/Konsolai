@@ -10,6 +10,8 @@ roles
 llm
   llm.idle_timeout_seconds     120
   llm.max_tokens.answer        4096
+  llm.max_tokens.answer_low    600
+  llm.max_tokens.answer_high   2400
   llm.max_tokens.lookup        4096
   llm.max_tokens.act           4096
   llm.max_tokens.build         12288

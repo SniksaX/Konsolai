@@ -83,10 +83,12 @@ type Temperatures struct {
 }
 
 type MaxTokens struct {
-	Answer int `yaml:"answer"`
-	Lookup int `yaml:"lookup"`
-	Act    int `yaml:"act"`
-	Build  int `yaml:"build"`
+	Answer     int `yaml:"answer"`
+	AnswerLow  int `yaml:"answer_low"`
+	AnswerHigh int `yaml:"answer_high"`
+	Lookup     int `yaml:"lookup"`
+	Act        int `yaml:"act"`
+	Build      int `yaml:"build"`
 }
 
 type Fast struct {
@@ -537,6 +539,19 @@ func (c Config) MemoryOn() bool {
 
 func (c Config) RAGEnabled() bool {
 	return c.RAG.Enabled
+}
+
+// AnswerEffortCap is the answer max_tokens for low or high effort.
+// None and unknown efforts return 0 so the caller keeps the existing answer cap.
+func (c Config) AnswerEffortCap(effort string) int {
+	switch effort {
+	case "low":
+		return nonzero(c.LLM.MaxTokens.AnswerLow, 600)
+	case "high":
+		return nonzero(c.LLM.MaxTokens.AnswerHigh, 2400)
+	default:
+		return 0
+	}
 }
 
 func (c Config) TokenCap(intent string) int {

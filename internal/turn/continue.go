@@ -31,6 +31,12 @@ func (r *Runner) continueDecision(text string) (intent.Decision, bool) {
 			Effort: intent.EffortHigh, Task: r.lastTask,
 		}, true
 	}
+	if isContinue(text) && r.answerCut && r.lastIntent == intent.Answer {
+		return intent.Decision{
+			Intent: intent.Answer, Language: r.lastLang, Reason: "continue-cut",
+			Effort: r.lastEffort, Task: r.lastTask, ContinuesSession: 1,
+		}, true
+	}
 	if !isContinue(text) || !incompleteTurn(r.lastCode) || r.lastIntent == "" {
 		if intent.HoldIntent(r.lastIntent, r.lastAssistant, text) {
 			return intent.Decision{

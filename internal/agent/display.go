@@ -69,6 +69,13 @@ func FormatSummary(intent string, s Stats) string {
 	if s.PromptTokens > 0 || s.CompletionTokens > 0 {
 		parts = append(parts, formatTok(s.PromptTokens)+" → "+formatTok(s.CompletionTokens)+" tok")
 	}
+	if intent == "answer" && s.CompletionTokens > 0 && s.ModelTime > 0 {
+		secs := s.ModelTime.Seconds()
+		if secs > 0 {
+			rate := int(float64(s.CompletionTokens)/secs + 0.5)
+			parts = append(parts, fmt.Sprintf("%d tok/s", rate))
+		}
+	}
 	return strings.Join(parts, " · ")
 }
 

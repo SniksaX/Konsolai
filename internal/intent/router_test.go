@@ -132,6 +132,9 @@ func TestClassifySchemaAndRecent(t *testing.T) {
 	if !strings.Contains(joined, "A single explicit command or a trivial operation is low") {
 		t.Fatal("router prompt missing act-low rule")
 	}
+	if !strings.Contains(joined, "A how-to question about a well-known topic is low") {
+		t.Fatal("router prompt missing how-to effort")
+	}
 	if !strings.Contains(joined, "ALWAYS intent answer, effort none") {
 		t.Fatal("router prompt missing acknowledgement rule")
 	}

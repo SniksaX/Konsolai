@@ -21,6 +21,8 @@ defaults:
     idle_timeout_seconds: 120   # stream idle limit
     max_tokens:
       answer: 4096   # answer intent token cap
+      answer_low: 600   # answer token cap at low effort
+      answer_high: 2400   # answer token cap at high effort
       lookup: 4096   # lookup intent token cap
       act: 4096   # act intent token cap
       build: 12288   # build intent token cap

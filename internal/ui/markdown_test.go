@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bytes"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -216,6 +217,149 @@ func TestStripEmojiOutsideFences(t *testing.T) {
 	}
 	if !strings.Contains(got, "keep 🎉") {
 		t.Fatalf("fence should keep emoji: %q", got)
+	}
+}
+
+func TestFenceFlushesEvery20Lines(t *testing.T) {
+	restore := ForceTheme(Palette{})
+	defer restore()
+	var buf bytes.Buffer
+	r := NewRenderer(&buf, false)
+	if _, err := r.Write([]byte("```go\n")); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < fenceFlushLines-1; i++ {
+		if _, err := r.Write([]byte("line " + strconv.Itoa(i) + "\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if strings.Contains(buf.String(), "line 0") {
+		t.Fatalf("fence flushed before %d lines: %q", fenceFlushLines, buf.String())
+	}
+	if _, err := r.Write([]byte("line " + strconv.Itoa(fenceFlushLines-1) + "\n")); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "line 0") || !strings.Contains(got, "line "+strconv.Itoa(fenceFlushLines-1)) {
+		t.Fatalf("want flush at %d lines, got %q", fenceFlushLines, got)
+	}
+	if strings.Contains(got, "╰") {
+		t.Fatalf("fence closed early: %q", got)
+	}
+	if _, err := r.Write([]byte("after\n```\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	got = buf.String()
+	if !strings.Contains(got, "after") || !strings.Contains(got, "╰") {
+		t.Fatalf("closer: %q", got)
+	}
+}
+
+func TestBlankLookaheadHoldsOneLine(t *testing.T) {
+	restore := ForceTheme(Palette{})
+	defer restore()
+	var buf bytes.Buffer
+	r := NewRenderer(&buf, false)
+	if _, err := r.Write([]byte("a\n\n")); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "\n\n") {
+		t.Fatalf("blank emitted before lookahead: %q", buf.String())
+	}
+	if _, err := r.Write([]byte("\nb\n")); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "a\n\nb") {
+		t.Fatalf("want one blank: %q", buf.String())
+	}
+	if strings.Contains(buf.String(), "a\n\n\nb") {
+		t.Fatalf("collapsed run: %q", buf.String())
+	}
+}
+
+func TestTableEscapedPipesKeepColumns(t *testing.T) {
+	restore := ForceTheme(Palette{})
+	defer restore()
+	src := "| Form | Meaning |\n" +
+		"| --- | --- |\n" +
+		"| `str \\| None` | optional |\n" +
+		"| `int \\| str` | either |\n" +
+		"\n" +
+		"After the table.\n"
+	var buf bytes.Buffer
+	r := NewRenderer(&buf, false)
+	if _, err := r.Write([]byte(src)); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "str | None") || !strings.Contains(got, "int | str") {
+		t.Fatalf("literal pipes: %q", got)
+	}
+	if strings.Contains(got, `\|`) {
+		t.Fatalf("escape left in output: %q", got)
+	}
+	headerN := 0
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "Form") {
+			headerN = strings.Count(line, "│")
+		}
+	}
+	if headerN < 3 {
+		t.Fatalf("header %d\n%s", headerN, got)
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "str | None") || strings.Contains(line, "int | str") {
+			if strings.Count(line, "│") != headerN {
+				t.Fatalf("column count %q\n%s", line, got)
+			}
+		}
+	}
+	if !strings.Contains(got, "│\n\nAfter the table.") {
+		t.Fatalf("blank line before paragraph: %q", got)
+	}
+	if strings.Contains(got, "│\n\n\nAfter the table.") {
+		t.Fatalf("extra blank: %q", got)
+	}
+}
+
+func TestTableFitsHeaderColumnCount(t *testing.T) {
+	restore := ForceTheme(Palette{})
+	defer restore()
+	src := "| A | B |\n| --- | --- |\n| only |\n| a | b | c |\n"
+	var buf bytes.Buffer
+	r := NewRenderer(&buf, false)
+	if _, err := r.Write([]byte(src)); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	headerN := 0
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "A") && strings.Contains(line, "B") {
+			headerN = strings.Count(line, "│")
+		}
+	}
+	if headerN != 3 {
+		t.Fatalf("header %d\n%s", headerN, got)
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if strings.TrimSpace(line) == "" || !strings.Contains(line, "│") || strings.Contains(line, "┼") {
+			continue
+		}
+		if strings.Count(line, "│") != headerN {
+			t.Fatalf("columns %q\n%s", line, got)
+		}
+	}
+	if !strings.Contains(got, "b | c") {
+		t.Fatalf("merged cell: %q", got)
 	}
 }
 

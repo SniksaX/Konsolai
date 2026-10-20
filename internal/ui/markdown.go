@@ -20,18 +20,26 @@ var (
 	reTable   = regexp.MustCompile(`^\s*\|`)
 )
 
-// Renderer is a streaming markdown writer that flushes on newlines.
+// fenceFlushLines is how often an open fence is painted before its closer.
+const fenceFlushLines = 20
+
+// Renderer is a streaming markdown writer. Ordinary lines flush at each
+// newline. One pending blank is the only lookahead for collapsing blank
+// runs. An open fence flushes every fenceFlushLines lines or at its closer.
+// A table flushes when it ends.
 type Renderer struct {
-	w         io.Writer
-	plain     bool
-	buf       []byte
-	inFence   bool
-	fenceChar byte
-	fenceN    int
-	fenceLang string
-	fenceBody strings.Builder
-	table     []string
-	lastBlank bool
+	w            io.Writer
+	plain        bool
+	buf          []byte
+	inFence      bool
+	fenceChar    byte
+	fenceN       int
+	fenceLang    string
+	fenceBody    strings.Builder
+	fenceLines   int
+	fenceStarted bool
+	table        []string
+	pendingBlank bool
 }
 
 func NewRenderer(w io.Writer, plain bool) *Renderer {
@@ -56,17 +64,24 @@ func (r *Renderer) Write(p []byte) (int, error) {
 
 func (r *Renderer) Flush() error {
 	if r.inFence {
-		body := r.fenceBody.String()
 		if len(r.buf) > 0 {
-			body += string(r.buf)
+			r.fenceBody.WriteString(string(r.buf))
 			r.buf = nil
 		}
-		body = stripLenientCloser(body, r.fenceChar, r.fenceN)
-		if err := r.emitFence(r.fenceLang, body); err != nil {
-			return err
-		}
-		r.inFence = false
+		body := stripLenientCloser(r.fenceBody.String(), r.fenceChar, r.fenceN)
 		r.fenceBody.Reset()
+		r.fenceLines = 0
+		if r.fenceStarted {
+			r.fenceBody.WriteString(body)
+			if err := r.finishFence(); err != nil {
+				return err
+			}
+		} else {
+			r.inFence = false
+			if err := r.emitFence(r.fenceLang, body); err != nil {
+				return err
+			}
+		}
 	}
 	if err := r.flushTable(); err != nil {
 		return err
@@ -77,28 +92,43 @@ func (r *Renderer) Flush() error {
 		}
 		r.buf = nil
 	}
-	return nil
+	return r.flushPendingBlank()
 }
 
 func (r *Renderer) line(s string) error {
 	if r.inFence {
 		if isCloseFence(strings.TrimRight(s, "\r"), r.fenceChar, r.fenceN) {
-			body := r.fenceBody.String()
-			r.fenceBody.Reset()
-			r.inFence = false
 			if r.plain {
+				r.inFence = false
+				r.fenceBody.Reset()
+				r.fenceLines = 0
+				r.fenceStarted = false
 				return r.writeCollapsed(s, s+"\n")
 			}
+			if r.fenceStarted {
+				return r.finishFence()
+			}
+			body := r.fenceBody.String()
+			r.fenceBody.Reset()
+			r.fenceLines = 0
+			r.inFence = false
 			return r.emitFence(r.fenceLang, body)
 		}
 		r.fenceBody.WriteString(s)
 		r.fenceBody.WriteByte('\n')
+		r.fenceLines++
 		if r.plain {
 			return r.writeCollapsed(s, s+"\n")
+		}
+		if r.fenceLines >= fenceFlushLines {
+			return r.spillFence()
 		}
 		return nil
 	}
 	if char, n, lang, ok := parseOpenFence(strings.TrimRight(s, "\r")); ok {
+		if err := r.flushPendingBlank(); err != nil {
+			return err
+		}
 		if err := r.flushTable(); err != nil {
 			return err
 		}
@@ -106,7 +136,7 @@ func (r *Renderer) line(s string) error {
 		r.fenceChar = char
 		r.fenceN = n
 		r.fenceLang = lang
-		r.lastBlank = false
+		r.pendingBlank = false
 		if r.plain {
 			return r.writeCollapsed(s, s+"\n")
 		}
@@ -119,6 +149,11 @@ func (r *Renderer) line(s string) error {
 		return r.writeCollapsed(s, s+"\n")
 	}
 	if reTable.MatchString(s) {
+		if len(r.table) == 0 {
+			if err := r.flushPendingBlank(); err != nil {
+				return err
+			}
+		}
 		r.table = append(r.table, s)
 		return nil
 	}
@@ -214,15 +249,25 @@ func isCloseFence(s string, char byte, n int) bool {
 
 func (r *Renderer) writeCollapsed(s, out string) error {
 	if strings.TrimSpace(s) == "" {
-		if r.lastBlank {
+		if r.pendingBlank {
 			return nil
 		}
-		r.lastBlank = true
-		_, err := io.WriteString(r.w, "\n")
+		r.pendingBlank = true
+		return nil
+	}
+	if err := r.flushPendingBlank(); err != nil {
 		return err
 	}
-	r.lastBlank = false
 	_, err := io.WriteString(r.w, out)
+	return err
+}
+
+func (r *Renderer) flushPendingBlank() error {
+	if !r.pendingBlank {
+		return nil
+	}
+	r.pendingBlank = false
+	_, err := io.WriteString(r.w, "\n")
 	return err
 }
 
@@ -230,7 +275,9 @@ func (r *Renderer) emitLine(s string) error {
 	if strings.TrimSpace(s) == "" {
 		return r.writeCollapsed(s, "\n")
 	}
-	r.lastBlank = false
+	if err := r.flushPendingBlank(); err != nil {
+		return err
+	}
 	p := Current()
 	switch {
 	case reHeading.MatchString(s):
@@ -285,8 +332,58 @@ func (r *Renderer) writeHanging(indent, marker, text string) error {
 	return err
 }
 
+func (r *Renderer) spillFence() error {
+	body := r.fenceBody.String()
+	r.fenceBody.Reset()
+	r.fenceLines = 0
+	p := Current()
+	if !r.fenceStarted {
+		label := r.fenceLang
+		if label == "" {
+			label = "code"
+		}
+		head := p.Subtle("╭─") + " " + p.Muted(label)
+		if _, err := io.WriteString(r.w, head+"\n"); err != nil {
+			return err
+		}
+		r.fenceStarted = true
+	}
+	return r.writeFenceLines(body)
+}
+
+func (r *Renderer) finishFence() error {
+	if err := r.spillFence(); err != nil {
+		return err
+	}
+	r.inFence = false
+	r.fenceStarted = false
+	_, err := io.WriteString(r.w, Current().Subtle("╰─")+"\n")
+	return err
+}
+
+func (r *Renderer) writeFenceLines(body string) error {
+	code := strings.TrimRight(body, "\n")
+	if code == "" {
+		return nil
+	}
+	p := Current()
+	highlighted := highlight(r.fenceLang, code, p)
+	var lines []string
+	if highlighted != "" {
+		lines = strings.Split(strings.TrimRight(highlighted, "\n"), "\n")
+	} else {
+		lines = strings.Split(code, "\n")
+	}
+	for _, line := range lines {
+		if _, err := io.WriteString(r.w, p.Subtle("│ ")+line+"\n"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *Renderer) emitFence(lang, body string) error {
-	r.lastBlank = false
+	r.pendingBlank = false
 	p := Current()
 	label := lang
 	if label == "" {
@@ -360,6 +457,21 @@ func (r *Renderer) flushTable() error {
 		}
 		parsed = append(parsed, splitRow(row))
 	}
+	cols := 0
+	for _, cells := range parsed {
+		if cells != nil {
+			cols = len(cells)
+			break
+		}
+	}
+	if cols > 0 {
+		for i, cells := range parsed {
+			if cells == nil {
+				continue
+			}
+			parsed[i] = fitRow(cells, cols)
+		}
+	}
 	widths := []int{}
 	for _, cells := range parsed {
 		for i, c := range cells {
@@ -417,13 +529,76 @@ func (r *Renderer) flushTable() error {
 
 func splitRow(s string) []string {
 	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "|")
-	s = strings.TrimSuffix(s, "|")
-	parts := strings.Split(s, "|")
-	for i, p := range parts {
-		parts[i] = strings.TrimSpace(p)
+	if strings.HasPrefix(s, "|") {
+		s = s[1:]
 	}
-	return parts
+	if strings.HasSuffix(s, "|") && !strings.HasSuffix(s, `\|`) {
+		s = s[:len(s)-1]
+	}
+	var cells []string
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) && s[i+1] == '|' {
+			b.WriteByte('|')
+			i++
+			continue
+		}
+		if s[i] == '`' {
+			if n := codeSpanLen(s[i:]); n > 0 {
+				b.WriteString(unescapePipes(s[i : i+n]))
+				i += n - 1
+				continue
+			}
+		}
+		if s[i] == '|' {
+			cells = append(cells, strings.TrimSpace(b.String()))
+			b.Reset()
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	cells = append(cells, strings.TrimSpace(b.String()))
+	return cells
+}
+
+func unescapePipes(s string) string {
+	return strings.ReplaceAll(s, `\|`, "|")
+}
+
+func codeSpanLen(s string) int {
+	if s == "" || s[0] != '`' {
+		return 0
+	}
+	n := 0
+	for n < len(s) && s[n] == '`' {
+		n++
+	}
+	closer := s[:n]
+	rest := s[n:]
+	j := strings.Index(rest, closer)
+	if j < 0 {
+		return 0
+	}
+	return n + j + n
+}
+
+func fitRow(cells []string, cols int) []string {
+	if cols < 1 {
+		return cells
+	}
+	if len(cells) < cols {
+		out := make([]string, cols)
+		copy(out, cells)
+		return out
+	}
+	if len(cells) == cols {
+		return cells
+	}
+	merged := strings.Join(cells[cols-1:], " | ")
+	out := make([]string, cols)
+	copy(out, cells[:cols-1])
+	out[cols-1] = merged
+	return out
 }
 
 func isTableSep(s string) bool {
