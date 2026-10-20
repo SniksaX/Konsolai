@@ -73,44 +73,68 @@ func (p *Prompter) confirm(summary, preview string, force bool) (Decision, strin
 	}
 	w := p.writer()
 	BeforeOutput()
-	for {
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, Current().Heading(summary))
-		if preview != "" {
-			body := preview
-			if isDiffPreview(preview) {
-				body = ColorDiff(preview)
-				if !strings.HasSuffix(body, "\n") {
-					body += "\n"
-				}
-			} else {
-				body = Numbered(preview)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, Current().Heading(summary))
+	if preview != "" {
+		body := preview
+		if isDiffPreview(preview) {
+			body = ColorDiff(preview)
+			if !strings.HasSuffix(body, "\n") {
+				body += "\n"
 			}
-			fmt.Fprint(w, Indent(body, 4))
+		} else {
+			body = Numbered(preview)
 		}
-		fmt.Fprintln(w, PromptOptions())
+		fmt.Fprint(w, Indent(body, 4))
+	}
+	// Only the options line repeats after a stray key; the summary and preview stay put.
+	for {
+		fmt.Fprint(w, PromptOptions())
 		b, err := p.nextKey()
 		if err != nil {
+			fmt.Fprintln(w)
 			return 0, "", fmt.Errorf("ui: read prompt: %w", err)
 		}
-		switch unicode.ToLower(rune(b)) {
-		case 'y':
-			fmt.Fprintln(w)
-			return Approve, "", nil
-		case 'a':
-			p.approveAll = true
-			fmt.Fprintln(w)
-			return ApproveAll, "", nil
-		case 'q', 0x03, 0x1b:
-			fmt.Fprintln(w)
-			return Quit, "", nil
-		case 'n':
-			fmt.Fprintln(w)
-			return Reject, "", nil
-		default:
-			fmt.Fprintln(w, Current().Warn("answer y, n, a or q"))
+		d, ok := decisionFor(b)
+		if !ok {
+			fmt.Fprintln(w, "  "+Current().Warn("answer y, n, a or q"))
+			continue
 		}
+		if d == ApproveAll {
+			p.approveAll = true
+		}
+		fmt.Fprintln(w, "  "+decisionLabel(d))
+		fmt.Fprintln(w)
+		return d, "", nil
 	}
+}
+
+func decisionFor(b byte) (Decision, bool) {
+	switch unicode.ToLower(rune(b)) {
+	case 'y':
+		return Approve, true
+	case 'a':
+		return ApproveAll, true
+	case 'n':
+		return Reject, true
+	case 'q', 0x03, 0x1b:
+		return Quit, true
+	}
+	return 0, false
+}
+
+// decisionLabel echoes the answer on the options line so the scrollback shows what was chosen.
+func decisionLabel(d Decision) string {
+	p := Current()
+	switch d {
+	case Approve:
+		return p.Success("✓ approved")
+	case ApproveAll:
+		return p.Success("✓ approved all")
+	case Reject:
+		return p.Warn("✗ rejected")
+	}
+	return p.Muted("quit")
 }
 
 func (p *Prompter) Cancel() {
