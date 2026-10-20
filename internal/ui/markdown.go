@@ -457,6 +457,21 @@ func (r *Renderer) flushTable() error {
 		}
 		parsed = append(parsed, splitRow(row))
 	}
+	cols := 0
+	for _, cells := range parsed {
+		if cells != nil {
+			cols = len(cells)
+			break
+		}
+	}
+	if cols > 0 {
+		for i, cells := range parsed {
+			if cells == nil {
+				continue
+			}
+			parsed[i] = fitRow(cells, cols)
+		}
+	}
 	widths := []int{}
 	for _, cells := range parsed {
 		for i, c := range cells {
@@ -514,13 +529,76 @@ func (r *Renderer) flushTable() error {
 
 func splitRow(s string) []string {
 	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "|")
-	s = strings.TrimSuffix(s, "|")
-	parts := strings.Split(s, "|")
-	for i, p := range parts {
-		parts[i] = strings.TrimSpace(p)
+	if strings.HasPrefix(s, "|") {
+		s = s[1:]
 	}
-	return parts
+	if strings.HasSuffix(s, "|") && !strings.HasSuffix(s, `\|`) {
+		s = s[:len(s)-1]
+	}
+	var cells []string
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) && s[i+1] == '|' {
+			b.WriteByte('|')
+			i++
+			continue
+		}
+		if s[i] == '`' {
+			if n := codeSpanLen(s[i:]); n > 0 {
+				b.WriteString(unescapePipes(s[i : i+n]))
+				i += n - 1
+				continue
+			}
+		}
+		if s[i] == '|' {
+			cells = append(cells, strings.TrimSpace(b.String()))
+			b.Reset()
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	cells = append(cells, strings.TrimSpace(b.String()))
+	return cells
+}
+
+func unescapePipes(s string) string {
+	return strings.ReplaceAll(s, `\|`, "|")
+}
+
+func codeSpanLen(s string) int {
+	if s == "" || s[0] != '`' {
+		return 0
+	}
+	n := 0
+	for n < len(s) && s[n] == '`' {
+		n++
+	}
+	closer := s[:n]
+	rest := s[n:]
+	j := strings.Index(rest, closer)
+	if j < 0 {
+		return 0
+	}
+	return n + j + n
+}
+
+func fitRow(cells []string, cols int) []string {
+	if cols < 1 {
+		return cells
+	}
+	if len(cells) < cols {
+		out := make([]string, cols)
+		copy(out, cells)
+		return out
+	}
+	if len(cells) == cols {
+		return cells
+	}
+	merged := strings.Join(cells[cols-1:], " | ")
+	out := make([]string, cols)
+	copy(out, cells[:cols-1])
+	out[cols-1] = merged
+	return out
 }
 
 func isTableSep(s string) bool {
