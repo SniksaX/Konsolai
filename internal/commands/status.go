@@ -94,6 +94,7 @@ func runStatus(ctx context.Context, env *Env, _ []string) int {
 	} else {
 		fmt.Fprintf(env.out(), "embed          %s  %s\n", turn.EndpointHost(env.Profile.EmbedURL()), httpReach(ctx, env.Profile.EmbedURL()))
 	}
+	writeEmbedDims(ctx, env)
 	if env.Profile.RerankURL() == "" {
 		fmt.Fprintf(env.out(), "rerank         %s\n", ui.Current().Muted("not configured"))
 	} else {
