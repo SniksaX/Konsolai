@@ -20,6 +20,12 @@ func TestUnverifiedClaimsKillWithoutShell(t *testing.T) {
 	if len(got) != 0 {
 		t.Fatalf("verified %v", got)
 	}
+	got = UnverifiedClaims("Process killed.", []VerifiedCall{{
+		Tool: "run_shell", Args: `{"cmd":"fuser -k 18765/tcp"}`,
+	}})
+	if len(got) != 0 {
+		t.Fatalf("fuser verified %v", got)
+	}
 }
 
 func TestUnverifiedClaimsCreateNeedsWrite(t *testing.T) {
