@@ -82,6 +82,7 @@ func doctorChecks(ctx context.Context, env *Env) []doctorCheck {
 	out = append(out,
 		checkThinking(ctx, env, timeout),
 		checkDatabase(ctx, env),
+		checkEmbedDims(ctx, env),
 		checkPgpass(),
 		checkBinary("chromium", locateChrome(), chromeFix),
 		doctorCheck{mark: "✓", name: "clipboard", detail: clipBackend(os.Environ())},
