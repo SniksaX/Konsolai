@@ -421,3 +421,17 @@ func TestActHighKeepsPlanGate(t *testing.T) {
 		t.Fatal("high effort act must keep the plan gate")
 	}
 }
+
+func TestUnreachableModelPrintsFriendlyLine(t *testing.T) {
+	var errb strings.Builder
+	r := testRunner(t, llm.New("http://127.0.0.1:1/v1", ""), nil)
+	r.Err = &errb
+	res := r.RunTurn(context.Background(), Request{Text: "hi", Cwd: t.TempDir(), Plain: true})
+	if res.ExitCode != 1 {
+		t.Fatalf("exit %d", res.ExitCode)
+	}
+	got := errb.String()
+	if !strings.Contains(got, "cannot reach the model server") || strings.Contains(got, "llm: list models") {
+		t.Fatalf("%q", got)
+	}
+}
