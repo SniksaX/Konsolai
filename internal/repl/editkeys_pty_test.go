@@ -124,7 +124,9 @@ func inputState(sc *screen) (text string, cur int, ok bool) {
 
 func (v *ptyView) see(why string, ok func(*screen) bool) *screen {
 	v.t.Helper()
-	before := len(v.raw())
+	v.mu.Lock()
+	before := v.mark
+	v.mu.Unlock()
 	return v.expect(why, func(sc *screen) bool {
 		if len(v.raw()) <= before {
 			return false
