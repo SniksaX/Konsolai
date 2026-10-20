@@ -29,6 +29,7 @@ type Session struct {
 	Run     RunFunc
 	Exec    ExecFunc
 	OnClear func()
+	OnCwd   func(abs string) error
 }
 
 func New(cwd string) *Session {
@@ -137,6 +138,9 @@ func (s *Session) Cd(dir string) error {
 	}
 	if eval, err := filepath.EvalSymlinks(abs); err == nil {
 		abs = eval
+	}
+	if s.OnCwd != nil {
+		return s.OnCwd(abs)
 	}
 	s.OldPwd = s.Cwd
 	s.Cwd = abs
