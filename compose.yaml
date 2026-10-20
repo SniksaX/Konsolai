@@ -1,9 +1,9 @@
 # Compose project "konsolai".
 # `docker compose up -d` starts only the database. The CLI is profile "app"
 # and the embedding server is profile "rag".
-# The database password comes from KONSOLAI_DB_PASSWORD. It is never stored here.
-# This project uses its own volume and published port. It does not use the
-# developer's own database.
+# The database password defaults to konsolai for this local database.
+# Override KONSOLAI_DB_PASSWORD from the shell. This project uses its own
+# volume and published port. It does not use the developer's database.
 
 name: konsolai
 
@@ -12,7 +12,7 @@ services:
     image: pgvector/pgvector:pg17-trixie@sha256:7a7e9f22015b67edb4bef5c59daeebcd7e74bfa570df6ce60ae01237c8648a84
     environment:
       POSTGRES_DB: konsolai
-      POSTGRES_PASSWORD: ${KONSOLAI_DB_PASSWORD:?}
+      POSTGRES_PASSWORD: ${KONSOLAI_DB_PASSWORD:-konsolai}
     ports:
       - "${KONSOLAI_DB_PORT:-55434}:5432"
     volumes:
@@ -44,8 +44,8 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       KONSOLAI_CONFIG: /config/config.yaml
-      # Password is the same KONSOLAI_DB_PASSWORD value. sslmode=disable matches a local compose network.
-      KONSOLAI_DATABASE_URL: postgres://postgres:${KONSOLAI_DB_PASSWORD:?}@db:5432/konsolai?sslmode=disable
+      # Hostname db is this Compose network. The password matches the database service.
+      KONSOLAI_DATABASE_URL: postgres://postgres:${KONSOLAI_DB_PASSWORD:-konsolai}@db:5432/konsolai?sslmode=disable
     depends_on:
       db:
         condition: service_healthy
