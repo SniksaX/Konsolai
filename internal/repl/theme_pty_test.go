@@ -7,9 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/SniksaX/Konsolai/internal/commands"
 	"github.com/SniksaX/Konsolai/internal/config"
@@ -147,58 +145,21 @@ func driveThemePicker(t *testing.T, testName, child, keys string) ([]byte, strin
 		_ = cmd.Wait()
 	}()
 	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 48, Cols: 120})
-	var mu sync.Mutex
-	var buf bytes.Buffer
-	go func() {
-		tmp := make([]byte, 4096)
-		for {
-			n, err := ptmx.Read(tmp)
-			if n > 0 {
-				mu.Lock()
-				buf.Write(tmp[:n])
-				mu.Unlock()
+	v := startView(t, ptmx, 48, 120)
+	v.expect("welcome", screenHas("main-model"))
+	v.typeKeys("/theme", func(sc *screen) bool { return strings.Contains(screenPrompt(sc), "/theme") })
+	v.typeKeys("\r", screenHas("◆ build"))
+	if keys != "" {
+		done := func(sc *screen) bool {
+			d := sc.dump()
+			if strings.Contains(keys, "\r") {
+				return strings.Contains(d, "applied now") && !strings.Contains(d, "◆ build")
 			}
-			if err != nil {
-				return
-			}
+			return !strings.Contains(d, "◆ build") && strings.Contains(d, "main-model")
 		}
-	}()
-	waitPlain := func(needle string, d time.Duration) string {
-		t.Helper()
-		deadline := time.Now().Add(d)
-		for time.Now().Before(deadline) {
-			mu.Lock()
-			plain := ansiRe.ReplaceAllString(strings.ReplaceAll(buf.String(), "\r", ""), "")
-			mu.Unlock()
-			if strings.Contains(plain, needle) {
-				return plain
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-		mu.Lock()
-		plain := ansiRe.ReplaceAllString(strings.ReplaceAll(buf.String(), "\r", ""), "")
-		mu.Unlock()
-		t.Fatalf("timeout waiting for %q\n%s", needle, plain)
-		return ""
+		v.typeKeys(keys, done)
 	}
-	waitPlain("main-model", 3*time.Second)
-	time.Sleep(150 * time.Millisecond)
-	if _, err := ptmx.Write([]byte("/theme\r")); err != nil {
-		t.Fatal(err)
-	}
-	waitPlain("mono", 3*time.Second)
-	time.Sleep(80 * time.Millisecond)
-	if _, err := ptmx.Write([]byte(keys)); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(keys, "\r") {
-		waitPlain("applied now", 3*time.Second)
-	}
-	time.Sleep(200 * time.Millisecond)
-	mu.Lock()
-	out := append([]byte(nil), buf.Bytes()...)
-	mu.Unlock()
-	return out, cfg
+	return v.raw(), cfg
 }
 
 func blockLines(sc *screen) int {
