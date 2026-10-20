@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,9 @@ import (
 // compared raw (so an absolute prefix never matched) and do-mode listed from
 // cwd instead of the repo root.
 func TestSearchFromSubdir(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("needs git")
+	}
 	root := t.TempDir()
 	if err := exec.Command("git", "-C", root, "init", "-q").Run(); err != nil {
 		t.Fatal(err)
@@ -42,7 +46,7 @@ func TestSearchFromSubdir(t *testing.T) {
 		t.Fatal(err)
 	}
 	list := func(context.Context) ([]string, error) { return walkRel(root) }
-	reg := NewRegistry(g, os.Stdout, list, nil, nil)
+	reg := NewRegistry(g, io.Discard, list, nil, nil)
 
 	absTools := filepath.Join(root, "internal", "tools")
 	absFile := filepath.Join(absTools, "shell.go")
