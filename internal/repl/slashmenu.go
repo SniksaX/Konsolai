@@ -752,12 +752,19 @@ func (m *slashMenu) Render(width int) string {
 		b.WriteString(p.Muted(fmt.Sprintf("↑ %d more", from)))
 		b.WriteByte('\n')
 	}
+	// One name column for the whole filtered list, so summaries line up and do not shift while scrolling.
+	nameW := 0
+	if !m.arg {
+		for _, c := range m.items {
+			nameW = max(nameW, theme.DisplayWidth(c.DisplayNames()))
+		}
+	}
 	for i := from; i < to; i++ {
 		var row string
 		if m.arg {
 			row = choiceRow(m.rows[i], m.partial, i == m.sel, width)
 		} else {
-			row = slashMenuRow(m.items[i], i == m.sel)
+			row = slashMenuRow(m.items[i], i == m.sel, nameW)
 		}
 		b.WriteString(theme.TruncateChrome(row, width))
 		b.WriteByte('\n')
@@ -779,13 +786,14 @@ func (m *slashMenu) Render(width int) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func slashMenuRow(c commands.Command, selected bool) string {
+func slashMenuRow(c commands.Command, selected bool, nameW int) string {
 	p := ui.Current()
 	names := c.DisplayNames()
+	gap := strings.Repeat(" ", max(0, nameW-theme.DisplayWidth(names))+2)
 	if selected {
-		return p.Accent("› ") + p.Heading(names) + "  " + p.Meta(c.Summary)
+		return p.Accent("› ") + p.Heading(names) + gap + p.Meta(c.Summary)
 	}
-	return "  " + theme.Style(theme.Primary, names) + "  " + p.Muted(c.Summary)
+	return "  " + theme.Style(theme.Primary, names) + gap + p.Muted(c.Summary)
 }
 
 func choiceRow(ch commands.Choice, partial string, selected bool, width int) string {
