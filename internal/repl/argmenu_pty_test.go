@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/SniksaX/Konsolai/internal/commands"
 	"github.com/SniksaX/Konsolai/internal/config"
@@ -24,21 +23,15 @@ const (
 func TestPTYSetListsModelThemeSteps(t *testing.T) {
 	s := startArgREPL(t, "TestPTYSetListsModelThemeSteps")
 	defer s.stop()
-	s.wait("main-model", 4*time.Second)
-	s.write([]byte("/set"))
-	s.wait("name of the main chat model", 3*time.Second)
-	plain := s.plain()
-	for _, want := range []string{"model", "theme", "amber"} {
-		if !strings.Contains(plain, want) {
-			t.Fatalf("missing %s\n%s", want, plain)
-		}
-	}
+	s.view().expect("welcome", screenHas("main-model"))
+	s.view().typeKeys("/set", screenHasAll("name of the main chat model", "theme", "amber"))
 	s.until("act turn step cap", 20, "\x1b[B")
-	if !strings.Contains(s.plain(), "15") {
-		t.Fatalf("steps current missing\n%s", s.plain())
+	if !strings.Contains(s.screenText(), "15") {
+		s.fail("steps current missing")
 	}
-	s.write([]byte("\x1b"))
-	time.Sleep(200 * time.Millisecond)
+	s.view().typeKeys("\x1b", func(sc *screen) bool {
+		return strings.Contains(screenPrompt(sc), "/set") && !strings.Contains(belowPrompt(sc), "select · enter")
+	})
 	s.quiet("/set")
 	t.Log("pass: /set lists model, theme, and steps with descriptions and current values")
 }
@@ -46,21 +39,11 @@ func TestPTYSetListsModelThemeSteps(t *testing.T) {
 func TestPTYSetModelEnterOpensRoles(t *testing.T) {
 	s := startArgREPL(t, "TestPTYSetModelEnterOpensRoles")
 	defer s.stop()
-	s.wait("main-model", 4*time.Second)
-	s.write([]byte("/set "))
-	s.wait("name of the main chat model", 3*time.Second)
-	s.write([]byte("\x1b[B"))
-	s.wait("/set model", 2*time.Second)
-	s.write([]byte("\r"))
-	s.wait("discover", 3*time.Second)
-	plain := s.plain()
-	for _, want := range []string{"main", "fast", "add", "remove", "discover"} {
-		if !strings.Contains(plain, want) {
-			t.Fatalf("missing %s\n%s", want, s.plain())
-		}
-	}
-	s.write([]byte("\x1b"))
-	time.Sleep(200 * time.Millisecond)
+	s.view().expect("welcome", screenHas("main-model"))
+	s.view().typeKeys("/set ", screenHas("theme"))
+	s.view().typeKeys("\x1b[B", func(sc *screen) bool { return strings.Contains(screenPrompt(sc), "/set model") })
+	s.view().typeKeys("\r", screenHasAll("main", "fast", "add", "remove", "discover"))
+	s.view().typeKeys("\x1b", func(sc *screen) bool { return strings.Contains(screenPrompt(sc), "/set model") })
 	s.quiet("/set model")
 	t.Log("pass: enter on model opens main, fast, add, remove, discover")
 }
@@ -68,33 +51,17 @@ func TestPTYSetModelEnterOpensRoles(t *testing.T) {
 func TestPTYSetFastRoleRestores(t *testing.T) {
 	s := startArgREPL(t, "TestPTYSetFastRoleRestores")
 	defer s.stop()
-	s.wait("main-model", 4*time.Second)
-	s.write([]byte("/set "))
-	s.wait("name of the main chat model", 3*time.Second)
-	s.write([]byte("\x1b[B\r"))
-	s.wait("discover", 3*time.Second)
-	s.write([]byte("\x1b[B\x1b[B\r"))
-	s.wait("extra", 3*time.Second)
-	s.write([]byte("\x1b[B\x1b[B\x1b[B\r"))
-	s.wait("from the next turn", 3*time.Second)
-	body := s.readCfg()
-	if !strings.Contains(body, "extra") {
-		t.Fatalf("fast role did not change\n%s\n%s", body, s.plain())
-	}
-	from := s.mark()
-	s.write([]byte("/set model fast off\r"))
-	s.waitNew(from, "from the next turn", 3*time.Second)
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if !strings.Contains(s.readCfg(), "extra") {
-			break
-		}
-		time.Sleep(30 * time.Millisecond)
-	}
-	body = s.readCfg()
-	if strings.Contains(body, "extra") {
-		t.Fatalf("fast role not restored\n%s", body)
-	}
+	s.view().expect("welcome", screenHas("main-model"))
+	s.view().typeKeys("/set ", screenHas("theme"))
+	s.view().typeKeys("\x1b[B", func(sc *screen) bool { return strings.Contains(screenPrompt(sc), "/set model") })
+	s.view().typeKeys("\r", screenHas("discover"))
+	s.view().typeKeys("\x1b[B\x1b[B\r", screenHas("extra"))
+	s.view().typeKeys("\x1b[B\x1b[B\x1b[B\r", func(sc *screen) bool {
+		return strings.Contains(s.readCfg(), "extra") && strings.Contains(sc.dump(), "from the next turn")
+	})
+	s.view().typeKeys("/set model fast off\r", func(*screen) bool {
+		return !strings.Contains(s.readCfg(), "extra")
+	})
 	s.quiet("")
 	t.Log("pass: fast role changed to extra and was restored")
 }
@@ -102,33 +69,11 @@ func TestPTYSetFastRoleRestores(t *testing.T) {
 func TestPTYSetStepsFreeText(t *testing.T) {
 	s := startArgREPL(t, "TestPTYSetStepsFreeText")
 	defer s.stop()
-	s.wait("main-model", 4*time.Second)
-	s.write([]byte("/set steps "))
-	s.wait("current 15", 3*time.Second)
-	plain := s.plain()
-	for _, want := range []string{"default 15", "range"} {
-		if !strings.Contains(plain, want) {
-			t.Fatalf("missing %s\n%s", want, plain)
-		}
-	}
-	s.write([]byte("20\r"))
-	s.wait("from the next turn", 3*time.Second)
-	if !strings.Contains(s.readCfg(), "20") {
-		t.Fatalf("steps not saved\n%s", s.readCfg())
-	}
-	from := s.mark()
-	s.write([]byte("/set steps default\r"))
-	s.waitNew(from, "from the next turn", 3*time.Second)
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if !strings.Contains(s.readCfg(), "20") {
-			break
-		}
-		time.Sleep(30 * time.Millisecond)
-	}
-	if strings.Contains(s.readCfg(), "20") {
-		t.Fatalf("steps not restored\n%s", s.readCfg())
-	}
+	s.view().expect("welcome", screenHas("main-model"))
+	s.view().typeKeys("/set ", screenHas("theme"))
+	s.view().typeKeys("steps ", screenHasAll("current 15", "default 15", "range"))
+	s.view().typeKeys("20\r", func(*screen) bool { return strings.Contains(s.readCfg(), "20") })
+	s.view().typeKeys("/set steps default\r", func(*screen) bool { return !strings.Contains(s.readCfg(), "20") })
 	s.quiet("")
 	t.Log("pass: steps free-text saved 20 and default restored it")
 }
@@ -136,30 +81,26 @@ func TestPTYSetStepsFreeText(t *testing.T) {
 func TestPTYSetThemeEsc(t *testing.T) {
 	s := startArgREPL(t, "TestPTYSetThemeEsc")
 	defer s.stop()
-	s.wait("main-model", 4*time.Second)
-	s.write([]byte("/set theme "))
-	s.wait("glacier", 3*time.Second)
-	plain := s.plain()
-	for _, name := range []string{"amber", "glacier", "nebula", "jade", "rose", "mono"} {
-		if !strings.Contains(plain, name) {
-			t.Fatalf("missing theme %s\n%s", name, plain)
+	s.view().expect("welcome", screenHas("main-model"))
+	s.view().typeKeys("/set ", screenHas("theme"))
+	s.view().typeKeys("theme ", func(sc *screen) bool {
+		d := sc.dump()
+		if !strings.Contains(d, "current") {
+			return false
 		}
-	}
-	if !strings.Contains(plain, "current") {
-		t.Fatalf("current theme not marked\n%s", plain)
-	}
-	s.write([]byte("\x1b"))
-	s.wait("/set theme", 2*time.Second)
-	time.Sleep(150 * time.Millisecond)
-	if strings.Contains(s.screenText(), "nebula") {
-		t.Fatalf("theme list stayed\n%s", s.screenText())
-	}
-	s.write([]byte("\x1b"))
-	time.Sleep(200 * time.Millisecond)
-	row := s.cursorRow()
-	if strings.Contains(row, "/set") {
-		t.Fatalf("line not cleared: %q\n%s", row, s.screenText())
-	}
+		for _, name := range []string{"amber", "glacier", "nebula", "jade", "rose", "mono"} {
+			if !strings.Contains(d, name) {
+				return false
+			}
+		}
+		return true
+	})
+	s.view().typeKeys("\x1b", func(sc *screen) bool {
+		return strings.Contains(screenPrompt(sc), "/set theme") && !strings.Contains(sc.dump(), "nebula")
+	})
+	s.view().typeKeys("\x1b", func(sc *screen) bool {
+		return !strings.Contains(screenPrompt(sc), "/set")
+	})
 	if strings.Contains(s.readCfg(), "glacier") {
 		t.Fatalf("theme changed\n%s", s.readCfg())
 	}
@@ -170,21 +111,15 @@ func TestPTYSetThemeEsc(t *testing.T) {
 func TestPTYSetTabCompletes(t *testing.T) {
 	s := startArgREPL(t, "TestPTYSetTabCompletes")
 	defer s.stop()
-	s.wait("main-model", 4*time.Second)
-	s.write([]byte("/set th"))
-	s.wait("think", 3*time.Second)
-	plain := s.plain()
-	if !strings.Contains(plain, "theme") || !strings.Contains(plain, "think") {
-		t.Fatalf("filter\n%s", plain)
-	}
-	from := s.mark()
-	s.write([]byte("\t"))
-	s.waitNew(from, "/set theme ", 3*time.Second)
-	if !strings.Contains(s.plain()[from:], "mono") {
-		t.Fatalf("theme level did not open\n%s", s.plain()[from:])
-	}
-	s.write([]byte("\x1b"))
-	time.Sleep(200 * time.Millisecond)
+	s.view().expect("welcome", screenHas("main-model"))
+	s.view().typeKeys("/set ", screenHas("theme"))
+	s.view().typeKeys("th", screenHasAll("theme", "think"))
+	s.view().typeKeys("\t", func(sc *screen) bool {
+		return strings.Contains(screenPrompt(sc), "/set theme") && strings.Contains(sc.dump(), "mono")
+	})
+	s.view().typeKeys("\x1b", func(sc *screen) bool {
+		return strings.Contains(screenPrompt(sc), "/set theme") && !strings.Contains(sc.dump(), "mono")
+	})
 	s.quiet("/set theme")
 	t.Log("pass: /set th filtered to theme and think; tab opened theme")
 }
@@ -192,24 +127,12 @@ func TestPTYSetTabCompletes(t *testing.T) {
 func TestPTYSetQuestionDetails(t *testing.T) {
 	s := startArgREPL(t, "TestPTYSetQuestionDetails")
 	defer s.stop()
-	s.wait("main-model", 4*time.Second)
-	s.write([]byte("/set "))
-	s.wait("name of the main chat model", 3*time.Second)
-	s.write([]byte("\x1b[B?"))
-	s.wait("roles.main", 3*time.Second)
-	plain := s.plain()
-	for _, want := range []string{"path", "type", "default", "current", "source", "when"} {
-		if !strings.Contains(plain, want) {
-			t.Fatalf("missing %s\n%s", want, plain)
-		}
-	}
-	s.write([]byte("?"))
-	time.Sleep(250 * time.Millisecond)
-	if strings.Contains(s.screenText(), "roles.main") {
-		t.Fatalf("details stayed\n%s", s.screenText())
-	}
-	s.write([]byte("\x1b"))
-	time.Sleep(200 * time.Millisecond)
+	s.view().expect("welcome", screenHas("main-model"))
+	s.view().typeKeys("/set ", screenHas("name of the main chat model"))
+	s.view().typeKeys("\x1b[B", func(sc *screen) bool { return strings.Contains(screenPrompt(sc), "/set model") })
+	s.view().typeKeys("?", screenHasAll("roles.main", "path", "type", "default", "current", "source", "when"))
+	s.view().typeKeys("?", func(sc *screen) bool { return !strings.Contains(sc.dump(), "roles.main") })
+	s.view().typeKeys("\x1b", func(sc *screen) bool { return strings.Contains(screenPrompt(sc), "/set") })
 	s.quiet("/set")
 	t.Log("pass: ? showed /set details and ? hid them")
 }
@@ -217,17 +140,12 @@ func TestPTYSetQuestionDetails(t *testing.T) {
 func TestPTYCopyArgs(t *testing.T) {
 	s := startArgREPL(t, "TestPTYCopyArgs")
 	defer s.stop()
-	s.wait("main-model", 4*time.Second)
-	s.write([]byte("/copy "))
-	s.wait("Copy the last answer", 3*time.Second)
-	plain := s.plain()
-	for _, want := range []string{"answer", "all", "code", "cmd", "Copy the last prompt and answer", "Copy a code block", "Copy a command"} {
-		if !strings.Contains(plain, want) {
-			t.Fatalf("missing %s\n%s", want, plain)
-		}
-	}
-	s.write([]byte("\x1b"))
-	time.Sleep(200 * time.Millisecond)
+	s.view().expect("welcome", screenHas("main-model"))
+	s.view().typeKeys("/", screenHas("/copy"))
+	s.view().typeKeys("copy ", screenHasAll("answer", "all", "code", "cmd", "Copy the last prompt and answer", "Copy a code block", "Copy a command"))
+	s.view().typeKeys("\x1b", func(sc *screen) bool {
+		return strings.Contains(screenPrompt(sc), "/copy") && !strings.Contains(sc.dump(), "Copy the last prompt and answer")
+	})
 	s.quiet("/copy")
 	t.Log("pass: /copy lists answer, all, code, and cmd")
 }
@@ -304,57 +222,29 @@ func (s *argREPL) stop() {
 	_ = s.cmd.Wait()
 }
 
-func (s *argREPL) write(b []byte) {
+func (s *argREPL) view() *ptyView {
+	return &ptyView{t: s.t, pt: s.pt, mu: &s.mu, buf: &s.buf, rows: argRows, cols: argCols}
+}
+
+func (s *argREPL) raw() []byte { return s.view().raw() }
+
+func (s *argREPL) fail(why string) {
 	s.t.Helper()
-	time.Sleep(80 * time.Millisecond)
-	if _, err := s.pt.Write(b); err != nil {
-		s.t.Fatal(err)
-	}
-}
-
-func (s *argREPL) raw() []byte {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]byte(nil), s.buf.Bytes()...)
-}
-
-func (s *argREPL) plain() string {
-	return ansiRe.ReplaceAllString(strings.ReplaceAll(string(s.raw()), "\r", ""), "")
-}
-
-func (s *argREPL) mark() int { return len(s.plain()) }
-
-func (s *argREPL) wait(needle string, d time.Duration) {
-	s.t.Helper()
-	s.waitNew(0, needle, d)
-}
-
-func (s *argREPL) waitNew(from int, needle string, d time.Duration) {
-	s.t.Helper()
-	deadline := time.Now().Add(d)
-	for time.Now().Before(deadline) {
-		p := s.plain()
-		if from > len(p) {
-			from = 0
-		}
-		if strings.Contains(p[from:], needle) {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	s.t.Fatalf("timeout waiting for %q\n%s", needle, s.plain())
+	failScreen(s.t, why, s.shot(), s.raw())
 }
 
 func (s *argREPL) until(needle string, max int, key string) {
 	s.t.Helper()
 	for i := 0; i < max; i++ {
-		if strings.Contains(s.plain(), needle) {
+		if strings.Contains(s.screenText(), needle) {
 			return
 		}
-		s.write([]byte(key))
-		time.Sleep(40 * time.Millisecond)
+		s.view().typeKeys(key, nil)
 	}
-	s.t.Fatalf("never saw %q\n%s", needle, s.plain())
+	if strings.Contains(s.screenText(), needle) {
+		return
+	}
+	s.fail("never saw " + needle)
 }
 
 func (s *argREPL) readCfg() string {
@@ -383,37 +273,34 @@ func (s *argREPL) cursorRow() string {
 	return strings.TrimRight(sc.lines()[sc.r], " ")
 }
 
+func belowPrompt(sc *screen) string {
+	if sc.r+1 >= sc.h {
+		return ""
+	}
+	return strings.Join(sc.lines()[sc.r+1:], "\n")
+}
+
 func (s *argREPL) quiet(input string) {
 	s.t.Helper()
-	time.Sleep(180 * time.Millisecond)
-	sc := s.shot()
-	dump := sc.dump()
-	if sc.r < 0 || sc.r >= sc.h {
-		s.t.Fatalf("cursor row %d\n%s", sc.r, dump)
-	}
-	below := ""
-	if sc.r+1 < sc.h {
-		below = strings.Join(sc.lines()[sc.r+1:], "\n")
-	}
-	for _, bad := range []string{"↓ ", "↑ ", "next/run", "select · enter"} {
-		if strings.Contains(below, bad) {
-			s.t.Fatalf("leftover menu %q\n%s", bad, dump)
+	s.view().expect("quiet prompt", func(sc *screen) bool {
+		if sc.r < 0 || sc.r >= sc.h || sc.c < 2 || sc.c > len(sc.cell[sc.r]) {
+			return false
 		}
-	}
-	if sc.c > len(sc.cell[sc.r]) {
-		s.t.Fatalf("cursor col %d\n%s", sc.c, dump)
-	}
-	before := strings.TrimRight(string(sc.cell[sc.r][:sc.c]), " ")
-	if !strings.HasSuffix(before, "›") && !strings.Contains(before, "›") {
-		s.t.Fatalf("cursor is not on the prompt %q\n%s", before, dump)
-	}
-	if input != "" && !strings.Contains(before, strings.TrimRight(input, " ")) {
-		s.t.Fatalf("cursor row %q want input %q\n%s", before, input, dump)
-	}
-	// The cursor sits on the cell just after the prompt and the typed input.
-	if sc.c < 2 {
-		s.t.Fatalf("cursor col %d before the prompt\n%s", sc.c, dump)
-	}
+		below := belowPrompt(sc)
+		for _, bad := range []string{"↓ ", "↑ ", "next/run", "select · enter"} {
+			if strings.Contains(below, bad) {
+				return false
+			}
+		}
+		before := strings.TrimRight(string(sc.cell[sc.r][:sc.c]), " ")
+		if !strings.Contains(before, "›") {
+			return false
+		}
+		if input != "" && !strings.Contains(before, strings.TrimRight(input, " ")) {
+			return false
+		}
+		return true
+	})
 }
 
 func argMenuChild() {
