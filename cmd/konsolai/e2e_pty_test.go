@@ -336,7 +336,7 @@ func e2eLLM(t *testing.T) *httptest.Server {
 			return
 		}
 		low := strings.ToLower(s)
-		if strings.Contains(low, "reject") || strings.Contains(s, `"role":"tool"`) || strings.Contains(s, `"role": "tool"`) {
+		if strings.Contains(low, "user rejected") || strings.Contains(s, `"role":"tool"`) || strings.Contains(s, `"role": "tool"`) {
 			encode(e2eTool("finish", `{"summary":"done"}`))
 			return
 		}
