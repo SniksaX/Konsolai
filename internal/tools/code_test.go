@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +21,7 @@ func codeReg(t *testing.T) (string, *Registry) {
 	list := func(ctx context.Context) ([]string, error) {
 		return walkRel(root)
 	}
-	return root, NewRegistry(g, os.Stdout, list, nil, nil)
+	return root, NewRegistry(g, io.Discard, list, nil, nil)
 }
 
 func walkRel(root string) ([]string, error) {
@@ -201,7 +202,7 @@ func TestDocsTaskRejectsSourceEdit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "a.md"), []byte("# x\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	reg := NewRegistry(g, os.Stdout, nil, nil, nil, Options{DocsTask: true})
+	reg := NewRegistry(g, io.Discard, nil, nil, nil, Options{DocsTask: true})
 	tool, _ := reg.Get("edit_file")
 	_, err = tool.Prepare(`{"path":"a.py","old_str":"x = 1","new_str":"x = 2"}`)
 	if err == nil || err.Error() != DocsSourceReject {
@@ -210,7 +211,7 @@ func TestDocsTaskRejectsSourceEdit(t *testing.T) {
 	if _, err := tool.Prepare(`{"path":"a.md","old_str":"# x","new_str":"# y"}`); err != nil {
 		t.Fatalf("md: %v", err)
 	}
-	plain := NewRegistry(g, os.Stdout, nil, nil, nil)
+	plain := NewRegistry(g, io.Discard, nil, nil, nil)
 	e, _ := plain.Get("edit_file")
 	if _, err := e.Prepare(`{"path":"a.py","old_str":"x = 1","new_str":"x = 2"}`); err != nil {
 		t.Fatalf("non-docs: %v", err)
