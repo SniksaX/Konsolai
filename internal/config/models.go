@@ -446,19 +446,3 @@ func writeModelDiff(b *strings.Builder, base, fileCfg, full Config) {
 		}
 	}
 }
-
-func modelEnvLines() string {
-	return "" +
-		"# OpenAI-compatible API base for the main role\n" +
-		"KONSOLAI_ENDPOINT=http://localhost:8000/v1\n" +
-		"# empty uses the server default\n" +
-		"KONSOLAI_MODEL=\n" +
-		"# fast model API base; empty leaves the fast role unchanged\n" +
-		"KONSOLAI_FAST_ENDPOINT=\n" +
-		"# fast model id\n" +
-		"KONSOLAI_FAST_MODEL=\n" +
-		"# embedding service URL\n" +
-		"KONSOLAI_EMBED_ENDPOINT=\n" +
-		"# rerank service URL\n" +
-		"KONSOLAI_RERANK_ENDPOINT=\n"
-}
