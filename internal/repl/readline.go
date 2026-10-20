@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/SniksaX/Konsolai/internal/commands"
+	"github.com/SniksaX/Konsolai/internal/config"
 	"github.com/SniksaX/Konsolai/internal/ui"
 	"github.com/SniksaX/Konsolai/internal/ui/theme"
 	"github.com/reeflective/readline"
@@ -445,7 +446,7 @@ func (r *rlReader) escWait() time.Duration {
 			return d
 		}
 	}
-	return 30 * time.Millisecond
+	return config.Builtin().EscTimeout()
 }
 
 func (r *rlReader) slashEsc() {
