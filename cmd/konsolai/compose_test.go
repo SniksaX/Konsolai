@@ -24,12 +24,23 @@ func TestDockerScriptDoesNotRemoveContainers(t *testing.T) {
 	if strings.Contains(string(body), "docker rm") {
 		t.Fatal("scripts/docker.sh must not remove containers directly")
 	}
+	if !strings.Contains(string(body), `KONSOLAI_UID="$(id -u)"`) || !strings.Contains(string(body), `KONSOLAI_GID="$(id -g)"`) {
+		t.Fatal("scripts/docker.sh must export the host uid and gid")
+	}
+}
+
+func TestComposeServiceUser(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join(moduleRoot(t), "compose.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `user: "${KONSOLAI_UID:-1000}:${KONSOLAI_GID:-1000}"`) {
+		t.Fatal("konsolai service must run as the host uid and gid")
+	}
 }
 
 func TestComposeConfig(t *testing.T) {
-	if !dockerDaemon(t) {
-		t.Skip("docker daemon is not available")
-	}
+	requireDocker(t)
 	root := moduleRoot(t)
 	pass := randToken(t)
 	cmd := exec.Command("docker", "compose", "-f", filepath.Join(root, "compose.yaml"), "config", "-q")
@@ -42,9 +53,7 @@ func TestComposeConfig(t *testing.T) {
 }
 
 func TestComposeDatabaseRoundTrip(t *testing.T) {
-	if !dockerDaemon(t) {
-		t.Skip("docker daemon is not available")
-	}
+	requireDocker(t)
 	root := moduleRoot(t)
 	token := randToken(t)
 	project := "konsolai-test-" + token[:12]
@@ -125,6 +134,16 @@ func moduleRoot(t *testing.T) string {
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 
+func requireDocker(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("needs docker")
+	}
+	if !dockerDaemon(t) {
+		t.Skip("docker daemon is not available")
+	}
+}
+
 func dockerDaemon(t *testing.T) bool {
 	t.Helper()
 	if _, err := exec.LookPath("docker"); err != nil {
@@ -155,6 +174,8 @@ func composeEnv(root, pass string, port int, work, cfg, dbVol, embedVol string) 
 		"KONSOLAI_EMBED_VOLUME": embedVol,
 		"KONSOLAI_EMBED_MODEL":  "BAAI/bge-base-en-v1.5",
 		"KONSOLAI_EMBED_PORT":   "8080",
+		"KONSOLAI_UID":          fmt.Sprintf("%d", os.Getuid()),
+		"KONSOLAI_GID":          fmt.Sprintf("%d", os.Getgid()),
 	}
 	var out []string
 	for _, e := range env {
