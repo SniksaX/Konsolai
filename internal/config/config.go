@@ -192,6 +192,8 @@ type UI struct {
 	CursorColor         bool     `yaml:"cursor_color"`
 	CodeHighlight       bool     `yaml:"code_highlight"`
 	ClearOnStart        bool     `yaml:"clear_on_start"`
+	ClearHeader         string   `yaml:"clear_header"`
+	PinnedHeader        bool     `yaml:"pinned_header"`
 	StripEmoji          bool     `yaml:"strip_emoji"`
 	ProbeDeadlineMS     int      `yaml:"probe_deadline_ms"`
 	ProbeTimeoutMS      int      `yaml:"probe_timeout_ms"`
@@ -783,6 +785,20 @@ func (c Config) CodeHighlightOn() bool {
 
 func (c Config) ClearOnStart() bool {
 	return c.UI.ClearOnStart
+}
+
+// ClearHeader is ui.clear_header: full, compact, or none. Anything else is full.
+func (c Config) ClearHeader() string {
+	switch strings.ToLower(strings.TrimSpace(c.UI.ClearHeader)) {
+	case "compact", "none", "full":
+		return strings.ToLower(strings.TrimSpace(c.UI.ClearHeader))
+	default:
+		return "full"
+	}
+}
+
+func (c Config) PinnedHeader() bool {
+	return c.UI.PinnedHeader
 }
 
 func (c Config) StripEmojiOn() bool {
