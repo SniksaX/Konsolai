@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -15,6 +16,7 @@ import (
 	"github.com/SniksaX/Konsolai/internal/intent"
 	"github.com/SniksaX/Konsolai/internal/llm"
 	"github.com/SniksaX/Konsolai/internal/memory"
+	"github.com/SniksaX/Konsolai/internal/turn"
 )
 
 func TestParseArgs(t *testing.T) {
@@ -272,16 +274,18 @@ func TestStreamAnswerRetryThenEmpty(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	c := llm.New(srv.URL+"/v1", "main-model")
-	out, _, err := streamAnswer(context.Background(), c, []llm.Message{{Role: llm.RoleUser, Content: "q"}}, false, true)
+	var buf bytes.Buffer
+	out, _, err := turn.StreamAnswer(context.Background(), c, []llm.Message{{Role: llm.RoleUser, Content: "q"}}, false, true, &buf, io.Discard, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(out) != "" {
-		t.Fatalf("first %q", out)
+	if strings.TrimSpace(out) != "" || buf.Len() != 0 {
+		t.Fatalf("first %q buf %q", out, buf.String())
 	}
-	out, _, err = streamAnswer(context.Background(), c, []llm.Message{{Role: llm.RoleUser, Content: "q"}}, false, true)
-	if err != nil || out != "hi" {
-		t.Fatalf("retry %q %v", out, err)
+	buf.Reset()
+	out, _, err = turn.StreamAnswer(context.Background(), c, []llm.Message{{Role: llm.RoleUser, Content: "q"}}, false, true, &buf, io.Discard, 0, 0)
+	if err != nil || out != "hi" || strings.TrimSpace(buf.String()) != "hi" {
+		t.Fatalf("retry %q buf %q %v", out, buf.String(), err)
 	}
 }
 
