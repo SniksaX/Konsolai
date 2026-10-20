@@ -187,12 +187,6 @@ func (s *e2eSess) plain() string {
 	return ansiReE2E.ReplaceAllString(raw, "")
 }
 
-func (s *e2eSess) len() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.buf.Len()
-}
-
 func (s *e2eSess) raw() []byte {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -296,18 +290,6 @@ func (s *e2eSess) typeKeys(keys string, done func(*slashScreen) bool) {
 	s.typeKeysWithin(keys, done, ptyTimeout())
 }
 
-func (s *e2eSess) wait(needle string, d time.Duration) int {
-	s.t.Helper()
-	s.waitNew(0, needle, d)
-	return s.len()
-}
-
-func (s *e2eSess) waitNew(from int, needle string, d time.Duration) {
-	s.t.Helper()
-	_ = from
-	s.expectWithin(needle, d, slashHas(needle))
-}
-
 func (s *e2eSess) send(keys string) {
 	s.t.Helper()
 	if _, err := s.ptmx.Write([]byte(keys)); err != nil {
@@ -322,10 +304,10 @@ func (s *e2eSess) waitExit(d time.Duration) {
 	select {
 	case err := <-done:
 		if err != nil {
-			s.t.Fatalf("exit: %v\n%s", err, s.plain())
+			s.failDump("exit: " + err.Error())
 		}
 	case <-time.After(d):
-		s.t.Fatalf("exit timeout\n%s", s.plain())
+		s.failDump("exit timeout")
 	}
 }
 
