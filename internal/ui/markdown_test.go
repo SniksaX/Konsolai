@@ -280,6 +280,89 @@ func TestBlankLookaheadHoldsOneLine(t *testing.T) {
 	}
 }
 
+func TestTableEscapedPipesKeepColumns(t *testing.T) {
+	restore := ForceTheme(Palette{})
+	defer restore()
+	src := "| Form | Meaning |\n" +
+		"| --- | --- |\n" +
+		"| `str \\| None` | optional |\n" +
+		"| `int \\| str` | either |\n" +
+		"\n" +
+		"After the table.\n"
+	var buf bytes.Buffer
+	r := NewRenderer(&buf, false)
+	if _, err := r.Write([]byte(src)); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "str | None") || !strings.Contains(got, "int | str") {
+		t.Fatalf("literal pipes: %q", got)
+	}
+	if strings.Contains(got, `\|`) {
+		t.Fatalf("escape left in output: %q", got)
+	}
+	headerN := 0
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "Form") {
+			headerN = strings.Count(line, "│")
+		}
+	}
+	if headerN < 3 {
+		t.Fatalf("header %d\n%s", headerN, got)
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "str | None") || strings.Contains(line, "int | str") {
+			if strings.Count(line, "│") != headerN {
+				t.Fatalf("column count %q\n%s", line, got)
+			}
+		}
+	}
+	if !strings.Contains(got, "│\n\nAfter the table.") {
+		t.Fatalf("blank line before paragraph: %q", got)
+	}
+	if strings.Contains(got, "│\n\n\nAfter the table.") {
+		t.Fatalf("extra blank: %q", got)
+	}
+}
+
+func TestTableFitsHeaderColumnCount(t *testing.T) {
+	restore := ForceTheme(Palette{})
+	defer restore()
+	src := "| A | B |\n| --- | --- |\n| only |\n| a | b | c |\n"
+	var buf bytes.Buffer
+	r := NewRenderer(&buf, false)
+	if _, err := r.Write([]byte(src)); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	headerN := 0
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "A") && strings.Contains(line, "B") {
+			headerN = strings.Count(line, "│")
+		}
+	}
+	if headerN != 3 {
+		t.Fatalf("header %d\n%s", headerN, got)
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if strings.TrimSpace(line) == "" || !strings.Contains(line, "│") || strings.Contains(line, "┼") {
+			continue
+		}
+		if strings.Count(line, "│") != headerN {
+			t.Fatalf("columns %q\n%s", line, got)
+		}
+	}
+	if !strings.Contains(got, "b | c") {
+		t.Fatalf("merged cell: %q", got)
+	}
+}
+
 func TestThemeNOCOLOR(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	t.Setenv("COLORTERM", "truecolor")
