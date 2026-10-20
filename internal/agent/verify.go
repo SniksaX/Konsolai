@@ -23,7 +23,7 @@ var finishClaimRules = []claimRule{
 	{
 		name: "killed/stopped",
 		re:   regexp.MustCompile(`(?i)\b(killed|terminated|stopped|arrêté|arrete|tué)\b`),
-		ok:   shellMatched(`(?i)\b(kill|pkill|killall|systemctl\s+stop)\b`),
+		ok:   shellMatched(`(?i)\b(kill|pkill|killall|fuser|systemctl\s+stop)\b`),
 	},
 	{
 		name: "started",
