@@ -10,6 +10,7 @@ import (
 
 	"github.com/SniksaX/Konsolai/internal/store"
 	"github.com/SniksaX/Konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 )
 
 func runStats(ctx context.Context, env *Env, args []string) int {
@@ -128,12 +129,12 @@ func writeTable(b *strings.Builder, title string, headers []string, rows [][]str
 	fmt.Fprintf(b, "%s\n", p.Heading(title))
 	widths := make([]int, len(headers))
 	for i, h := range headers {
-		widths[i] = len(h)
+		widths[i] = theme.DisplayWidth(h)
 	}
 	for _, row := range rows {
 		for i, c := range row {
-			if i < len(widths) && len(c) > widths[i] {
-				widths[i] = len(c)
+			if i < len(widths) && theme.DisplayWidth(c) > widths[i] {
+				widths[i] = theme.DisplayWidth(c)
 			}
 		}
 	}
@@ -168,10 +169,11 @@ func paintRow(cells []string, widths []int, right []bool, header bool) string {
 }
 
 func padCell(s string, w int, right bool) string {
-	if len(s) >= w {
+	n := theme.DisplayWidth(s)
+	if n >= w {
 		return s
 	}
-	pad := strings.Repeat(" ", w-len(s))
+	pad := strings.Repeat(" ", w-n)
 	if right {
 		return pad + s
 	}
