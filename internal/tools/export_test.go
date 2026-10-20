@@ -53,9 +53,7 @@ func TestExportDocHTMLChange(t *testing.T) {
 }
 
 func TestExportDocPDFChange(t *testing.T) {
-	if _, err := docrender.FindChrome(); err != nil {
-		t.Skip("chrome not installed")
-	}
+	skipWithoutChrome(t)
 	root := t.TempDir()
 	g, err := safety.New(root)
 	if err != nil {
@@ -134,9 +132,7 @@ func TestExportPrepareDoesNotRender(t *testing.T) {
 }
 
 func TestExportDocMermaidRenders(t *testing.T) {
-	if _, err := docrender.FindChrome(); err != nil {
-		t.Skip("chrome not installed")
-	}
+	skipWithoutChrome(t)
 	root := t.TempDir()
 	g, err := safety.New(root)
 	if err != nil {
@@ -176,13 +172,36 @@ func TestExportDocMermaidRenders(t *testing.T) {
 		t.Fatal(err)
 	}
 	pdf := filepath.Join(root, "out.pdf")
-	out, err := exec.Command("pdftotext", pdf, "-").CombinedOutput()
-	if err != nil {
-		t.Fatalf("pdftotext: %s %v", out, err)
+	t.Run("pdftotext", func(t *testing.T) {
+		if _, err := exec.LookPath("pdftotext"); err != nil {
+			t.Skip("needs pdftotext")
+		}
+		out, err := exec.Command("pdftotext", pdf, "-").CombinedOutput()
+		if err != nil {
+			t.Fatalf("pdftotext: %s %v", out, err)
+		}
+		if !strings.Contains(string(out), "Arch") && !strings.Contains(string(out), "Architecture") {
+			t.Fatalf("pdftotext %q", out)
+		}
+	})
+}
+
+func skipWithoutChrome(t *testing.T) {
+	t.Helper()
+	if p := strings.TrimSpace(os.Getenv("KONSOLAI_CHROME")); p != "" {
+		if _, err := exec.LookPath(p); err == nil {
+			return
+		}
 	}
-	if !strings.Contains(string(out), "Arch") && !strings.Contains(string(out), "Architecture") {
-		t.Fatalf("pdftotext %q", out)
+	for _, name := range []string{"chromium", "chromium-browser", "google-chrome-stable", "google-chrome", "brave", "brave-browser"} {
+		if _, err := exec.LookPath(name); err == nil {
+			return
+		}
 	}
+	if _, err := docrender.FindChrome(); err == nil {
+		return
+	}
+	t.Skip("needs chromium")
 }
 
 func TestExportDocRejectsUnknownFields(t *testing.T) {
