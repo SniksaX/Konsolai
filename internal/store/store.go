@@ -33,9 +33,12 @@ type Store struct {
 }
 
 // OpenOptions carries store deadlines. Zero values keep the built-in limits.
+// SearchPath, when set, is a single schema name prepended to public on every
+// connection. The schema must already exist.
 type OpenOptions struct {
 	QueryTimeout   time.Duration
 	MigrateTimeout time.Duration
+	SearchPath     string
 }
 
 type Session struct {
@@ -135,10 +138,20 @@ func resolvedOpen(opt OpenOptions) (query, migrate time.Duration) {
 }
 
 func OpenWith(ctx context.Context, databaseURL string, opt OpenOptions) (*Store, error) {
+	if err := validateSearchPath(opt.SearchPath); err != nil {
+		return nil, err
+	}
 	query, migrate := resolvedOpen(opt)
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("store: parse config: %w", err)
+	}
+	if opt.SearchPath != "" {
+		schema := opt.SearchPath
+		cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+			_, err := conn.Exec(ctx, "SET search_path TO "+pgx.Identifier{schema}.Sanitize()+", public")
+			return err
+		}
 	}
 	cfg.ConnConfig.ConnectTimeout = query
 	connectCtx, cancel := context.WithTimeout(ctx, query)
@@ -160,6 +173,23 @@ func OpenWith(ctx context.Context, databaseURL string, opt OpenOptions) (*Store,
 		return nil, err
 	}
 	return s, nil
+}
+
+func validateSearchPath(schema string) error {
+	if schema == "" {
+		return nil
+	}
+	for i, r := range schema {
+		letter := r >= 'a' && r <= 'z'
+		digit := r >= '0' && r <= '9'
+		if i == 0 && !letter {
+			return fmt.Errorf("store: search path: %s", schema)
+		}
+		if !letter && !digit && r != '_' {
+			return fmt.Errorf("store: search path: %s", schema)
+		}
+	}
+	return nil
 }
 
 func (s *Store) Close() {
