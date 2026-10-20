@@ -53,3 +53,16 @@ func TestIsDiffPreview(t *testing.T) {
 		t.Fatal("script is not a diff")
 	}
 }
+
+func TestColorDiffHeadersAreNotChanges(t *testing.T) {
+	restore := ForceTheme(Palette{Enabled: true, Truecolor: true, Scheme: "amber"})
+	defer restore()
+	p := Current()
+	got := strings.Split(ColorDiff("--- a/x.go\n+++ b/x.go\n@@ -1 +1 @@\n-old\n+new"), "\n")
+	want := []string{p.Heading("--- a/x.go"), p.Heading("+++ b/x.go"), p.Accent("@@ -1 +1 @@"), p.Error("-old"), p.Success("+new")}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("line %d: %q want %q", i, got[i], want[i])
+		}
+	}
+}
