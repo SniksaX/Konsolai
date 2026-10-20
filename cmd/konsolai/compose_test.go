@@ -117,6 +117,28 @@ func TestComposeConfigNoDotEnv(t *testing.T) {
 	}
 }
 
+func TestComposePasswordAppearsTwice(t *testing.T) {
+	requireDocker(t)
+	root := moduleRoot(t)
+	hideDotEnv(t, root)
+	cmd := exec.Command("docker", "compose", "-f", filepath.Join(root, "compose.yaml"), "config")
+	cmd.Dir = root
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "KONSOLAI_DB_PASSWORD=other"}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("compose config: %v\n%s", err, out)
+	}
+	n := 0
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.Contains(line, "other") {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Fatalf("password count %d\n%s", n, out)
+	}
+}
+
 func TestComposeDatabaseRoundTrip(t *testing.T) {
 	requireDocker(t)
 	root := moduleRoot(t)
@@ -127,6 +149,9 @@ func TestComposeDatabaseRoundTrip(t *testing.T) {
 		t.Fatalf("project %s", project)
 	}
 	pass := randToken(t)
+	if pass == "" || pass == "konsolai" {
+		t.Fatal("round trip password must not be the default")
+	}
 	port := freePort(t)
 	work := t.TempDir()
 	cfg := filepath.Join(t.TempDir(), "config.yaml")
