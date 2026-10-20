@@ -25,7 +25,7 @@ Embed and rerank are optional URLs on `roles.embed` and `roles.rerank`. When `ra
 Never touch the developer's own database container. Integration tests use `scripts/test-db.sh`. Compose uses its own volume and published port and never the developer's database.
 Config path is `--config`, then `KONSOLAI_CONFIG`, then `$XDG_CONFIG_HOME/konsolai/config.yaml` or `~/.config/konsolai/config.yaml`. Writes resolve symlinks and land in the real file, mode 0600.
 A new setting is ONE entry in `internal/config/keys.go`. Every configuration change goes through `/set`.
-Env overrides are the `Env` column of that table, plus `KONSOLAI_PROFILE` and `KONSOLAI_CONFIG`. `--profile` beats `KONSOLAI_PROFILE` beats `default_profile` beats built-in `default`. `--config` beats `KONSOLAI_CONFIG` beats the XDG path.
+Prefer `config.yaml`. Env vars are for containers and CI. Overrides are the `Env` column of that table, plus `KONSOLAI_PROFILE` and `KONSOLAI_CONFIG`. `--profile` beats `KONSOLAI_PROFILE` beats `default_profile` beats built-in `default`. `--config` beats `KONSOLAI_CONFIG` beats the XDG path.
 
 ## Architecture
 
@@ -68,7 +68,8 @@ The plan gate is always on for build. Act requires a plan only at high effort.
 
 ## Config
 
-A new key is ONE entry in `internal/config/keys.go`. That entry supplies the default, validation, docs, sample file, env override, and `/config` output.
+Configuration lives in `config.yaml`. `config.example.yaml` is generated documentation. The repo has no other config files. `/set default` and `/set default all` write `InitYAML()` from the key table.
+A new key is ONE entry in `internal/config/keys.go`. That entry supplies the default, validation, docs, the example file, the env override, and `/config` output.
 Accessors are the only `<= 0` means default logic (`nonzero` and the ratio accessors).
 `TestConfigKeysComplete` walks every leaf of `Config` by reflection and fails if a field has no table entry, or a table entry has no field.
 
@@ -106,8 +107,8 @@ Work lands on `dev`. Config keys are the single table in `internal/config/keys.g
 - REPL welcome: `split`, `frame`, and `minimal`. Paint once after probes. Height from the wrapped TTY.
 - `turn_stats`: best-effort token and timing rows. Welcome rates use `ModelRate`.
 - `/theme`: picker. Esc does not change the theme or clear the screen. Enter applies the palette in place and does not redraw the welcome.
-- Frame side text removed; theme applies in place. `/set default <name>` restores one key. `/set default all` asks y/n first (`--yes` skips), reports how many keys differ and that models, roles, and endpoints reset, backs up the real file as `config.yaml.bak-<timestamp>` (mode 0600, five kept), then writes the factory document. Decline leaves the file. The symlink stays.
-- Docker: `Dockerfile` targets `base` and `full` (Debian Chromium via `KONSOLAI_CHROME`). `compose.yaml` project `konsolai` starts only the database on `docker compose up -d`, on its own volume and port, never the developer's database. `scripts/docker.sh` builds, runs the database, and runs the CLI. Inside the container the model server is `http://host.docker.internal:<port>/v1`.
+- Frame side text removed; theme applies in place. `/set default <name>` restores one key. `/set default all` asks y/n first (`--yes` skips), reports how many keys differ and that models, roles, and endpoints reset, backs up the real file as `config.yaml.bak-<timestamp>` (mode 0600, five kept), then writes the factory document from `InitYAML()`. Decline leaves the file. The symlink stays.
+- Docker: `Dockerfile` targets `base` and `full` (Debian Chromium via `KONSOLAI_CHROME`). The `konsolai` service runs as the host uid (`KONSOLAI_UID` / `KONSOLAI_GID`). `compose.yaml` project `konsolai` starts only the database on `docker compose up -d`. Every variable has a default (password `konsolai`, port `55434`) and there is no env file. `KONSOLAI_DATABASE_URL` in the compose file points at host `db` and overrides the mounted file. The user's `config.yaml` keeps models and roles. Own volume and port, never the developer's database. `scripts/docker.sh` builds, runs the database, and runs the CLI. Inside the container the model server is `http://host.docker.internal:<port>/v1`.
 - CI: `.github/workflows/ci.yml` on push and pull request to `dev` and `prod` runs gofmt, vet, and `go test` against pgvector, and builds the base image with no push. Tests that need external binaries skip when they are missing; CI installs poppler-utils and sets `KONSOLAI_CHROME` when Chrome is already on the runner. `.github/workflows/release.yml` runs that test job before it publishes on `v*` tags: `ghcr.io/sniksax/konsolai:<tag>`, `:latest`, and `:<tag>-full`, plus linux amd64 and arm64 binaries. The token is `GITHUB_TOKEN`.
 - Placeholder: inline suggestion only. Enter does not submit it.
 - Footer context meter: last prompt tokens against the window (`ctx_warn_pct`, `ctx_hot_pct`, `ctx_cells`).
