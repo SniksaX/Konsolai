@@ -537,6 +537,11 @@ func (c *Client) Stream(ctx context.Context, msgs []Message, opts ChatOptions, o
 	return usage, err
 }
 
+// StreamTools streams content deltas and returns the full assistant message, including tool calls.
+func (c *Client) StreamTools(ctx context.Context, msgs []Message, tools []ToolSpec, opts ChatOptions, onDelta func(string) error) (Message, Usage, error) {
+	return c.complete(ctx, msgs, tools, opts, onDelta)
+}
+
 func (c *Client) complete(ctx context.Context, msgs []Message, tools []ToolSpec, opts ChatOptions, onDelta func(string) error) (Message, Usage, error) {
 	msgs = Normalize(msgs)
 	extra := 1

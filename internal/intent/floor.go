@@ -10,19 +10,39 @@ var defaultVerbs = []string{
 	"create", "write", "make", "add", "generate", "fix", "update", "edit",
 	"change", "refactor", "rename", "delete", "remove", "install", "run",
 	"build", "deploy", "commit", "move", "copy",
+	"kill", "stop", "start", "restart", "test", "free", "close", "open", "launch",
 	"crée", "créer", "écris", "écrire", "ajoute", "ajouter", "génère", "générer",
 	"corrige", "corriger", "modifie", "modifier", "supprime", "supprimer",
 	"installe", "installer", "lance", "lancer", "déplace", "renomme",
+	"tue", "tuer", "arrête", "arrete", "arrêter", "arreter", "démarre", "demarre",
+	"relance", "teste", "libère", "libere", "ferme",
 }
 
 var defaultTargets = []string{
 	"file", "folder", "directory", "project", "repo", "branch", "readme",
 	"test", "function", "endpoint", "fichier", "dossier", "projet", "branche",
+	"process", "pid", "port", "server", "container", "service",
+	"processus", "serveur", "conteneur",
+}
+
+var pronounTargets = []string{
+	"it", "that", "this", "them", "ça", "ca", "le", "la", "les", "ce",
+}
+
+var objectHints = []string{
+	"process", "pid", "port", "file", "server", "container", "branch", "service",
+	"processus", "fichier", "serveur", "conteneur", "branche", "dossier",
+	"readme", "endpoint",
 }
 
 var buildTargetWords = map[string]bool{
 	"readme": true, "test": true, "function": true, "endpoint": true,
 	"docs": true, "doc": true,
+}
+
+var systemTargetWords = map[string]bool{
+	"process": true, "pid": true, "port": true, "server": true, "container": true,
+	"service": true, "processus": true, "serveur": true, "conteneur": true,
 }
 
 var containerWords = map[string]bool{
@@ -32,6 +52,10 @@ var containerWords = map[string]bool{
 var howPrefixes = []string{"how", "comment", "pourquoi", "why"}
 
 func ActionFloor(text string, verbs, targets []string) (Intent, bool) {
+	return ActionFloorPrev(text, "", verbs, targets, false)
+}
+
+func ActionFloorPrev(text, prev string, verbs, targets []string, inRepo bool) (Intent, bool) {
 	if verbs == nil {
 		verbs = defaultVerbs
 	}
@@ -49,6 +73,12 @@ func ActionFloor(text string, verbs, targets []string) (Intent, bool) {
 			return "", false
 		}
 	}
+	if MentionsObject(prev) {
+		targets = append(append([]string{}, targets...), pronounTargets...)
+	}
+	if inRepo && hasTestDeictic(folded) {
+		return Build, true
+	}
 	if !hasWord(folded, verbs) {
 		return "", false
 	}
@@ -56,6 +86,9 @@ func ActionFloor(text string, verbs, targets []string) (Intent, bool) {
 	hasNamed := hasWord(folded, targets)
 	if !hasFile && !hasNamed {
 		return "", false
+	}
+	if hasSystemTarget(folded) {
+		return Act, true
 	}
 	if hasFile {
 		return Build, true
@@ -70,6 +103,40 @@ func ActionFloor(text string, verbs, targets []string) (Intent, bool) {
 		return Build, true
 	}
 	return Act, true
+}
+
+func MentionsObject(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	if hasFilename(s) {
+		return true
+	}
+	folded := fold(s)
+	if hasWord(folded, objectHints) {
+		return true
+	}
+	if strings.Contains(folded, "port ") {
+		return true
+	}
+	return false
+}
+
+func hasTestDeictic(folded string) bool {
+	if !hasWord(folded, []string{"test", "teste", "tester"}) {
+		return false
+	}
+	return hasWord(folded, pronounTargets)
+}
+
+func hasSystemTarget(folded string) bool {
+	for _, w := range wordsOf(folded) {
+		if systemTargetWords[w] {
+			return true
+		}
+	}
+	return false
 }
 
 func RaiseTo(d Decision, floor Intent) Decision {

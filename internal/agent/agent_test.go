@@ -1389,6 +1389,15 @@ func TestRestoreApprovedPlan(t *testing.T) {
 }
 
 func TestPromptNotes(t *testing.T) {
+	if !strings.Contains(LookupPrompt, "Only state results you observed in tool output in THIS turn") || !strings.Contains(LookupPrompt, "was blocked, failed, or never attempted") {
+		t.Fatal("lookup honesty")
+	}
+	if !strings.Contains(ActPrompt, "Only state results you observed in tool output in THIS turn") {
+		t.Fatal("act honesty")
+	}
+	if !strings.Contains(CodePrompt, "Only state results you observed in tool output in THIS turn") {
+		t.Fatal("code honesty")
+	}
 	if !strings.Contains(LookupPrompt, "never with web_fetch") {
 		t.Fatal("lookup web_fetch")
 	}
@@ -1401,14 +1410,14 @@ func TestPromptNotes(t *testing.T) {
 	if !strings.Contains(AnswerPrompt, "Do not mention the user's project") {
 		t.Fatal("answer project")
 	}
-	if !strings.Contains(AnswerPrompt, "If the user refers to 'this' or 'here' without content, say you will look at the current folder.") {
+	if !strings.Contains(AnswerPrompt, "call escalate immediately") || !strings.Contains(AnswerPrompt, "Never write that you ran") {
+		t.Fatal("answer escalate rule")
+	}
+	if !strings.Contains(AnswerPrompt, "If the user refers to 'this' or 'here' without content, call escalate with intent lookup.") {
 		t.Fatal("answer deictic fallback")
 	}
 	if !strings.Contains(AnswerPrompt, "About Konsolai:") || !strings.Contains(AnswerPrompt, "export PDF/HTML") {
 		t.Fatal("answer about block")
-	}
-	if !strings.Contains(AnswerPrompt, "Never claim you cannot search or run commands") {
-		t.Fatal("answer capability rule")
 	}
 	if !strings.Contains(AnswerPrompt, "Answer concisely.") || !strings.Contains(AnswerPrompt, "at most one short example") || !strings.Contains(AnswerPrompt, "explain in depth") {
 		t.Fatal("answer concise rule")

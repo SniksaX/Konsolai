@@ -283,9 +283,12 @@ func defaultActionVerbs() []string {
 		"create", "write", "make", "add", "generate", "fix", "update", "edit",
 		"change", "refactor", "rename", "delete", "remove", "install", "run",
 		"build", "deploy", "commit", "move", "copy",
+		"kill", "stop", "start", "restart", "test", "free", "close", "open", "launch",
 		"crée", "créer", "écris", "écrire", "ajoute", "ajouter", "génère", "générer",
 		"corrige", "corriger", "modifie", "modifier", "supprime", "supprimer",
 		"installe", "installer", "lance", "lancer", "déplace", "renomme",
+		"tue", "tuer", "arrête", "arrete", "arrêter", "arreter", "démarre", "demarre",
+		"relance", "teste", "libère", "libere", "ferme",
 	}
 }
 
@@ -293,6 +296,8 @@ func defaultTargets() []string {
 	return []string{
 		"file", "folder", "directory", "project", "repo", "branch", "readme",
 		"test", "function", "endpoint", "fichier", "dossier", "projet", "branche",
+		"process", "pid", "port", "server", "container", "service",
+		"processus", "serveur", "conteneur",
 	}
 }
 

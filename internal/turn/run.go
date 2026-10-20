@@ -115,11 +115,14 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 		r.answerCut = false
 	}
 	spoken := req.Text
+	prevCtx := strings.TrimSpace(r.lastUser + "\n" + r.lastAssistant)
 	if !continued {
-		dec = DecideIntentFloor(ctx, routeClient, req.Intent, req.Text, req.New, routerCands, inRepo, r.Profile.Router.ActionVerbs, r.Profile.Router.Targets)
+		dec = DecideIntentFloor(ctx, routeClient, req.Intent, req.Text, req.New, routerCands, inRepo, r.Profile.Router.ActionVerbs, r.Profile.Router.Targets, prevCtx)
 	} else if dec.Reason == "continue-promise" && r.lastUser != "" {
 		req.Text = r.lastUser
 		r.lastPromise = false
+	} else if dec.Reason == "contradict-claim" && r.lastUser != "" {
+		req.Text = intent.WithPreviousExchange(spoken, r.lastUser, r.lastAssistant)
 	} else if dec.Reason == "clarification" {
 		req.Text = intent.WithPreviousExchange(req.Text, r.lastUser, r.lastAssistant)
 	} else {
@@ -325,7 +328,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			dec.Effort = intent.EffortHigh
 			r.emitBadge(req, string(dec.Intent), true)
 		} else {
-			r.lastPromise = intent.IsPromise(answer)
+			r.lastPromise = intent.ClaimsAction(answer)
 			if r.lastPromise {
 				r.lastUser = req.Text
 				r.lastEscalate = intent.EscalateIntent(req.Text, r.Profile.Router.ActionVerbs, r.Profile.Router.Targets)
@@ -533,7 +536,8 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 		r.emitBadge(req, string(dec.Intent), false)
 	}}
 	tokCap := r.Profile.AnswerEffortCap(string(dec.EffectiveEffort()))
-	out, usage, streamErr := streamAnswer(ctx, client, msgs, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap)
+	answerTools := answerEscalateTools(client, main)
+	out, calls, usage, streamErr := streamAnswer(ctx, client, msgs, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap, answerTools)
 	cut := errors.Is(streamErr, llm.ErrTruncated)
 	if streamErr != nil && !cut && !usedMain && !gate.released {
 		if req.Trace {
@@ -542,12 +546,13 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 		client = main
 		usedMain = true
 		gate.reset()
-		out, usage, streamErr = streamAnswer(ctx, client, msgs, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap)
+		answerTools = answerEscalateTools(client, main)
+		out, calls, usage, streamErr = streamAnswer(ctx, client, msgs, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap, answerTools)
 		cut = errors.Is(streamErr, llm.ErrTruncated)
 	}
-	if streamErr == nil && strings.TrimSpace(out) == "" && !gate.released {
+	if streamErr == nil && strings.TrimSpace(out) == "" && len(calls) == 0 && !gate.released {
 		gate.reset()
-		out, usage, streamErr = streamAnswer(ctx, client, []llm.Message{system, user}, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap)
+		out, calls, usage, streamErr = streamAnswer(ctx, client, []llm.Message{system, user}, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap, answerTools)
 		cut = errors.Is(streamErr, llm.ErrTruncated)
 	}
 	modelTime := time.Since(t0)
@@ -567,14 +572,23 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 		fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.MainEndpoint(), streamErr, req.Trace))
 		return 1, out, ptok, usedMain, ""
 	}
+	if esc := parseEscalate(calls); esc != "" && !r.escalated {
+		gate.discard()
+		return 0, out, ptok, usedMain, esc
+	}
 	if strings.TrimSpace(out) == "" && !cut {
 		r.answerCut = false
 		fmt.Fprintln(r.errw(), "konsolai: the model returned no answer")
 		return 1, out, ptok, usedMain, ""
 	}
-	if !r.escalated && intent.IsPromise(out) && !gate.released {
-		gate.discard()
-		return 0, out, ptok, usedMain, intent.EscalateIntent(query, r.Profile.Router.ActionVerbs, r.Profile.Router.Targets)
+	if !r.escalated && intent.ClaimsAction(out) {
+		esc := intent.EscalateIntent(query, r.Profile.Router.ActionVerbs, r.Profile.Router.Targets)
+		if gate.released {
+			fmt.Fprintln(r.errw(), ui.Current().Warn("the previous reply claimed an action that was not performed; retrying as "+string(esc)))
+		} else {
+			gate.discard()
+		}
+		return 0, out, ptok, usedMain, esc
 	}
 	if !gate.released {
 		gate.release()
@@ -627,10 +641,18 @@ func SanitizeAnswerHistory(hist []llm.Message) []llm.Message {
 }
 
 func StreamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, think, plain bool, outw, errw io.Writer, temp, topP float64) (string, llm.Usage, error) {
-	return streamAnswer(ctx, client, msgs, think, plain, outw, errw, temp, topP, 0)
+	out, _, usage, err := streamAnswer(ctx, client, msgs, think, plain, outw, errw, temp, topP, 0, nil)
+	return out, usage, err
 }
 
-func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, think, plain bool, outw, errw io.Writer, temp, topP float64, tokenCap int) (string, llm.Usage, error) {
+func answerEscalateTools(client, main *llm.Client) []llm.ToolSpec {
+	if client == nil || main == nil || client != main {
+		return nil
+	}
+	return []llm.ToolSpec{EscalateTool}
+}
+
+func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, think, plain bool, outw, errw io.Writer, temp, topP float64, tokenCap int, tools []llm.ToolSpec) (string, []llm.ToolCall, llm.Usage, error) {
 	if outw == nil {
 		outw = os.Stdout
 	}
@@ -652,12 +674,12 @@ func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 	rend := ui.NewRenderer(body, plain)
 	if _, err := client.ResolveModel(ctx); err != nil {
 		live.Stop()
-		return "", llm.Usage{}, err
+		return "", nil, llm.Usage{}, err
 	}
-	_, maxTok, elide, err := agent.PrepareCall(client, msgs, nil, "answer")
+	_, maxTok, elide, err := agent.PrepareCall(client, msgs, tools, "answer")
 	if err != nil {
 		live.Stop()
-		return "", llm.Usage{}, err
+		return "", nil, llm.Usage{}, err
 	}
 	if tokenCap > 0 && maxTok > tokenCap {
 		maxTok = tokenCap
@@ -668,7 +690,7 @@ func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 	if temp <= 0 {
 		temp = 0.3
 	}
-	usage, err := client.Stream(ctx, msgs, llm.ChatOptions{
+	msg, usage, err := client.StreamTools(ctx, msgs, tools, llm.ChatOptions{
 		Thinking: think, Temperature: temp, TopP: topP, MaxTokens: maxTok,
 		OnProgress: func(p llm.Progress) { live.SetLabel(agent.ProgressLabel("thinking", p)) },
 	}, func(delta string) error {
@@ -701,7 +723,10 @@ func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 		consider.Consider(collected.String())
 	}
 	out := strings.TrimLeft(collected.String(), "\r\n")
-	return out, usage, err
+	if out == "" {
+		out = strings.TrimLeft(msg.Content, "\r\n")
+	}
+	return out, msg.ToolCalls, usage, err
 }
 
 func codeContext(ctx context.Context, snap sysctx.Snapshot, root string) string {
@@ -826,7 +851,7 @@ func (g *answerGate) Consider(text string) {
 	if strings.TrimSpace(text) == "" || !strings.Contains(text, "\n") {
 		return
 	}
-	if intent.IsPromise(text) {
+	if intent.ClaimsAction(text) {
 		return
 	}
 	g.release()

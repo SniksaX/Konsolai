@@ -41,3 +41,36 @@ func TestIsPromise(t *testing.T) {
 		t.Fatal("not a promise")
 	}
 }
+
+func TestActionFloorKillAndPronoun(t *testing.T) {
+	prev := "the go server is listening on port 10101"
+	got, ok := ActionFloorPrev("okey delete it", prev, nil, nil, false)
+	if !ok || got != Act {
+		t.Fatalf("delete it got %q ok=%v", got, ok)
+	}
+	got, ok = ActionFloorPrev("okey kill it", prev, nil, nil, false)
+	if !ok || got != Act {
+		t.Fatalf("kill it got %q ok=%v", got, ok)
+	}
+	if _, ok := ActionFloorPrev("okey delete it", "", nil, nil, false); ok {
+		t.Fatal("pronoun without prior object must not floor")
+	}
+}
+
+func TestActionFloorTestItInRepo(t *testing.T) {
+	got, ok := ActionFloorPrev("can you test it ?", "a Go server from main.go", nil, nil, true)
+	if !ok || (got != Build && got != Act) {
+		t.Fatalf("test it got %q ok=%v", got, ok)
+	}
+	got, ok = ActionFloorPrev("teste-le", "le serveur tourne", nil, nil, true)
+	if !ok || (got != Build && got != Act) {
+		t.Fatalf("teste-le got %q ok=%v", got, ok)
+	}
+}
+
+func TestActionFloorSystemObject(t *testing.T) {
+	got, ok := ActionFloor("kill the process on port 8080", nil, nil)
+	if !ok || got != Act {
+		t.Fatalf("got %q ok=%v", got, ok)
+	}
+}

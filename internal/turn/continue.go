@@ -25,6 +25,12 @@ func (r *Runner) continueDecision(text string) (intent.Decision, bool) {
 	if r == nil {
 		return intent.Decision{}, false
 	}
+	if intent.IsContradiction(text) && r.lastIntent == intent.Answer && r.lastUser != "" {
+		return intent.Decision{
+			Intent: intent.Act, Language: r.lastLang, Reason: "contradict-claim",
+			Effort: intent.EffortHigh, Task: r.lastTask,
+		}, true
+	}
 	if intent.IsPromiseContinue(text) && r.lastPromise && r.lastUser != "" && r.lastEscalate != "" {
 		return intent.Decision{
 			Intent: r.lastEscalate, Language: r.lastLang, Reason: "continue-promise",
