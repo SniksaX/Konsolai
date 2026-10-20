@@ -35,9 +35,15 @@ func machinePattern() *regexp.Regexp {
 	return regexp.MustCompile("(?i)" + strings.Join(parts, "|"))
 }
 
-// machineAllow is empty on purpose. A tracked file that must match the
-// denylist needs a path and a reason here.
-var machineAllow = map[string]string{}
+// machineAllow excuses the public embed model id in files that must name it.
+// Other denylist hits in those files still fail. The reason is the 1024-wide
+// default whose vectors match memory_chunks.
+var machineAllow = map[string]string{
+	"compose.yaml":                   "public default embed model whose vectors are 1024-wide, matching memory_chunks",
+	"README.md":                      "public default embed model whose vectors are 1024-wide, matching memory_chunks",
+	"AGENTS.md":                      "public default embed model whose vectors are 1024-wide, matching memory_chunks",
+	"internal/config/compose_env.go": "public default embed model whose vectors are 1024-wide, matching memory_chunks",
+}
 
 func TestNoLocalMachine(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
@@ -55,11 +61,9 @@ func TestNoLocalMachine(t *testing.T) {
 		t.Fatal(err)
 	}
 	re := machinePattern()
+	modelID := "bge-" + "m3"
 	for _, name := range strings.Split(string(out), "\x00") {
 		if name == "" {
-			continue
-		}
-		if _, ok := machineAllow[name]; ok {
 			continue
 		}
 		body, err := os.ReadFile(filepath.Join(root, name))
@@ -70,15 +74,28 @@ func TestNoLocalMachine(t *testing.T) {
 		if !re.MatchString(text) {
 			continue
 		}
+		_, allowed := machineAllow[name]
 		for i, line := range strings.Split(text, "\n") {
-			if re.MatchString(line) {
+			checked := line
+			if allowed {
+				checked = strings.ReplaceAll(checked, modelID, "")
+			}
+			if re.MatchString(checked) {
 				t.Errorf("%s:%d matches the local-machine denylist", name, i+1)
 			}
 		}
 	}
 	for path, reason := range machineAllow {
-		if reason == "" {
+		if strings.TrimSpace(reason) == "" {
 			t.Errorf("allowlist %s needs a reason", path)
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(strings.ToLower(string(body)), modelID) {
+			t.Errorf("allowlist %s does not contain the embed model id", path)
 		}
 	}
 }
