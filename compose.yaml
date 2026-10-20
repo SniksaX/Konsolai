@@ -27,6 +27,8 @@ services:
   konsolai:
     profiles: ["app"]
     image: ${KONSOLAI_IMAGE:-konsolai:dev}
+    # A mode 0600 config is owned by the host user. Run as that user.
+    user: "${KONSOLAI_UID:-1000}:${KONSOLAI_GID:-1000}"
     build:
       context: .
       target: ${KONSOLAI_TARGET:-base}
