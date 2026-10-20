@@ -16,6 +16,7 @@ type WelcomeRow struct {
 	Intent    string
 	CWD       string
 	LastAt    time.Time
+	Here      bool
 }
 
 const welcomeSessionCols = `
@@ -57,9 +58,9 @@ func (s *Store) WelcomeMemory(ctx context.Context, profile string, projectID *in
 	return facts, sessions, nil
 }
 
-// WelcomeRecent returns up to limit sessions, current directory first, and the
-// single most recently active session (for the resume placeholder).
-func (s *Store) WelcomeRecent(ctx context.Context, profile, cwd string, limit int) (display []WelcomeRow, latest WelcomeRow, hasLatest bool, err error) {
+// WelcomeRecent returns the same numbered list as NumberedSessions, current
+// project (or cwd) first, plus the single most recently active session.
+func (s *Store) WelcomeRecent(ctx context.Context, profile string, projectID *int64, cwd string, limit int) (display []WelcomeRow, latest WelcomeRow, hasLatest bool, err error) {
 	if s == nil || s.pool == nil {
 		return nil, WelcomeRow{}, false, fmt.Errorf("store: welcome recent: no pool")
 	}
@@ -83,25 +84,15 @@ func (s *Store) WelcomeRecent(ctx context.Context, profile, cwd string, limit in
 	}
 	hasLatest = true
 
-	rows, err := s.pool.Query(ctx, `
-		SELECT `+welcomeSessionCols+`
-		FROM sessions s
-		WHERE s.profile = $1
-		ORDER BY (s.cwd = $2) DESC, s.last_activity_at DESC
-		LIMIT $3`, profile, cwd, limit)
+	listed, err := s.NumberedSessions(ctx, profile, projectID, cwd, limit, false)
 	if err != nil {
-		return nil, latest, true, fmt.Errorf("store: welcome recent: %w", err)
+		return nil, latest, true, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var row WelcomeRow
-		if err := rows.Scan(&row.Title, &row.FirstUser, &row.Intent, &row.CWD, &row.LastAt); err != nil {
-			return nil, latest, true, fmt.Errorf("store: scan welcome recent: %w", err)
-		}
-		display = append(display, row)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, latest, true, fmt.Errorf("store: welcome recent: %w", err)
+	for _, row := range listed {
+		display = append(display, WelcomeRow{
+			Title: row.Title, FirstUser: row.FirstUser, Intent: row.Intent,
+			CWD: row.CWD, LastAt: row.LastActivity, Here: Here(projectID, cwd, row.Session),
+		})
 	}
 	return display, latest, true, nil
 }
