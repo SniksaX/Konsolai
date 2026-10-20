@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -39,7 +40,7 @@ func TestBaseRelativeTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	list := func(context.Context) ([]string, error) { return walkRel(root) }
-	reg := NewRegistry(g, os.Stdout, list, nil, nil)
+	reg := NewRegistry(g, io.Discard, list, nil, nil)
 
 	listDir := mustTool(t, reg, "list_dir")
 	act, err := listDir.Prepare(`{"path":"."}`)
@@ -159,7 +160,7 @@ func TestBaseRelativeTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reg2 := NewRegistry(g2, os.Stdout, list, nil, nil)
+	reg2 := NewRegistry(g2, io.Discard, list, nil, nil)
 	read2 := mustTool(t, reg2, "read_file")
 	act, err = read2.Prepare(`{"path":"here.txt"}`)
 	if err != nil {
