@@ -13,6 +13,8 @@ services:
     environment:
       POSTGRES_DB: konsolai
       POSTGRES_PASSWORD: ${KONSOLAI_DB_PASSWORD:-konsolai}
+      # Same interpolation as the konsolai service, so a default config shows both.
+      KONSOLAI_DATABASE_URL: postgres://postgres:${KONSOLAI_DB_PASSWORD:-konsolai}@db:5432/konsolai?sslmode=disable
     ports:
       - "${KONSOLAI_DB_PORT:-55434}:5432"
     volumes:
@@ -58,7 +60,10 @@ services:
   embed:
     profiles: ["rag"]
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4@sha256:2538ea1c9640d3763b15af668039d24172d063b42337b0c27796fc2be180c78d
-    command: ["--model-id", "${KONSOLAI_EMBED_MODEL:-BAAI/bge-base-en-v1.5}"]
+    # Default model is BAAI/bge-m3, 1024-wide, matching memory_chunks.
+    # BAAI/bge-base-en-v1.5 is 768-wide. It was the previous default because
+    # the machine-name guard rejects bge-m3. Use it only with /set rag reset-dim.
+    command: ["--model-id", "${KONSOLAI_EMBED_MODEL:-BAAI/bge-m3}"]
     ports:
       - "${KONSOLAI_EMBED_PORT:-8080}:80"
     volumes:
