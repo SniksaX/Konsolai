@@ -325,7 +325,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			dec.Effort = intent.EffortHigh
 			r.emitBadge(req, string(dec.Intent), true)
 		} else {
-			r.lastPromise = intent.IsPromise(answer)
+			r.lastPromise = intent.ClaimsAction(answer)
 			if r.lastPromise {
 				r.lastUser = req.Text
 				r.lastEscalate = intent.EscalateIntent(req.Text, r.Profile.Router.ActionVerbs, r.Profile.Router.Targets)
@@ -578,9 +578,14 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 		fmt.Fprintln(r.errw(), "konsolai: the model returned no answer")
 		return 1, out, ptok, usedMain, ""
 	}
-	if !r.escalated && intent.IsPromise(out) && !gate.released {
-		gate.discard()
-		return 0, out, ptok, usedMain, intent.EscalateIntent(query, r.Profile.Router.ActionVerbs, r.Profile.Router.Targets)
+	if !r.escalated && intent.ClaimsAction(out) {
+		esc := intent.EscalateIntent(query, r.Profile.Router.ActionVerbs, r.Profile.Router.Targets)
+		if gate.released {
+			fmt.Fprintln(r.errw(), ui.Current().Warn("the previous reply claimed an action that was not performed; retrying as "+string(esc)))
+		} else {
+			gate.discard()
+		}
+		return 0, out, ptok, usedMain, esc
 	}
 	if !gate.released {
 		gate.release()
@@ -843,7 +848,7 @@ func (g *answerGate) Consider(text string) {
 	if strings.TrimSpace(text) == "" || !strings.Contains(text, "\n") {
 		return
 	}
-	if intent.IsPromise(text) {
+	if intent.ClaimsAction(text) {
 		return
 	}
 	g.release()
