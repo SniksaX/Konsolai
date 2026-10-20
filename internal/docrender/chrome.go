@@ -48,6 +48,18 @@ func FindChrome() (string, error) {
 	return "", errors.New("install chromium (sudo pacman -S chromium) or set KONSOLAI_CHROME")
 }
 
+func headlessArgs(profile string) []string {
+	return []string{
+		"--headless=new",
+		"--disable-gpu",
+		"--no-sandbox",
+		"--disable-dev-shm-usage",
+		"--disable-extensions",
+		"--ozone-platform=headless",
+		"--user-data-dir=" + profile,
+	}
+}
+
 func isBrave(p string) bool {
 	b := strings.ToLower(filepath.Base(p))
 	return b == "brave" || b == "brave-browser"
