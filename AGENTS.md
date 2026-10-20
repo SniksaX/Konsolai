@@ -85,6 +85,7 @@ Accessors are the only `<= 0` means default logic (`nonzero` and the ratio acces
 - The fast client is preferred when reachable. If an answer stream fails on it, the turn retries on main. Fast is skipped when the prompt passes `context_guard_ratio`.
 - Reply language comes from the user message (`intent.Detect` / `ResolveLanguage`, en and fr), then the previous user line, then a router hint that is in the profile list.
 - `export_doc` accepts only `html` and `pdf`. Shell PDF and HTML printers are refused. A docs plan that asks for PDF or HTML must name `export_doc`.
+- Tests that need external binaries skip when they are missing; CI installs them.
 - `memory.Guard` disables itself on the first store error and reports one line. A `turn_stats` insert failure never fails the turn.
 - Prompts tell the model to use `search`, `find_files`, and `outline` before `recall` on code.
 - Color is theme roles. Submitted lines use `theme.InputEcho`. Raw ANSI stays in `internal/ui/theme` and `_test.go`.
@@ -107,7 +108,7 @@ Work lands on `dev`. Config keys are the single table in `internal/config/keys.g
 - `/theme`: picker. Esc does not change the theme or clear the screen. Enter applies the palette in place and does not redraw the welcome.
 - Frame side text removed; theme applies in place. `/set default <name>` restores one key. `/set default all` asks y/n first (`--yes` skips), reports how many keys differ and that models, roles, and endpoints reset, backs up the real file as `config.yaml.bak-<timestamp>` (mode 0600, five kept), then writes the factory document. Decline leaves the file. The symlink stays.
 - Docker: `Dockerfile` targets `base` and `full` (Debian Chromium via `KONSOLAI_CHROME`). `compose.yaml` project `konsolai` starts only the database on `docker compose up -d`, on its own volume and port, never the developer's database. `scripts/docker.sh` builds, runs the database, and runs the CLI. Inside the container the model server is `http://host.docker.internal:<port>/v1`.
-- CI: `.github/workflows/ci.yml` on push and pull request to `dev` and `prod` runs gofmt, vet, and `go test` against pgvector, and builds the base image with no push. `.github/workflows/release.yml` on `v*` tags pushes `ghcr.io/sniksax/konsolai:<tag>`, `:latest`, and `:<tag>-full`, and attaches linux amd64 and arm64 binaries. The token is `GITHUB_TOKEN`.
+- CI: `.github/workflows/ci.yml` on push and pull request to `dev` and `prod` runs gofmt, vet, and `go test` against pgvector, and builds the base image with no push. Tests that need external binaries skip when they are missing; CI installs poppler-utils and sets `KONSOLAI_CHROME` when Chrome is already on the runner. `.github/workflows/release.yml` runs that test job before it publishes on `v*` tags: `ghcr.io/sniksax/konsolai:<tag>`, `:latest`, and `:<tag>-full`, plus linux amd64 and arm64 binaries. The token is `GITHUB_TOKEN`.
 - Placeholder: inline suggestion only. Enter does not submit it.
 - Footer context meter: last prompt tokens against the window (`ctx_warn_pct`, `ctx_hot_pct`, `ctx_cells`).
 - `propose_plan`: a command-only plan may omit `files` when the plan does not write or edit files.
