@@ -48,6 +48,20 @@ type welcomeState struct {
 	freshFor      time.Duration
 }
 
+func (s *welcomeState) retarget(cwd, dir, branch string, projectID *int64) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snap.in.CWD = cwd
+	s.snap.in.ProjectID = projectID
+	s.snap.info.Dir = dir
+	s.snap.info.Branch = branch
+	s.snap.data.Session.Dir = dir
+	s.snap.data.Session.Branch = branch
+}
+
 func (s *welcomeState) snapshot() welcomeSnap {
 	s.mu.Lock()
 	defer s.mu.Unlock()
