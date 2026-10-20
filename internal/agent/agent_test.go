@@ -1389,6 +1389,15 @@ func TestRestoreApprovedPlan(t *testing.T) {
 }
 
 func TestPromptNotes(t *testing.T) {
+	if !strings.Contains(LookupPrompt, "Only state results you observed in tool output in THIS turn") {
+		t.Fatal("lookup honesty")
+	}
+	if !strings.Contains(ActPrompt, "Only state results you observed in tool output in THIS turn") {
+		t.Fatal("act honesty")
+	}
+	if !strings.Contains(CodePrompt, "Only state results you observed in tool output in THIS turn") {
+		t.Fatal("code honesty")
+	}
 	if !strings.Contains(LookupPrompt, "never with web_fetch") {
 		t.Fatal("lookup web_fetch")
 	}
