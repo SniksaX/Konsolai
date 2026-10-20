@@ -684,6 +684,7 @@ func TestTunablesOmitAndOverride(t *testing.T) {
 	for _, key := range []string{
 		"probe_deadline_ms: 400",
 		"probe_timeout_ms: 300",
+		"esc_timeout_ms: 30",
 		"git_query_ms: 200",
 		"memory_query_ms: 200",
 		"startup_cap_ms: 500",
