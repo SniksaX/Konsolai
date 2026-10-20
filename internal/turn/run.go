@@ -115,11 +115,14 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 		r.answerCut = false
 	}
 	spoken := req.Text
+	prevCtx := strings.TrimSpace(r.lastUser + "\n" + r.lastAssistant)
 	if !continued {
-		dec = DecideIntentFloor(ctx, routeClient, req.Intent, req.Text, req.New, routerCands, inRepo, r.Profile.Router.ActionVerbs, r.Profile.Router.Targets)
+		dec = DecideIntentFloor(ctx, routeClient, req.Intent, req.Text, req.New, routerCands, inRepo, r.Profile.Router.ActionVerbs, r.Profile.Router.Targets, prevCtx)
 	} else if dec.Reason == "continue-promise" && r.lastUser != "" {
 		req.Text = r.lastUser
 		r.lastPromise = false
+	} else if dec.Reason == "contradict-claim" && r.lastUser != "" {
+		req.Text = intent.WithPreviousExchange(spoken, r.lastUser, r.lastAssistant)
 	} else if dec.Reason == "clarification" {
 		req.Text = intent.WithPreviousExchange(req.Text, r.lastUser, r.lastAssistant)
 	} else {
