@@ -273,14 +273,18 @@ func recentText(pal ui.Palette, width, inset int, item Recent) string {
 	}
 	right := recentRight(item)
 	rightW := theme.DisplayWidth(right)
-	prefixW := inset + 2 // spaces, "›", and the following space
+	num := ""
+	if item.N > 0 {
+		num = strconv.Itoa(item.N) + " "
+	}
+	prefixW := inset + theme.DisplayWidth(num) + 2 // spaces, optional number, "›", and the following space
 	minGap := 0
 	if rightW > 0 {
 		minGap = 1
 	}
 	room := width - prefixW - minGap - rightW
 	if room < 0 {
-		plain := spaces(inset) + "› " + right
+		plain := spaces(inset) + num + "› " + right
 		if theme.DisplayWidth(plain) > width {
 			plain = theme.Truncate(plain, width)
 		}
@@ -302,6 +306,7 @@ func recentText(pal ui.Palette, width, inset int, item Recent) string {
 	}
 	var b strings.Builder
 	b.WriteString(spaces(inset))
+	b.WriteString(num)
 	b.WriteString(pal.AccentDim("›"))
 	b.WriteString(" ")
 	b.WriteString(title)
@@ -313,14 +318,17 @@ func recentText(pal ui.Palette, width, inset int, item Recent) string {
 }
 
 func recentRight(item Recent) string {
-	switch {
-	case item.Intent != "" && item.Age != "":
-		return item.Intent + "  " + item.Age
-	case item.Intent != "":
-		return item.Intent
-	default:
-		return item.Age
+	var parts []string
+	if item.Dir != "" {
+		parts = append(parts, item.Dir)
 	}
+	if item.Intent != "" {
+		parts = append(parts, item.Intent)
+	}
+	if item.Age != "" {
+		parts = append(parts, item.Age)
+	}
+	return strings.Join(parts, "  ")
 }
 
 func paintRecentPlain(pal ui.Palette, plain string) string {
