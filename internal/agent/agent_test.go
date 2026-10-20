@@ -1389,7 +1389,7 @@ func TestRestoreApprovedPlan(t *testing.T) {
 }
 
 func TestPromptNotes(t *testing.T) {
-	if !strings.Contains(LookupPrompt, "Only state results you observed in tool output in THIS turn") {
+	if !strings.Contains(LookupPrompt, "Only state results you observed in tool output in THIS turn") || !strings.Contains(LookupPrompt, "was blocked, failed, or never attempted") {
 		t.Fatal("lookup honesty")
 	}
 	if !strings.Contains(ActPrompt, "Only state results you observed in tool output in THIS turn") {
