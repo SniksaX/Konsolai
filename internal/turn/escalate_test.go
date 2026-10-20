@@ -125,6 +125,35 @@ func TestContinueAfterPromise(t *testing.T) {
 	}
 }
 
+func TestContinueContradictionAfterAnswer(t *testing.T) {
+	r := &Runner{
+		lastIntent:    intent.Answer,
+		lastUser:      "okey delete it",
+		lastAssistant: "Process killed. Port 10101 is now free.",
+		lastLang:      "en",
+	}
+	dec, ok := r.continueDecision("you didn't kill it")
+	if !ok || dec.Intent != intent.Act || dec.Reason != "contradict-claim" {
+		t.Fatalf("%+v ok=%v", dec, ok)
+	}
+	dec, ok = r.continueDecision("ça marche pas")
+	if !ok || dec.Intent != intent.Act {
+		t.Fatalf("ça marche pas %+v", dec)
+	}
+}
+
+func TestTranscriptFloorsToAct(t *testing.T) {
+	prev := "can you test it ?\nthe go server on :10101"
+	got, ok := intent.ActionFloorPrev("okey delete it", prev, nil, nil, true)
+	if !ok || got != intent.Act {
+		t.Fatalf("delete it %q ok=%v", got, ok)
+	}
+	got, ok = intent.ActionFloorPrev("can you test it ?", "main.go runs a Go server", nil, nil, true)
+	if !ok || (got != intent.Build && got != intent.Act) {
+		t.Fatalf("test it %q ok=%v", got, ok)
+	}
+}
+
 func TestContinueDecisionClarification(t *testing.T) {
 	r := &Runner{
 		lastIntent:    intent.Act,
