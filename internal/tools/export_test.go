@@ -134,9 +134,6 @@ func TestExportPrepareDoesNotRender(t *testing.T) {
 }
 
 func TestExportDocMermaidRenders(t *testing.T) {
-	if _, err := exec.LookPath("mmdc"); err != nil {
-		t.Skip("mmdc not installed")
-	}
 	if _, err := docrender.FindChrome(); err != nil {
 		t.Skip("chrome not installed")
 	}
@@ -167,6 +164,9 @@ func TestExportDocMermaidRenders(t *testing.T) {
 	}
 	if !strings.Contains(string(html), "<svg") {
 		t.Fatalf("html missing svg: %s", html[:min(len(html), 400)])
+	}
+	if strings.Contains(strings.ToLower(string(html)), "<script") {
+		t.Fatal("html still has a script")
 	}
 	pdfAct, err := tool.Prepare(`{"path":"out.pdf","format":"pdf"}`)
 	if err != nil {
