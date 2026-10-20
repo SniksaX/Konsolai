@@ -12,7 +12,7 @@ The architect writes lettered tasks. The IDE agent implements. The user tests an
 Commits go to `dev` only. Never commit to `prod`. One commit per file. MOVE exception: a split of one file into siblings may be one commit so every commit builds.
 Message: `[TYPE|SIZE] Title` in imperative mood, title max 72 characters. TYPE is ADD, UPDATE, FIX, DELETE, MOVE, or REFACTOR. SIZE is MINOR (under 20 lines), MEDIUM (20–100), or MAJOR (over 100, or a public API or behavior change). Keep the body short. Use `git commit -F`.
 After each phase: `gofmt -l .`, `go vet ./...`, `go test ./... -count=1` (with the test DB when store is involved), `go build -o ~/.local/bin/konsolai ./cmd/konsolai`.
-Test DB: `scripts/test-db.sh up|down`. Never touch the developer's own database container; integration tests use `scripts/test-db.sh`.
+Test DB: `scripts/test-db.sh up|down`. Never touch the developer's own database container; integration tests use `scripts/test-db.sh`. Compose uses its own volume and published port and never the developer's database.
 UI changes are verified on a real PTY (`/dev/ptmx`, `creack/pty`), not a pipe.
 Code: strict types; no `interface{}` or `any` unless unavoidable; wrap errors as `pkg: context: %w`; no debug logging; no new packages unless the architect specifies them; no new dependencies unless approved.
 Approved in `go.mod`: jackc/pgx/v5, alecthomas/chroma/v2, yuin/goldmark, reeflective/readline, rivo/uniseg, go.yaml.in/yaml/v3, golang.org/x/term, golang.org/x/sys, and test-only creack/pty. Go 1.27.1. Module `github.com/SniksaX/Konsolai`.
@@ -22,7 +22,7 @@ Approved in `go.mod`: jackc/pgx/v5, alecthomas/chroma/v2, yuin/goldmark, reeflec
 Chat is any OpenAI-compatible server. The built-in model is named `default` at `http://localhost:8000/v1` with an empty id. `thinking_kwargs` sends `chat_template_kwargs.enable_thinking` only when that model's flag is true. Reasoning may arrive in `delta.reasoning`.
 Fast is optional. An empty `roles.fast` uses the main model and stays quiet. An answer stream retries on main if the fast call fails.
 Embed and rerank are optional URLs on `roles.embed` and `roles.rerank`. When `rag.enabled` is false, Konsolai does not ingest and does not offer the recall tool.
-Never touch the developer's own database container. Integration tests use `scripts/test-db.sh`.
+Never touch the developer's own database container. Integration tests use `scripts/test-db.sh`. Compose uses its own volume and published port and never the developer's database.
 Config path is `--config`, then `KONSOLAI_CONFIG`, then `$XDG_CONFIG_HOME/konsolai/config.yaml` or `~/.config/konsolai/config.yaml`. Writes resolve symlinks and land in the real file, mode 0600.
 A new setting is ONE entry in `internal/config/keys.go`. Every configuration change goes through `/set`.
 Env overrides are the `Env` column of that table, plus `KONSOLAI_PROFILE` and `KONSOLAI_CONFIG`. `--profile` beats `KONSOLAI_PROFILE` beats `default_profile` beats built-in `default`. `--config` beats `KONSOLAI_CONFIG` beats the XDG path.
@@ -105,7 +105,9 @@ Work lands on `dev`. Config keys are the single table in `internal/config/keys.g
 - REPL welcome: `split`, `frame`, and `minimal`. Paint once after probes. Height from the wrapped TTY.
 - `turn_stats`: best-effort token and timing rows. Welcome rates use `ModelRate`.
 - `/theme`: picker. Esc does not change the theme or clear the screen. Enter applies the palette in place and does not redraw the welcome.
-- Frame side text removed; theme applies in place; `/set default <name|all>` restores `config.default.yaml`.
+- Frame side text removed; theme applies in place. `/set default <name>` restores one key. `/set default all` asks y/n first (`--yes` skips), reports how many keys differ and that models, roles, and endpoints reset, backs up the real file as `config.yaml.bak-<timestamp>` (mode 0600, five kept), then writes the factory document. Decline leaves the file. The symlink stays.
+- Docker: `Dockerfile` targets `base` and `full` (Chromium via `KONSOLAI_CHROME`, and `mmdc`). `compose.yaml` project `konsolai` starts only the database on `docker compose up -d`, on its own volume and port, never the developer's database. `scripts/docker.sh` builds, runs the database, and runs the CLI. Inside the container the model server is `http://host.docker.internal:<port>/v1`.
+- CI: `.github/workflows/ci.yml` on push and pull request to `dev` and `prod` runs gofmt, vet, and `go test` against pgvector, and builds the base image with no push. `.github/workflows/release.yml` on `v*` tags pushes `ghcr.io/sniksax/konsolai:<tag>`, `:latest`, and `:<tag>-full`, and attaches linux amd64 and arm64 binaries. The token is `GITHUB_TOKEN`.
 - Placeholder: inline suggestion only. Enter does not submit it.
 - Footer context meter: last prompt tokens against the window (`ctx_warn_pct`, `ctx_hot_pct`, `ctx_cells`).
 - `propose_plan`: a command-only plan may omit `files` when the plan does not write or edit files.

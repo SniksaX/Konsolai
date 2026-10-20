@@ -19,7 +19,8 @@ func main() {
 	if err := write(filepath.Join(root, "config.default.yaml"), config.InitYAML()); err != nil {
 		fail(err)
 	}
-	if err := write(filepath.Join(root, ".env.example"), config.EnvExample()); err != nil {
+	// Config keys come from EnvExample. Compose-only variables are a separate block.
+	if err := write(filepath.Join(root, ".env.example"), config.EnvExample()+config.ComposeEnvExample()); err != nil {
 		fail(err)
 	}
 }

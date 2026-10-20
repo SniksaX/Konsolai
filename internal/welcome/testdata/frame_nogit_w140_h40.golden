@@ -1,0 +1,18 @@
+
+╭─ konsolai v0.1.0 ───────────────────────────────────────────────────────────────────────────────────────────────────── ● gpu-box online ─╮
+│                                                                                                                                          │
+│   ▀▄     █  ▄▀ ▄▀▀▀▄ █▄  █ ▄▀▀▀▀ ▄▀▀▀▄ █     ▄▀▀▀▄ ▀▀█▀▀ █████                                                                           │
+│     ▀▄   █▄▀   █   █ █ ▀▄█ ▀▄▄▄  █   █ █     █▄▄▄█   █   █████                                                                           │
+│    ▄▀    █ ▀▄  █   █ █   █     █ █   █ █     █   █   █   █████                                                                           │
+│   ▀      ▀   ▀  ▀▀▀  ▀   ▀ ▀▀▀▀   ▀▀▀  ▀▀▀▀▀ ▀   ▀ ▀▀▀▀▀ ▀▀▀▀▀                                                                           │
+│                                                                                                                                          │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  MODELS                                       SESSION                                      RECENT                                        │
+│  ● main-model    main    84 tokens/s          dir      ~/projects/demo                     › fix the welcome screen before ... build  5m │
+│  ● fast-model    fast    120 tokens/s         branch   not a git repo                      › lookup theme roles               lookup  2h │
+│  ● embed-model   embed   40ms                 build    v0.1.0  ab12cd3                     › answer a short question          answer  1d │
+│  ● rerank-model  rerank  18ms                 memory   412 facts · 2 sessions              › wire the footer meter               act  3w │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+    / commands   ! shell   @ files   ? help                                                           tip /undo reverts the last file change
+

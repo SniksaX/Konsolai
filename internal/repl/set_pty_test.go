@@ -159,8 +159,12 @@ func TestSetDefaultAllRestores(t *testing.T) {
 		setDefaultChild()
 		return
 	}
-	raw, cfg := driveSetDefault(t, "TestSetDefaultAllRestores", "set-default-all", "defaults:\n  ui:\n    theme: jade\n  agent:\n    max_steps:\n      act: 3\n", "/set default all\r")
+	raw, cfg := driveSetDefault(t, "TestSetDefaultAllRestores", "set-default-all", "defaults:\n  ui:\n    theme: jade\n  agent:\n    max_steps:\n      act: 3\n", "/set default all\ry")
 	assertNoScreenClear(t, raw)
+	plain := ansiRe.ReplaceAllString(string(raw), "")
+	if !strings.Contains(plain, "will be reset") {
+		t.Fatalf("prompt missing\n%s", plain)
+	}
 	body, err := os.ReadFile(cfg)
 	if err != nil {
 		t.Fatal(err)

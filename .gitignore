@@ -1,5 +1,8 @@
 .*
 !.env.example
+!.dockerignore
+!.github/
+!.github/**
 .env
 .cursor/
 /config.yaml

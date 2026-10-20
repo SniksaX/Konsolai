@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/SniksaX/Konsolai/internal/config"
 	"github.com/SniksaX/Konsolai/internal/turn"
@@ -175,16 +178,26 @@ func setEmoji(env *Env, args []string, session bool) int {
 }
 
 func setDefault(ctx context.Context, env *Env, args []string, session bool) int {
+	yes := env != nil && env.Yes
+	kept := make([]string, 0, len(args))
+	for _, a := range args {
+		if a == "--yes" {
+			yes = true
+			continue
+		}
+		kept = append(kept, a)
+	}
+	args = kept
 	if len(args) == 0 || args[0] == "default" {
 		fmt.Fprintln(env.errw(), "usage: /set default <name|all>")
 		return 2
 	}
 	if strings.EqualFold(args[0], "all") {
 		if len(args) != 1 {
-			fmt.Fprintln(env.errw(), "usage: /set default all")
+			fmt.Fprintln(env.errw(), "usage: /set default all [--yes]")
 			return 2
 		}
-		return resetAllDefaults(env, session)
+		return resetAllDefaults(env, session, yes)
 	}
 	forwarded := []string{args[0], "default"}
 	forwarded = append(forwarded, args[1:]...)
@@ -194,15 +207,34 @@ func setDefault(ctx context.Context, env *Env, args []string, session bool) int 
 	return runSet(ctx, env, forwarded)
 }
 
-func resetAllDefaults(env *Env, session bool) int {
+func resetAllDefaults(env *Env, session, yes bool) int {
 	if env == nil {
 		return 1
 	}
+	body := config.InitYAML()
+	if !session && configURLPassword(body) {
+		fmt.Fprintln(env.errw(), "database is a string; a password is not allowed (use ~/.pgpass or KONSOLAI_DATABASE_URL)")
+		return 2
+	}
+	if !yes {
+		ok, err := confirmReset(env, factoryDiffSummary(env.Profile))
+		if err != nil {
+			fmt.Fprintln(env.errw(), err)
+			return 1
+		}
+		if !ok {
+			fmt.Fprintln(env.out(), "left unchanged")
+			return 1
+		}
+	}
 	if !session {
-		body := config.InitYAML()
-		if configURLPassword(body) {
-			fmt.Fprintln(env.errw(), "database is a string; a password is not allowed (use ~/.pgpass or KONSOLAI_DATABASE_URL)")
-			return 2
+		backup, err := backupActiveConfig(configPath(env))
+		if err != nil {
+			fmt.Fprintln(env.errw(), err)
+			return 1
+		}
+		if backup != "" {
+			fmt.Fprintln(env.out(), backup)
 		}
 		if err := config.WriteAtomic(configPath(env), []byte(body)); err != nil {
 			fmt.Fprintln(env.errw(), err)
@@ -220,6 +252,120 @@ func resetAllDefaults(env *Env, session bool) int {
 	applyLive(env, k)
 	fmt.Fprintln(env.out(), "applied now")
 	return 0
+}
+
+func factoryDiffSummary(c config.Config) string {
+	base := config.Builtin()
+	n := 0
+	for _, k := range config.Keys() {
+		if k.Present(c) != k.Present(base) {
+			n++
+		}
+	}
+	return fmt.Sprintf("%d keys differ from the factory values. Models, roles, and endpoints will be reset.", n)
+}
+
+func confirmReset(env *Env, summary string) (bool, error) {
+	conf := env.Confirm
+	if conf == nil {
+		p, err := ui.OpenPrompter(false)
+		if err != nil {
+			return false, fmt.Errorf("commands: confirm: %w", err)
+		}
+		defer p.Close()
+		conf = p
+	}
+	d, _, err := conf.Confirm(summary, "")
+	if err != nil {
+		return false, fmt.Errorf("commands: confirm: %w", err)
+	}
+	return d == ui.Approve || d == ui.ApproveAll, nil
+}
+
+const backupKeep = 5
+
+// backupActiveConfig copies the real file behind path to
+// <name>.bak-<YYYYmmdd-HHMMSS> beside that file, mode 0600.
+// A missing file returns an empty path. Older backups in that directory
+// beyond the newest five are removed. Backups elsewhere are left alone.
+func backupActiveConfig(path string) (string, error) {
+	real, err := config.RealPath(path)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(real)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("commands: read config: %w", err)
+	}
+	dir := filepath.Dir(real)
+	base := filepath.Base(real)
+	var dest string
+	var f *os.File
+	for try := 0; try < 5; try++ {
+		stamp := time.Now().Format("20060102-150405")
+		dest = filepath.Join(dir, base+".bak-"+stamp)
+		f, err = os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if err == nil {
+			break
+		}
+		if !os.IsExist(err) {
+			return "", fmt.Errorf("commands: backup config: %w", err)
+		}
+		time.Sleep(time.Second)
+	}
+	if f == nil {
+		return "", fmt.Errorf("commands: backup config: %s exists", dest)
+	}
+	ok := false
+	defer func() {
+		if !ok {
+			_ = os.Remove(dest)
+		}
+	}()
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return "", fmt.Errorf("commands: backup config: %w", err)
+	}
+	if err := f.Chmod(0600); err != nil {
+		_ = f.Close()
+		return "", fmt.Errorf("commands: backup config: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return "", fmt.Errorf("commands: backup config: %w", err)
+	}
+	if err := rotateBackups(dir, base, dest, backupKeep); err != nil {
+		return "", err
+	}
+	ok = true
+	return dest, nil
+}
+
+func rotateBackups(dir, base, keepPath string, keep int) error {
+	matches, err := filepath.Glob(filepath.Join(dir, base+".bak-*"))
+	if err != nil {
+		return fmt.Errorf("commands: list backups: %w", err)
+	}
+	var rest []string
+	for _, m := range matches {
+		if m == keepPath {
+			continue
+		}
+		rest = append(rest, m)
+	}
+	sort.Strings(rest)
+	drop := len(rest) - (keep - 1)
+	if drop < 1 {
+		return nil
+	}
+	for _, p := range rest[:drop] {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("commands: remove backup: %w", err)
+		}
+	}
+	return nil
 }
 
 func setTheme(env *Env, args []string, session bool) int {

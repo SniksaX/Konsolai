@@ -1,0 +1,10 @@
+.git
+.gitignore
+config.yaml
+config.yaml.bak-*
+.env
+.cursor
+docs/assets
+**/testdata
+**/testdata/**
+**/*_test.go
