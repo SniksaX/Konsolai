@@ -40,6 +40,9 @@ func machinePattern() *regexp.Regexp {
 var machineAllow = map[string]string{}
 
 func TestNoLocalMachine(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("needs git")
+	}
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller")
