@@ -21,7 +21,7 @@ func composeVars() []composeVar {
 		{"KONSOLAI_TARGET", "base", "image stage, `base` or `full`"},
 		{"KONSOLAI_WORKDIR", ".", "host directory mounted at `/work`"},
 		{"KONSOLAI_CONFIG_FILE", "./config.yaml", "config file mounted at `/config/config.yaml`"},
-		{"KONSOLAI_EMBED_MODEL", "BAAI/bge-base-en-v1.5", "embedding service model id"},
+		{"KONSOLAI_EMBED_MODEL", "BAAI/bge-m3", "embedding service model id"},
 		{"KONSOLAI_EMBED_PORT", "8080", "published embedding port"},
 	}
 }
