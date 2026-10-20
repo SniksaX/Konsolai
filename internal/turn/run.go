@@ -111,6 +111,9 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	understand := ui.Start("understanding")
 	routeClient := r.routerClient(ctx)
 	dec, continued := r.continueDecision(req.Text)
+	if !(continued && dec.Reason == "continue-cut") {
+		r.answerCut = false
+	}
 	spoken := req.Text
 	if !continued {
 		dec = DecideIntentFloor(ctx, routeClient, req.Intent, req.Text, req.New, routerCands, inRepo, r.Profile.Router.ActionVerbs, r.Profile.Router.Targets)
@@ -529,26 +532,31 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 	gate := &answerGate{dst: r.out(), onRelease: func() {
 		r.emitBadge(req, string(dec.Intent), false)
 	}}
-	out, usage, streamErr := StreamAnswer(ctx, client, msgs, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP)
-	if streamErr != nil && !usedMain && !gate.released {
+	tokCap := r.Profile.AnswerEffortCap(string(dec.EffectiveEffort()))
+	out, usage, streamErr := streamAnswer(ctx, client, msgs, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap)
+	cut := errors.Is(streamErr, llm.ErrTruncated)
+	if streamErr != nil && !cut && !usedMain && !gate.released {
 		if req.Trace {
 			fmt.Fprintln(r.errw(), "fast model failed; retrying on main")
 		}
 		client = main
 		usedMain = true
 		gate.reset()
-		out, usage, streamErr = StreamAnswer(ctx, client, msgs, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP)
+		out, usage, streamErr = streamAnswer(ctx, client, msgs, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap)
+		cut = errors.Is(streamErr, llm.ErrTruncated)
 	}
 	if streamErr == nil && strings.TrimSpace(out) == "" && !gate.released {
 		gate.reset()
-		out, usage, streamErr = StreamAnswer(ctx, client, []llm.Message{system, user}, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP)
+		out, usage, streamErr = streamAnswer(ctx, client, []llm.Message{system, user}, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap)
+		cut = errors.Is(streamErr, llm.ErrTruncated)
 	}
 	modelTime := time.Since(t0)
 	ptok := 0
 	if usedMain {
 		ptok = usage.PromptTokens
 	}
-	if streamErr != nil {
+	if streamErr != nil && !cut {
+		r.answerCut = false
 		if errors.Is(streamErr, context.Canceled) {
 			return 130, out, ptok, usedMain, ""
 		}
@@ -559,7 +567,8 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 		fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.MainEndpoint(), streamErr, req.Trace))
 		return 1, out, ptok, usedMain, ""
 	}
-	if strings.TrimSpace(out) == "" {
+	if strings.TrimSpace(out) == "" && !cut {
+		r.answerCut = false
 		fmt.Fprintln(r.errw(), "konsolai: the model returned no answer")
 		return 1, out, ptok, usedMain, ""
 	}
@@ -570,7 +579,15 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 	if !gate.released {
 		gate.release()
 	}
-	_ = rec.Message(ctx, llm.Message{Role: llm.RoleAssistant, Content: out})
+	if cut {
+		fmt.Fprintln(r.out(), ui.Current().Muted(fmt.Sprintf("· cut at %d tokens; ask 'continue' for more", usage.CompletionTokens)))
+		r.answerCut = true
+	} else {
+		r.answerCut = false
+	}
+	if strings.TrimSpace(out) != "" {
+		_ = rec.Message(ctx, llm.Message{Role: llm.RoleAssistant, Content: out})
+	}
 	st := agent.Stats{
 		Steps:            1,
 		ModelTime:        modelTime,
@@ -610,6 +627,10 @@ func SanitizeAnswerHistory(hist []llm.Message) []llm.Message {
 }
 
 func StreamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, think, plain bool, outw, errw io.Writer, temp, topP float64) (string, llm.Usage, error) {
+	return streamAnswer(ctx, client, msgs, think, plain, outw, errw, temp, topP, 0)
+}
+
+func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, think, plain bool, outw, errw io.Writer, temp, topP float64, tokenCap int) (string, llm.Usage, error) {
 	if outw == nil {
 		outw = os.Stdout
 	}
@@ -637,6 +658,9 @@ func StreamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 	if err != nil {
 		live.Stop()
 		return "", llm.Usage{}, err
+	}
+	if tokenCap > 0 && maxTok > tokenCap {
+		maxTok = tokenCap
 	}
 	if elide.Count > 0 {
 		fmt.Fprintln(errw, agent.FormatElide(elide, client.ContextWindow()))
