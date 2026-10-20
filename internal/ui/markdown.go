@@ -282,7 +282,7 @@ func (r *Renderer) emitLine(s string) error {
 	switch {
 	case reHeading.MatchString(s):
 		m := reHeading.FindStringSubmatch(s)
-		text := p.Heading(inline(p, m[2]))
+		text := p.Strong(inline(p, m[2]))
 		_, err := io.WriteString(r.w, text+"\n")
 		return err
 	case reBullet.MatchString(s):
@@ -514,7 +514,7 @@ func (r *Renderer) flushTable() error {
 			}
 			pad := cell + strings.Repeat(" ", n)
 			if first {
-				pad = p.Heading(pad)
+				pad = p.Strong(pad)
 			}
 			b.WriteString(" " + pad + " " + p.Subtle("│"))
 		}
@@ -642,7 +642,7 @@ func inline(p Palette, s string) string {
 		}
 		if strings.HasPrefix(s[i:], "**") {
 			if j := strings.Index(s[i+2:], "**"); j >= 0 {
-				b.WriteString(p.Strong(s[i+2 : i+2+j]))
+				b.WriteString(p.Heading(s[i+2 : i+2+j]))
 				i += j + 4
 				continue
 			}
