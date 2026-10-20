@@ -3,6 +3,7 @@ package tools
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,7 +19,7 @@ func fsRegistry(t *testing.T) (*safety.Guard, *Registry, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return g, NewRegistry(g, os.Stdout, nil, nil, nil), root
+	return g, NewRegistry(g, io.Discard, nil, nil, nil), root
 }
 
 func TestWriteFileAtomicAndMode(t *testing.T) {
@@ -181,7 +182,7 @@ func TestSearchMasksEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	list := func(context.Context) ([]string, error) { return walkRel(root) }
-	reg := NewRegistry(g, os.Stdout, list, nil, nil)
+	reg := NewRegistry(g, io.Discard, list, nil, nil)
 	st, _ := reg.Get("search")
 	act, err := st.Prepare(`{"pattern":"ABUSEIPDB_KEY"}`)
 	if err != nil {
@@ -234,7 +235,7 @@ func TestDocsTaskRejectsSourceWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reg := NewRegistry(g, os.Stdout, nil, nil, nil, Options{DocsTask: true})
+	reg := NewRegistry(g, io.Discard, nil, nil, nil, Options{DocsTask: true})
 	tool, _ := reg.Get("write_file")
 	_, err = tool.Prepare(`{"path":"main.go","content":"package main"}`)
 	if err == nil || err.Error() != DocsSourceReject {
@@ -247,7 +248,7 @@ func TestDocsTaskRejectsSourceWrite(t *testing.T) {
 	if _, err := tool.Prepare(`{"path":"docs/OVERVIEW.md","content":"# x"}`); err != nil {
 		t.Fatalf("md: %v", err)
 	}
-	plain := NewRegistry(g, os.Stdout, nil, nil, nil)
+	plain := NewRegistry(g, io.Discard, nil, nil, nil)
 	w, _ := plain.Get("write_file")
 	if _, err := w.Prepare(`{"path":"main.go","content":"package main"}`); err != nil {
 		t.Fatalf("non-docs: %v", err)
