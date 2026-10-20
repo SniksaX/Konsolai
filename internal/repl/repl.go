@@ -40,19 +40,21 @@ type Config struct {
 }
 
 type session struct {
-	mu      sync.Mutex
-	id      string
-	cwd     string
-	yes     bool
-	trace   bool
-	down    bool
-	ctxPct  int
-	showCtx bool
-	shell   bool
-	pastes  *PasteStore
-	mode    *shellmode.Session
-	cancel  context.CancelFunc
-	warns   []string
+	mu         sync.Mutex
+	id         string
+	cwd        string
+	yes        bool
+	trace      bool
+	down       bool
+	ctxPct     int
+	showCtx    bool
+	shell      bool
+	pastes     *PasteStore
+	mode       *shellmode.Session
+	welcome    *welcomeState
+	resumeIdle bool
+	cancel     context.CancelFunc
+	warns      []string
 }
 
 type nlWriter struct {
@@ -149,6 +151,7 @@ func Run(ctx context.Context, cfg Config) int {
 		fmt.Fprintln(errw, "konsolai:", err)
 		return 1
 	}
+	st.welcome = welcome
 
 	go probeBackground(ctx, env.Profile, errw, st)
 
@@ -348,15 +351,17 @@ func Run(ctx context.Context, cfg Config) int {
 		turnCtx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 		st.mu.Lock()
 		st.cancel = cancel
+		turnID, turnCwd, resumeIdle := st.id, st.cwd, st.resumeIdle
 		st.mu.Unlock()
 		res := cfg.Runner.RunTurn(turnCtx, turn.Request{
-			Text: line, Yes: st.yes, Trace: st.trace, Cwd: st.cwd,
-			ResumeSession: st.id, New: st.id == "", KeepOpen: true,
+			Text: line, Yes: st.yes, Trace: st.trace, Cwd: turnCwd,
+			ResumeSession: turnID, New: turnID == "" && !resumeIdle, KeepOpen: true,
 		})
 		cancelled := res.ExitCode == 130 || (turnCtx.Err() != nil && ctx.Err() == nil)
 		cancel()
 		st.mu.Lock()
 		st.cancel = nil
+		st.resumeIdle = false
 		if res.SessionID != "" {
 			st.id = res.SessionID
 		}
@@ -471,19 +476,19 @@ func sessionFooter(st *session, cfg Config) string {
 
 func wireEnv(env *commands.Env, st *session, cfg Config) {
 	env.OnCwd = func(dir string) error {
-		abs, err := expandDir(st.cwd, dir)
+		st.mu.Lock()
+		cwd := st.cwd
+		st.mu.Unlock()
+		abs, err := expandDir(cwd, dir)
 		if err != nil {
 			return err
 		}
-		st.cwd = abs
-		env.Cwd = abs
-		if st.mode != nil {
-			st.mode.Cwd = abs
-			if st.mode.Guard != nil {
-				_ = st.mode.Guard.SetBase(abs)
-			}
+		return st.switchDir(env, abs)
+	}
+	if st.mode != nil {
+		st.mode.OnCwd = func(abs string) error {
+			return st.switchDir(env, abs)
 		}
-		return nil
 	}
 	env.OnYes = func(on bool) { st.yes = on; env.Yes = on }
 	env.OnTrace = func(on bool) { st.trace = on }
@@ -495,6 +500,66 @@ func wireEnv(env *commands.Env, st *session, cfg Config) {
 		return runCompact(ctx, cfg.Runner, env, st)
 	}
 	env.OnExit = func() int { return -1 }
+}
+
+func (st *session) switchDir(env *commands.Env, abs string) error {
+	if eval, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = eval
+	}
+	st.mu.Lock()
+	prev := st.cwd
+	st.mu.Unlock()
+	if abs == prev {
+		return nil
+	}
+	if err := os.Chdir(abs); err != nil {
+		return fmt.Errorf("chdir: %w", err)
+	}
+	root := repo.Root(abs)
+	g, err := safety.NewAt(root, abs)
+	if err != nil {
+		_ = os.Chdir(prev)
+		return err
+	}
+	oldRoot := repo.Root(prev)
+	changed := oldRoot != root
+	st.mu.Lock()
+	st.cwd = abs
+	if changed {
+		st.id = ""
+		st.resumeIdle = true
+	}
+	mode := st.mode
+	wel := st.welcome
+	st.mu.Unlock()
+	if mode != nil {
+		mode.OldPwd = prev
+		mode.Cwd = abs
+		mode.Guard = g
+	}
+	var projectID *int64
+	if env != nil {
+		env.Cwd = abs
+		if env.Mem != nil {
+			projectID = turn.UpsertProject(context.Background(), env.Mem, abs)
+			env.ProjectID = projectID
+		}
+	}
+	branch := gitBranch(abs)
+	if wel != nil {
+		wel.retarget(abs, shortPath(abs), branch, projectID)
+	}
+	if changed && env != nil {
+		if branch == "" {
+			branch = "-"
+		}
+		w := env.Out
+		if w == nil {
+			w = os.Stdout
+		}
+		fmt.Fprintln(w, ui.Current().Muted(fmt.Sprintf("now in %s (%s)", filepath.Base(root), branch)))
+	}
+	return nil
 }
 
 func expandDir(cwd, dir string) (string, error) {
