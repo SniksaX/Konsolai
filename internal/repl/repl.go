@@ -744,27 +744,28 @@ func probeBackground(ctx context.Context, prof config.Profile, errw io.Writer, s
 	p := ui.Current()
 	var wg sync.WaitGroup
 	wg.Add(2)
+	unreachable := p.Warn("main model unreachable at " + turn.EndpointHost(prof.MainEndpoint()))
 	go func() {
 		defer wg.Done()
 		if prof.MainEndpoint() == "" {
-			markDown(st, p.Warn("endpoint unreachable"))
+			markDown(st, p.Warn("no main model endpoint configured")+p.Muted(" · /set model"))
 			return
 		}
 		cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
 		req, err := http.NewRequestWithContext(cctx, http.MethodGet, strings.TrimRight(prof.MainEndpoint(), "/")+"/models", nil)
 		if err != nil {
-			markDown(st, p.Warn("endpoint unreachable"))
+			markDown(st, unreachable)
 			return
 		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			markDown(st, p.Warn("endpoint unreachable"))
+			markDown(st, unreachable)
 			return
 		}
 		_ = resp.Body.Close()
 		if resp.StatusCode >= 400 {
-			markDown(st, p.Warn("endpoint unreachable"))
+			markDown(st, unreachable)
 		}
 	}()
 	go func() {
