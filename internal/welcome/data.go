@@ -52,9 +52,11 @@ type Session struct {
 }
 
 type Recent struct {
+	N      int // 1-based index in the shared session list; 0 hides the number
 	Title  string
 	Intent string
 	Age    string // 5m, 2h, 1d, 3w
+	Dir    string // another project's directory; painted Muted
 }
 
 type Data struct {
@@ -519,7 +521,7 @@ func loadMemory(ctx context.Context, in Input, g *gate, now time.Time) {
 		return
 	}
 	mem := fmt.Sprintf("%d facts · %d sessions", facts, sessions)
-	rows, latest, ok, rerr := in.Store.WelcomeRecent(cctx, in.Profile, in.CWD, 4)
+	rows, latest, ok, rerr := in.Store.WelcomeRecent(cctx, in.Profile, in.ProjectID, in.CWD, 4)
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.closed {
@@ -541,11 +543,17 @@ func recentFrom(rows []store.WelcomeRow, now time.Time) []Recent {
 		rows = rows[:4]
 	}
 	out := make([]Recent, 0, len(rows))
-	for _, row := range rows {
+	for i, row := range rows {
+		dir := ""
+		if !row.Here {
+			dir = row.CWD
+		}
 		out = append(out, Recent{
+			N:      i + 1,
 			Title:  displayTitle(row.Title, row.FirstUser),
 			Intent: row.Intent,
 			Age:    ageLabel(now.Sub(row.LastAt)),
+			Dir:    dir,
 		})
 	}
 	return out
