@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/SniksaX/Konsolai/internal/config"
 )
 
 func TestDockerScriptDoesNotRemoveContainers(t *testing.T) {
@@ -42,6 +44,7 @@ func TestComposeServiceUser(t *testing.T) {
 func TestComposeConfig(t *testing.T) {
 	requireDocker(t)
 	root := moduleRoot(t)
+	hideDotEnv(t, root)
 	pass := randToken(t)
 	cmd := exec.Command("docker", "compose", "-f", filepath.Join(root, "compose.yaml"), "config", "-q")
 	cmd.Dir = root
@@ -52,9 +55,72 @@ func TestComposeConfig(t *testing.T) {
 	}
 }
 
+func TestComposeFileDefaults(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join(moduleRoot(t), "compose.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if strings.Contains(text, ":?") {
+		t.Fatal("compose.yaml uses required-variable syntax")
+	}
+	url := "postgres://postgres:${KONSOLAI_DB_PASSWORD:-konsolai}@db:5432/konsolai?sslmode=disable"
+	if !strings.Contains(text, url) {
+		t.Fatal("compose database URL is not the default")
+	}
+	for _, line := range strings.Split(config.ComposeVarTable(), "\n") {
+		if !strings.HasPrefix(line, "| `KONSOLAI_") {
+			continue
+		}
+		cells := strings.Split(line, "|")
+		if len(cells) < 4 {
+			t.Fatalf("row %q", line)
+		}
+		name := strings.Trim(cells[1], " `")
+		def := strings.Trim(cells[2], " `")
+		needle := "${" + name + ":-" + def + "}"
+		if !strings.Contains(text, needle) {
+			t.Errorf("compose.yaml missing %s", needle)
+		}
+	}
+}
+
+func TestComposeConfigNoDotEnv(t *testing.T) {
+	requireDocker(t)
+	root := moduleRoot(t)
+	hideDotEnv(t, root)
+	bare := []string{"PATH=" + os.Getenv("PATH")}
+	quiet := exec.Command("docker", "compose", "-f", filepath.Join(root, "compose.yaml"), "config", "-q")
+	quiet.Dir = root
+	quiet.Env = bare
+	if out, err := quiet.CombinedOutput(); err != nil {
+		t.Fatalf("compose config -q: %v\n%s", err, out)
+	}
+	cmd := exec.Command("docker", "compose", "--profile", "app", "-f", filepath.Join(root, "compose.yaml"), "config")
+	cmd.Dir = root
+	cmd.Env = bare
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("compose config: %v\n%s", err, out)
+	}
+	text := string(out)
+	for _, want := range []string{
+		"POSTGRES_PASSWORD: konsolai",
+		"postgres://postgres:konsolai@db:5432/konsolai?sslmode=disable",
+		`published: "55434"`,
+		"target: 5432",
+		"user: 1000:1000",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("resolved config missing %q", want)
+		}
+	}
+}
+
 func TestComposeDatabaseRoundTrip(t *testing.T) {
 	requireDocker(t)
 	root := moduleRoot(t)
+	hideDotEnv(t, root)
 	token := randToken(t)
 	project := "konsolai-test-" + token[:12]
 	if strings.Contains(project, "konsolai-pg") {
@@ -245,6 +311,23 @@ func waitHealthy(ctx context.Context, project, service string) error {
 		time.Sleep(time.Second)
 	}
 	return fmt.Errorf("not healthy (%s)", last)
+}
+
+func hideDotEnv(t *testing.T, root string) {
+	t.Helper()
+	path := filepath.Join(root, ".env")
+	if _, err := os.Stat(path); err != nil {
+		return
+	}
+	aside := path + ".held"
+	if err := os.Rename(path, aside); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Rename(aside, path); err != nil {
+			t.Errorf("restore .env: %v", err)
+		}
+	})
 }
 
 func scrub(s, pass string) string {
