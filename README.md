@@ -128,6 +128,8 @@ Friendly names:
 | appearance | auto \| dark \| light | ui.appearance |
 | welcome | split \| frame \| minimal | ui.welcome |
 | banner | on \| off | ui.banner |
+| clear | full \| compact \| none | ui.clear_header |
+| pinned_header | on \| off | ui.pinned_header |
 | emoji | on \| off | ui.strip_emoji |
 | highlight | on \| off | ui.code_highlight |
 | cursor | on \| off | ui.cursor_color |
@@ -192,6 +194,8 @@ A paste of at least `ui.paste_chip_lines` lines (default 11) or `ui.paste_chip_c
 `/theme` with no argument opens a picker on a TTY. Esc leaves it with the current theme. Enter saves the highlighted palette, erases the picker, and leaves the screen in place. `/theme glacier` is `/set theme glacier`: it writes the palette and prints `applied now`. Names: `amber`, `glacier`, `nebula`, `jade`, `rose`, `mono`.
 
 These commands exist only in the REPL: `exit`, `clear`, `cd`, `cmd`, `yes`, `trace`, `think`, `model`, `compact`.
+
+`/clear` redraws the welcome. `ui.clear_header` is `full` (the welcome), `compact` (one line), or `none`. `/cmd clear`, Ctrl-L, and `clear` or `reset` in shell mode do the same. `/cmd forget` drops the shell-mode context. `ui.pinned_header` keeps the header fixed in a scroll region. Lines scrolled inside that region may not enter the terminal's scrollback.
 
 ### One-shot
 
@@ -272,7 +276,7 @@ The `name` cell is `Command.DisplayNames`. The `args` cell lists `Arg.Name`; opt
 | /exit, /quit | | Leave the REPL |
 | /clear | | Clear the screen |
 | /cd | dir | Change the working directory |
-| /cmd | [clear] | Toggle shell mode |
+| /cmd | [clear] [forget] | Toggle shell mode |
 | /yes | mode | Auto-approve for this REPL session |
 | /trace | mode | Toggle per-call traces |
 | /think | mode | Override thinking for this session |
