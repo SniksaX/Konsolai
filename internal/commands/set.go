@@ -75,6 +75,13 @@ func runSet(ctx context.Context, env *Env, args []string) int {
 	case "memory":
 		return setBoolKey(env, "memory.enabled", rest[1:], session)
 	case "rag":
+		if len(rest) >= 2 && rest[1] == "reset-dim" {
+			if session {
+				fmt.Fprintln(env.errw(), "reset-dim changes the database")
+				return 2
+			}
+			return resetRAGDim(ctx, env, rest[2:])
+		}
 		return setBoolKey(env, "rag.enabled", rest[1:], session)
 	case "web":
 		return setWeb(env, rest[1:], session)
