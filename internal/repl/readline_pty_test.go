@@ -62,6 +62,7 @@ type ptyView struct {
 	pt   *os.File
 	mu   *sync.Mutex
 	buf  *bytes.Buffer
+	mark int
 	rows int
 	cols int
 }
@@ -98,6 +99,9 @@ func (v *ptyView) expect(why string, ok func(*screen) bool) *screen {
 
 func (v *ptyView) write(keys string) {
 	v.t.Helper()
+	v.mu.Lock()
+	v.mark = v.buf.Len()
+	v.mu.Unlock()
 	if _, err := v.pt.Write([]byte(keys)); err != nil {
 		v.t.Fatal(err)
 	}
