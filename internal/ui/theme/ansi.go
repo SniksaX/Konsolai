@@ -11,10 +11,9 @@ const (
 	ClearLine   = "\r\x1b[K"
 )
 
-// InputEcho paints a submitted line in bold default foreground.
-// 39 keeps a surrounding accent color from sticking.
+// InputEcho paints a submitted line in the heading color, without bold.
 func InputEcho(text string) string {
-	return "\x1b[1;39m" + text + "\x1b[0m"
+	return Style(Heading, text)
 }
 
 // ScrollRegion limits scrolling to rows top through bottom, 1-based.
