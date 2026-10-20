@@ -49,7 +49,7 @@ func Search(ctx context.Context, st SearchBackend, emb Embedder, rerank Reranker
 }
 
 func SearchTune(ctx context.Context, st SearchBackend, emb Embedder, rerank Reranker, profile string, projectID *int64, query, scope string, k int, tune Tune) ([]Hit, error) {
-	if st == nil || emb == nil || !st.RAGAvailable(ctx) {
+	if st == nil || emb == nil || !st.RAGAvailable(ctx) || ragBlocked(nil) {
 		return nil, nil
 	}
 	query = strings.TrimSpace(query)
@@ -68,8 +68,11 @@ func SearchTune(ctx context.Context, st SearchBackend, emb Embedder, rerank Rera
 		k = maxK
 	}
 	vecs, err := emb.Embed(ctx, []string{query})
-	if err != nil || len(vecs) == 0 {
+	if err != nil || len(vecs) == 0 || len(vecs[0]) == 0 {
 		return nil, err
+	}
+	if !acceptDims(ctx, searchCatalog(st), len(vecs[0]), nil) {
+		return nil, nil
 	}
 	vecHits, err := st.SearchVector(ctx, profile, projectID, scope, vecs[0], vt)
 	if err != nil {
