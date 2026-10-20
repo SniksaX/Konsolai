@@ -86,44 +86,20 @@ func TestSlashPTYDownSubmitsHelp(t *testing.T) {
 		_ = ptmx.Close()
 	}()
 	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 24, Cols: 80})
-	time.Sleep(250 * time.Millisecond)
-	if _, err := ptmx.Write([]byte("/")); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(3 * time.Second)
-	var raw []byte
-	buf := make([]byte, 4096)
-	seen := false
-	for time.Now().Before(deadline) {
-		_ = ptmx.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
-		n, _ := ptmx.Read(buf)
-		if n > 0 {
-			raw = append(raw, buf[:n]...)
-		}
-		if strings.Contains(string(raw), "/help") {
-			seen = true
-			break
-		}
-	}
-	if !seen {
-		t.Fatalf("menu never appeared: %q", raw)
-	}
-	if _, err := ptmx.Write([]byte("\x1b[B")); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(300 * time.Millisecond)
-	if _, err := ptmx.Write([]byte("\r")); err != nil {
-		t.Fatal(err)
-	}
+	v := startView(t, ptmx, 24, 80)
+	v.expect("prompt", func(sc *screen) bool { return strings.Contains(sc.dump(), "›") })
+	v.typeKeys("/", screenHas("/help"))
+	v.typeKeys("\x1b[B", func(sc *screen) bool { return strings.Contains(screenPrompt(sc), "/help") })
+	v.typeKeys("\r", nil)
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	select {
 	case err := <-done:
 		got, _ := os.ReadFile(lineFile)
 		if err != nil {
-			t.Fatalf("child: %v line=%q", err, got)
+			failScreen(t, "child: "+err.Error()+" line="+string(got), v.shot(), v.raw())
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timeout")
+	case <-time.After(ptyTimeout()):
+		failScreen(t, "timeout", v.shot(), v.raw())
 	}
 }
