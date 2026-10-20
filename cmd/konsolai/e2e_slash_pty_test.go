@@ -8,38 +8,42 @@ import (
 	"unicode/utf8"
 )
 
+func TestSlashScreenSkipsDECSCUSR(t *testing.T) {
+	sc := newSlashScreen(2, 40)
+	sc.feed([]byte("ab\x1b[1 qcd"))
+	if strings.Contains(sc.dump(), "[1 q") {
+		t.Fatalf("cursor sequence leaked\n%s", sc.dump())
+	}
+	if !strings.Contains(sc.dump(), "abcd") {
+		t.Fatalf("text\n%s", sc.dump())
+	}
+}
+
 func TestE2ESlashMenuArrows(t *testing.T) {
 	s := startSlashE2E(t)
 	defer s.close()
-	s.wait("›", 10*time.Second)
-	s.send("/")
-	s.waitPromptMenu("/help", 3*time.Second)
-	s.send("\x1b[B")
-	s.waitPromptLine("› /help", 3*time.Second)
-	s.send("\x1b[B")
-	s.waitPromptLine("› /copy", 3*time.Second)
-	s.send("\x1b[A")
-	s.waitPromptLine("› /help", 3*time.Second)
-	s.send("\x1b[A")
-	s.waitPromptLine("› /", 3*time.Second)
+	s.expect("prompt", slashHas("›"))
+	s.typeKeys("/", slashHas("/help"))
+	s.typeKeys("\x1b[B", slashPromptIs("› /help"))
+	s.typeKeys("\x1b[B", slashPromptIs("› /copy"))
+	s.typeKeys("\x1b[A", slashPromptIs("› /help"))
+	s.typeKeys("\x1b[A", slashPromptIs("› /"))
 	t.Log("PASS 1 arrows: / list, ↓ /help, ↓ /copy, ↑ /help, ↑ /")
 }
 
 func TestE2ESlashMenuFilterTab(t *testing.T) {
 	s := startSlashE2E(t)
 	defer s.close()
-	s.wait("›", 10*time.Second)
-	s.send("/co")
-	s.waitPromptMenu("/copy", 3*time.Second)
-	if sc := s.plainScreen(); strings.Contains(sc, "/help") && !strings.Contains(sc, "/copy") {
-		t.Fatalf("filter leaked /help:\n%s", sc)
-	}
-	s.send("\x1b[B")
-	s.waitPromptLine("› /copy", 3*time.Second)
-	s.send("\t")
-	s.waitPromptLine("› /copy", 3*time.Second)
+	s.expect("prompt", slashHas("›"))
+	s.typeKeys("/", slashHas("/help"))
+	s.typeKeys("co", func(sc *slashScreen) bool {
+		d := sc.dump()
+		return strings.Contains(d, "/copy") && !strings.Contains(d, "/help")
+	})
+	s.typeKeys("\x1b[B", slashPromptIs("› /copy"))
+	s.typeKeys("\t", slashPromptIs("› /copy"))
 	if p := s.promptLine(); !strings.HasPrefix(p, "› /copy") {
-		t.Fatalf("tab complete prompt %q\n%s", p, s.plainScreen())
+		s.failDump("tab complete prompt " + p)
 	}
 	t.Log("PASS 2 filter /co, ↓ first match, tab complete")
 }
@@ -47,75 +51,58 @@ func TestE2ESlashMenuFilterTab(t *testing.T) {
 func TestE2ESlashMenuDetailToggle(t *testing.T) {
 	s := startSlashE2E(t)
 	defer s.close()
-	s.wait("›", 10*time.Second)
-	s.send("/")
-	s.waitPromptMenu("/help", 3*time.Second)
-	s.send("\x1b[B")
-	s.send("\x1b[B")
-	s.waitPromptLine("› /copy", 3*time.Second)
-	s.send("?")
-	s.waitScreen("usage", 3*time.Second)
-	if !strings.Contains(s.plainScreen(), "example") {
-		t.Fatalf("detail missing example:\n%s", s.plainScreen())
-	}
-	s.send("?")
-	s.waitScreenGone("usage", 3*time.Second)
+	s.expect("prompt", slashHas("›"))
+	s.typeKeys("/", slashHas("/help"))
+	s.typeKeys("\x1b[B", slashPromptIs("› /help"))
+	s.typeKeys("\x1b[B", slashPromptIs("› /copy"))
+	s.typeKeys("?", slashHasAll("usage", "example"))
+	s.typeKeys("?", func(sc *slashScreen) bool { return !strings.Contains(sc.dump(), "usage") })
 	t.Log("PASS 3 ? shows detail, ? hides it")
 }
 
 func TestE2ESlashMenuEscRestoreThenClear(t *testing.T) {
 	s := startSlashE2E(t)
 	defer s.close()
-	s.wait("›", 10*time.Second)
-	s.send("/")
-	s.waitPromptMenu("/help", 3*time.Second)
-	s.send("\x1b[B")
-	s.waitPromptLine("› /help", 3*time.Second)
-	s.send("\x1b")
-	time.Sleep(600 * time.Millisecond)
-	s.waitPromptLine("› /", 3*time.Second)
-	if strings.Contains(s.plainScreen(), "select") {
-		t.Fatalf("menu still open after esc:\n%s", s.plainScreen())
-	}
-	s.send("\x1b")
-	time.Sleep(600 * time.Millisecond)
-	s.waitPromptLine("›", 3*time.Second)
-	if p := s.promptLine(); p != "›" && p != "› " {
-		t.Fatalf("second esc should clear, prompt %q\n%s", p, s.plainScreen())
-	}
+	s.expect("prompt", slashHas("›"))
+	s.typeKeys("/", slashHas("/help"))
+	s.typeKeys("\x1b[B", slashPromptIs("› /help"))
+	s.typeKeys("\x1b", func(sc *slashScreen) bool {
+		p := strings.TrimSpace(slashPromptText(sc))
+		return p == "› /" && !strings.Contains(sc.dump(), "select")
+	})
+	s.typeKeys("\x1b", func(sc *slashScreen) bool {
+		p := slashPromptText(sc)
+		return p == "›" || p == "› "
+	})
 	t.Log("PASS 4 esc restores /, second esc clears")
 }
 
 func TestE2ESlashMenuEnterStatus(t *testing.T) {
 	s := startSlashE2E(t)
 	defer s.close()
-	s.wait("›", 10*time.Second)
-	s.send("/sta")
-	s.waitPromptMenu("/status", 3*time.Second)
-	s.send("\x1b[B")
-	s.waitPromptLine("› /status", 3*time.Second)
-	mark := s.len()
-	s.send("\r")
-	s.waitNew(mark, "version", 8*time.Second)
+	s.expect("prompt", slashHas("›"))
+	s.typeKeys("/", slashHas("/help"))
+	s.typeKeys("sta", slashHas("/status"))
+	s.typeKeys("\x1b[B", slashPromptIs("› /status"))
+	s.typeKeysWithin("\r", slashHas("version"), ptyTimeout()*3)
 	t.Log("PASS 5 enter /status prints version")
 }
 
 func TestE2ESlashMenuEnterCDKeepsEditing(t *testing.T) {
 	s := startSlashE2E(t)
 	defer s.close()
-	s.wait("›", 10*time.Second)
-	s.send("/cd")
-	s.waitPromptMenu("/cd", 3*time.Second)
-	s.send("\x1b[B")
-	s.waitPromptLine("› /cd", 3*time.Second)
-	s.send("\r")
-	s.waitPromptLine("› /cd", 3*time.Second)
-	time.Sleep(200 * time.Millisecond)
-	if strings.Contains(s.plain(), "unknown") || strings.Contains(s.plain(), "usage:") || strings.Contains(s.plainScreen(), "version") {
-		t.Fatalf("cd was submitted:\n%s", s.plain())
-	}
-	if !strings.Contains(s.promptLine(), "› /cd") {
-		t.Fatalf("want /cd still editing, prompt %q\n%s", s.promptLine(), s.plainScreen())
+	s.expect("prompt", slashHas("›"))
+	s.typeKeys("/", slashHas("/help"))
+	s.typeKeys("cd", func(sc *slashScreen) bool {
+		p := strings.TrimSpace(slashPromptText(sc))
+		return strings.Contains(sc.dump(), "parent directory") && (p == "› /cd" || p == "› /cd ")
+	})
+	s.typeKeys("\r", func(sc *slashScreen) bool {
+		p := strings.TrimSpace(slashPromptText(sc))
+		return strings.HasPrefix(p, "› /cd") && !strings.Contains(p, "..")
+	})
+	if strings.Contains(s.screen().dump(), "unknown") || strings.Contains(s.plain(), "usage:") {
+		s.failDump("cd was submitted")
 	}
 	t.Log("PASS 6 enter /cd keeps editing")
 }
@@ -123,39 +110,42 @@ func TestE2ESlashMenuEnterCDKeepsEditing(t *testing.T) {
 func TestE2ESlashMenuClosedHistory(t *testing.T) {
 	s := startSlashE2E(t)
 	defer s.close()
-	s.wait("›", 10*time.Second)
-	s.send("/status\r")
-	s.wait("version", 8*time.Second)
-	s.wait("›", 8*time.Second)
-	time.Sleep(150 * time.Millisecond)
-	s.send("\x1b[A")
-	s.waitPromptLine("› /status", 3*time.Second)
+	s.expect("prompt", slashHas("›"))
+	s.typeKeysWithin("/status\r", slashHas("version"), ptyTimeout()*3)
+	s.expect("prompt again", func(sc *slashScreen) bool {
+		p := slashPromptText(sc)
+		return p == "›" || p == "› "
+	})
+	s.typeKeys("\x1b[A", slashPromptIs("› /status"))
 	t.Log("PASS 7 closed ↑ recalls history")
 }
 
 func TestE2ESlashMenuCloseClearsRows(t *testing.T) {
 	s := startSlashE2E(t)
 	defer s.close()
-	s.wait("›", 10*time.Second)
-	s.send("/")
-	s.waitPromptMenu("/help", 3*time.Second)
-	s.send("\x1b")
-	time.Sleep(600 * time.Millisecond)
-	s.send("\x1b")
-	time.Sleep(600 * time.Millisecond)
+	s.expect("prompt", slashHas("›"))
+	s.typeKeys("/", slashHas("/help"))
+	s.typeKeys("\x1b", func(sc *slashScreen) bool {
+		p := slashPromptText(sc)
+		return strings.HasPrefix(p, "› /") && !strings.Contains(sc.dump(), "select")
+	})
+	s.typeKeys("\x1b", func(sc *slashScreen) bool {
+		p := slashPromptText(sc)
+		return (p == "›" || p == "› ") && slashMenuLeftover(sc) == ""
+	})
 	sc := s.screen()
 	if leftover := slashMenuLeftover(sc); leftover != "" {
-		t.Fatalf("leftover menu %q:\n%s", leftover, sc.dump())
+		s.failDump("leftover menu " + leftover)
 	}
 	row, col, ok := slashPromptCursor(sc)
 	if !ok {
-		t.Fatalf("prompt missing:\n%s", sc.dump())
+		s.failDump("prompt missing")
 	}
 	if sc.r != row {
-		t.Fatalf("cursor row %d want %d\n%s", sc.r, row, sc.dump())
+		s.failDump("cursor row")
 	}
 	if sc.c < col-1 || sc.c > col+1 {
-		t.Fatalf("cursor col %d want %d (after › )\n%s", sc.c, col, sc.dump())
+		s.failDump("cursor col")
 	}
 	t.Log("PASS 8 close clears menu, cursor after › ")
 }
@@ -169,10 +159,15 @@ func startSlashE2E(t *testing.T) *e2eSess {
 }
 
 func (s *e2eSess) screen() *slashScreen {
-	s.mu.Lock()
-	raw := append([]byte(nil), s.buf.Bytes()...)
-	s.mu.Unlock()
-	sc := newSlashScreen(24, 80)
+	raw := s.raw()
+	rows, cols := s.rows, s.cols
+	if rows == 0 {
+		rows = 24
+	}
+	if cols == 0 {
+		cols = 80
+	}
+	sc := newSlashScreen(rows, cols)
 	sc.feed(raw)
 	return sc
 }
@@ -201,6 +196,50 @@ func (s *e2eSess) promptLine() string {
 	return ""
 }
 
+func slashPromptText(sc *slashScreen) string {
+	if sc != nil && sc.r >= 0 && sc.r < sc.h {
+		row := sc.cell[sc.r]
+		end := sc.c
+		if end < 0 {
+			end = 0
+		}
+		if end > len(row) {
+			end = len(row)
+		}
+		cut := strings.TrimSpace(string(row[:end]))
+		if strings.HasPrefix(cut, "›") {
+			return cut
+		}
+		plain := strings.TrimSpace(strings.TrimRight(string(row), " "))
+		if strings.HasPrefix(plain, "›") {
+			return plain
+		}
+	}
+	for _, row := range sc.cell {
+		plain := strings.TrimSpace(string(row))
+		if strings.HasPrefix(plain, "›") {
+			return plain
+		}
+	}
+	return ""
+}
+
+func slashPromptIs(want string) func(*slashScreen) bool {
+	w := strings.TrimSpace(want)
+	return func(sc *slashScreen) bool {
+		p := strings.TrimSpace(slashPromptText(sc))
+		if p == w {
+			return true
+		}
+		// A completion may extend the line with a space and more text.
+		if w != "›" && w != "› /" && strings.HasPrefix(p, w) {
+			rest := strings.TrimPrefix(p, w)
+			return rest == "" || strings.HasPrefix(rest, " ")
+		}
+		return false
+	}
+}
+
 func (s *e2eSess) waitPromptLine(want string, d time.Duration) {
 	s.t.Helper()
 	deadline := time.Now().Add(d)
@@ -219,7 +258,7 @@ func (s *e2eSess) waitPromptLine(want string, d time.Duration) {
 		}
 		time.Sleep(15 * time.Millisecond)
 	}
-	s.t.Fatalf("timeout prompt %q want %q\n%s", last, want, s.plainScreen())
+	s.t.Fatalf("timeout prompt %q want %q\n--- screen ---\n%s\n--- raw ---\n%s", last, want, s.plainScreen(), e2eRawTail(s.raw()))
 }
 
 func (s *e2eSess) waitPromptMenu(needle string, d time.Duration) {
@@ -237,7 +276,7 @@ func (s *e2eSess) waitScreen(needle string, d time.Duration) {
 		}
 		time.Sleep(15 * time.Millisecond)
 	}
-	s.t.Fatalf("timeout screen %q\n%s", needle, s.plainScreen())
+	s.t.Fatalf("timeout screen %q\n--- screen ---\n%s\n--- raw ---\n%s", needle, s.plainScreen(), e2eRawTail(s.raw()))
 }
 
 func (s *e2eSess) waitScreenGone(needle string, d time.Duration) {
@@ -249,7 +288,7 @@ func (s *e2eSess) waitScreenGone(needle string, d time.Duration) {
 		}
 		time.Sleep(15 * time.Millisecond)
 	}
-	s.t.Fatalf("timeout waiting for %q to leave\n%s", needle, s.plainScreen())
+	s.t.Fatalf("timeout waiting for %q to leave\n--- screen ---\n%s\n--- raw ---\n%s", needle, s.plainScreen(), e2eRawTail(s.raw()))
 }
 
 func slashPromptCursor(sc *slashScreen) (row, col int, ok bool) {
@@ -402,15 +441,20 @@ func (s *slashScreen) csi(p []byte, i int) int {
 		return len(p)
 	case '[':
 		j := i + 2
-		for j < len(p) && !((p[j] >= 'A' && p[j] <= 'Z') || (p[j] >= 'a' && p[j] <= 'z')) {
+		for j < len(p) && p[j] >= 0x30 && p[j] <= 0x3F {
+			j++
+		}
+		paramEnd := j
+		for j < len(p) && p[j] >= 0x20 && p[j] <= 0x2F {
 			j++
 		}
 		if j >= len(p) {
 			return len(p)
 		}
-		cmd := p[j]
-		args := parseSlashCSI(string(p[i+2 : j]))
-		s.applyCSI(cmd, args)
+		if p[j] < 0x40 || p[j] > 0x7E {
+			return j
+		}
+		s.applyCSI(p[j], parseSlashCSI(string(p[i+2:paramEnd])))
 		return j + 1
 	default:
 		return i + 2
