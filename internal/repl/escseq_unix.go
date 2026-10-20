@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/SniksaX/Konsolai/internal/config"
 	"golang.org/x/sys/unix"
 )
 
@@ -14,7 +15,7 @@ import (
 // completes and a lone Esc does not.
 func readStdinByte(d time.Duration) (byte, bool) {
 	if d <= 0 {
-		d = 30 * time.Millisecond
+		d = config.Builtin().EscTimeout()
 	}
 	fd := int(os.Stdin.Fd())
 	deadline := time.Now().Add(d)
