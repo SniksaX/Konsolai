@@ -612,3 +612,36 @@ func TestRunClearWipesScrollback(t *testing.T) {
 		t.Fatal("OnClear not called")
 	}
 }
+
+func TestHelpAlignsSummaries(t *testing.T) {
+	env, out, _ := testEnv(t)
+	if code := runHelp(context.Background(), env, nil); code != 0 {
+		t.Fatal(code)
+	}
+	cmds := Default().All()
+	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
+	if len(lines) != len(cmds) {
+		t.Fatalf("%d lines for %d commands", len(lines), len(cmds))
+	}
+	col := -1
+	for i, line := range lines {
+		at := strings.Index(line, cmds[i].Summary)
+		if at < 0 {
+			t.Fatalf("missing summary in %q", line)
+		}
+		if col >= 0 && at != col {
+			t.Fatalf("summary at %d, want %d: %q", at, col, line)
+		}
+		col = at
+	}
+	if !strings.Contains(out.String(), "/resume <n> <request>") || !strings.Contains(out.String(), "/history [n] [here]") {
+		t.Fatalf("args missing:\n%s", out.String())
+	}
+
+	out.Reset()
+	env.InRepl = true
+	runHelp(context.Background(), env, nil)
+	if !strings.Contains(out.String(), "? on a row shows details") {
+		t.Fatalf("repl tip missing:\n%s", out.String())
+	}
+}
