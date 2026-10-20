@@ -68,6 +68,7 @@ type Runner struct {
 	lastAssistant    string
 	lastPromise      bool
 	lastEscalate     intent.Intent
+	answerCut        bool
 	escalated        bool
 	RebindNext       bool
 	statMu           sync.Mutex
