@@ -228,7 +228,7 @@ No request, stdin is a TTY, and stdout is not: the request is read from `/dev/tt
 
 Memory is off when `database.url` is empty. The first store error disables it for the process and prints one line.
 
-- `/history` lists recent sessions. `/resume <n> "<request>"` continues session n.
+- `/history` lists sessions of the current project first, then every other project, newest first. `/history --here` stays in the current project. The same numbers are `/resume`, `/show`, `/diff`, and the welcome RECENT panel. `/resume <n> "<request>"` continues session n.
 - `/undo` restores files changed in recent sessions.
 - `/remember "<fact>"` stores a user fact. `/remember --project "<fact>"` stores a project fact. `/facts` lists them. `/forget user|project <id>` deletes one.
 - `/recall "<query>"` searches the index and does not call the model. `/index` builds that index. `/index status` and `/index clear` report or drop it.
@@ -265,7 +265,7 @@ The `name` cell is `Command.DisplayNames`. The `args` cell lists `Arg.Name`; opt
 | --- | --- | --- |
 | /help | | Show this list of commands |
 | /copy | what [n] | Copy the last answer, pair, code block or command |
-| /history | [n] | List recent sessions |
+| /history | [n] [here] | List recent sessions |
 | /show | n | Reprint a session's prompts and answers |
 | /resume | n request | Continue session n with a new request |
 | /new | | Close resumable sessions so the next request starts fresh |
