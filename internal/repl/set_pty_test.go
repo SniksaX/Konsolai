@@ -7,9 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/SniksaX/Konsolai/internal/commands"
 	"github.com/SniksaX/Konsolai/internal/config"
@@ -64,62 +62,21 @@ func TestSetMenuPicksEnum(t *testing.T) {
 		_ = cmd.Wait()
 	}()
 	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 48, Cols: 120})
-	var mu sync.Mutex
-	var buf bytes.Buffer
-	go func() {
-		tmp := make([]byte, 4096)
-		for {
-			n, err := ptmx.Read(tmp)
-			if n > 0 {
-				mu.Lock()
-				buf.Write(tmp[:n])
-				mu.Unlock()
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
-	waitPlain := func(needle string, d time.Duration) {
-		t.Helper()
-		deadline := time.Now().Add(d)
-		for time.Now().Before(deadline) {
-			mu.Lock()
-			plain := ansiRe.ReplaceAllString(strings.ReplaceAll(buf.String(), "\r", ""), "")
-			mu.Unlock()
-			if strings.Contains(plain, needle) {
-				return
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-		mu.Lock()
-		plain := ansiRe.ReplaceAllString(strings.ReplaceAll(buf.String(), "\r", ""), "")
-		mu.Unlock()
-		t.Fatalf("timeout waiting for %q\n%s", needle, plain)
-	}
-	waitPlain("main-model", 4*time.Second)
-	time.Sleep(150 * time.Millisecond)
-	if _, err := ptmx.Write([]byte("/set\r")); err != nil {
-		t.Fatal(err)
-	}
-	waitPlain("welcome", 3*time.Second)
-	time.Sleep(80 * time.Millisecond)
-	if _, err := ptmx.Write([]byte("\x1b[B\x1b[B\r\x1b[B\r\x1b")); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
+	v := startView(t, ptmx, 48, 120)
+	v.expect("welcome", screenHas("main-model"))
+	v.typeKeys("/set", func(sc *screen) bool { return strings.Contains(screenPrompt(sc), "/set") })
+	v.typeKeys("\r", screenHas("welcome"))
+	v.typeKeys("\x1b[B\x1b[B", nil)
+	v.typeKeys("\r", screenHas("minimal"))
+	v.typeKeys("\x1b[B", nil)
+	v.typeKeys("\r\x1b", func(*screen) bool {
 		body, err := os.ReadFile(cfg)
-		if err == nil && strings.Contains(string(body), "frame") {
-			return
-		}
-		time.Sleep(30 * time.Millisecond)
+		return err == nil && strings.Contains(string(body), "frame")
+	})
+	body, err := os.ReadFile(cfg)
+	if err != nil || !strings.Contains(string(body), "frame") {
+		failScreen(t, "welcome not updated\n"+string(body), v.shot(), v.raw())
 	}
-	body, _ := os.ReadFile(cfg)
-	mu.Lock()
-	plain := ansiRe.ReplaceAllString(buf.String(), "")
-	mu.Unlock()
-	t.Fatalf("welcome not updated\n%s\n%s", body, plain)
 }
 
 func TestSetDefaultThemeNoClear(t *testing.T) {
@@ -273,50 +230,21 @@ func driveSetDefault(t *testing.T, testName, child, cfgBody, keys string) ([]byt
 		_ = cmd.Wait()
 	}()
 	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 48, Cols: 120})
-	var mu sync.Mutex
-	var buf bytes.Buffer
-	go func() {
-		tmp := make([]byte, 4096)
-		for {
-			n, err := ptmx.Read(tmp)
-			if n > 0 {
-				mu.Lock()
-				buf.Write(tmp[:n])
-				mu.Unlock()
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
-	waitPlain := func(needle string, d time.Duration) {
-		t.Helper()
-		deadline := time.Now().Add(d)
-		for time.Now().Before(deadline) {
-			mu.Lock()
-			plain := ansiRe.ReplaceAllString(strings.ReplaceAll(buf.String(), "\r", ""), "")
-			mu.Unlock()
-			if strings.Contains(plain, needle) {
-				return
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-		mu.Lock()
-		plain := ansiRe.ReplaceAllString(strings.ReplaceAll(buf.String(), "\r", ""), "")
-		mu.Unlock()
-		t.Fatalf("timeout waiting for %q\n%s", needle, plain)
+	v := startView(t, ptmx, 48, 120)
+	v.expect("welcome", screenHas("main-model"))
+	cmdKeys := keys
+	confirm := false
+	if strings.HasSuffix(keys, "\ry") {
+		confirm = true
+		cmdKeys = strings.TrimSuffix(keys, "y")
 	}
-	waitPlain("main-model", 4*time.Second)
-	time.Sleep(150 * time.Millisecond)
-	if _, err := ptmx.Write([]byte(keys)); err != nil {
-		t.Fatal(err)
+	if confirm {
+		v.typeKeys(cmdKeys, screenHas("will be reset"))
+		v.typeKeys("y", screenHas("applied now"))
+	} else {
+		v.typeKeys(cmdKeys, screenHas("applied now"))
 	}
-	waitPlain("applied now", 3*time.Second)
-	time.Sleep(150 * time.Millisecond)
-	mu.Lock()
-	out := append([]byte(nil), buf.Bytes()...)
-	mu.Unlock()
-	return out, cfg
+	return v.raw(), cfg
 }
 
 func setMenuChild() {
