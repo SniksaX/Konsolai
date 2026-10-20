@@ -85,6 +85,29 @@ func TestRunAnswerEscalateRerunsAsAct(t *testing.T) {
 	}
 }
 
+func TestRunAnswerDiscardsActionClaim(t *testing.T) {
+	client := fakeLLM(t, []llm.Message{{
+		Role: llm.RoleAssistant, Content: "Done. Process killed. Port 10101 is now free.",
+	}})
+	var out bytes.Buffer
+	r := testRunner(t, client, autoConfirm{})
+	r.Out = &out
+	r.Profile = config.Builtin()
+	r.Profile.Name = "default"
+	code, answer, _, _, esc := r.runAnswer(context.Background(), client, client, sysctx.Snapshot{}, nil, nil,
+		"okey delete it", agent.AnswerPrompt, false,
+		Request{Plain: true}, intent.Decision{Intent: intent.Answer}, 0)
+	if code != 0 {
+		t.Fatalf("code %d", code)
+	}
+	if esc != intent.Act {
+		t.Fatalf("esc %q answer %q", esc, answer)
+	}
+	if strings.Contains(out.String(), "Process killed") || strings.Contains(out.String(), "now free") {
+		t.Fatalf("printed claim: %q", out.String())
+	}
+}
+
 func TestContinueAfterPromise(t *testing.T) {
 	r := &Runner{
 		lastPromise:  true,
