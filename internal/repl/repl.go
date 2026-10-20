@@ -188,6 +188,16 @@ func Run(ctx context.Context, cfg Config) int {
 	if s, ok := rd.(interface{ SetMenuEnv(*commands.Env) }); ok {
 		s.SetMenuEnv(env)
 	}
+	if s, ok := rd.(interface{ SetEscTimeout(func() time.Duration) }); ok && env != nil {
+		s.SetEscTimeout(func() time.Duration { return env.Profile.EscTimeout() })
+	}
+	if s, ok := rd.(interface{ SetFileRoot(func() string) }); ok {
+		s.SetFileRoot(func() string {
+			st.mu.Lock()
+			defer st.mu.Unlock()
+			return st.cwd
+		})
+	}
 	bindWelcome(welcome, rd)
 	if kr, ok := rd.(interface{ ReadKey() (byte, error) }); ok {
 		ui.SetKeyReader(kr.ReadKey)
