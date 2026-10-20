@@ -526,20 +526,22 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 
 	usedMain := client == main
 	t0 := time.Now()
-	var buf bytes.Buffer
-	out, usage, streamErr := StreamAnswer(ctx, client, msgs, think, req.Plain, &buf, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP)
-	if streamErr != nil && !usedMain {
+	gate := &answerGate{dst: r.out(), onRelease: func() {
+		r.emitBadge(req, string(dec.Intent), false)
+	}}
+	out, usage, streamErr := StreamAnswer(ctx, client, msgs, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP)
+	if streamErr != nil && !usedMain && !gate.released {
 		if req.Trace {
 			fmt.Fprintln(r.errw(), "fast model failed; retrying on main")
 		}
 		client = main
 		usedMain = true
-		buf.Reset()
-		out, usage, streamErr = StreamAnswer(ctx, client, msgs, think, req.Plain, &buf, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP)
+		gate.reset()
+		out, usage, streamErr = StreamAnswer(ctx, client, msgs, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP)
 	}
-	if streamErr == nil && strings.TrimSpace(out) == "" {
-		buf.Reset()
-		out, usage, streamErr = StreamAnswer(ctx, client, []llm.Message{system, user}, think, req.Plain, &buf, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP)
+	if streamErr == nil && strings.TrimSpace(out) == "" && !gate.released {
+		gate.reset()
+		out, usage, streamErr = StreamAnswer(ctx, client, []llm.Message{system, user}, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP)
 	}
 	modelTime := time.Since(t0)
 	ptok := 0
@@ -561,11 +563,13 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 		fmt.Fprintln(r.errw(), "konsolai: the model returned no answer")
 		return 1, out, ptok, usedMain, ""
 	}
-	if !r.escalated && intent.IsPromise(out) {
+	if !r.escalated && intent.IsPromise(out) && !gate.released {
+		gate.discard()
 		return 0, out, ptok, usedMain, intent.EscalateIntent(query, r.Profile.Router.ActionVerbs, r.Profile.Router.Targets)
 	}
-	r.emitBadge(req, string(dec.Intent), false)
-	_, _ = io.Copy(r.out(), &buf)
+	if !gate.released {
+		gate.release()
+	}
 	_ = rec.Message(ctx, llm.Message{Role: llm.RoleAssistant, Content: out})
 	st := agent.Stats{
 		Steps:            1,
@@ -616,16 +620,22 @@ func StreamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 	var collected strings.Builder
 	live := ui.StartLive("thinking")
 	first := true
+	var consider streamConsiderer
+	if c, ok := outw.(streamConsiderer); ok {
+		consider = c
+	}
 	body := outw
 	if !plain {
 		body = ui.NewIndentWriter(outw, 4)
 	}
 	rend := ui.NewRenderer(body, plain)
 	if _, err := client.ResolveModel(ctx); err != nil {
+		live.Stop()
 		return "", llm.Usage{}, err
 	}
 	_, maxTok, elide, err := agent.PrepareCall(client, msgs, nil, "answer")
 	if err != nil {
+		live.Stop()
 		return "", llm.Usage{}, err
 	}
 	if elide.Count > 0 {
@@ -646,6 +656,9 @@ func StreamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 		}
 		collected.WriteString(s)
 		_, werr := rend.Write([]byte(s))
+		if consider != nil {
+			consider.Consider(collected.String())
+		}
 		return werr
 	})
 	if first {
@@ -655,8 +668,14 @@ func StreamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 	collected.WriteString(rest)
 	if rest != "" {
 		_, _ = rend.Write([]byte(rest))
+		if consider != nil {
+			consider.Consider(collected.String())
+		}
 	}
 	_ = rend.Flush()
+	if consider != nil {
+		consider.Consider(collected.String())
+	}
 	out := strings.TrimLeft(collected.String(), "\r\n")
 	return out, usage, err
 }
@@ -745,6 +764,83 @@ func inSubproject(cwd, root string) bool {
 		rt = filepath.Clean(root)
 	}
 	return c != rt
+}
+
+// streamConsiderer releases held answer text once it is safe to show.
+type streamConsiderer interface {
+	Consider(text string)
+}
+
+// answerGate holds rendered answer bytes until the first complete line is
+// not a promise, then copies them to dst. A pure promise stays unreleased
+// so the caller can discard it and escalate.
+type answerGate struct {
+	dst       io.Writer
+	hold      bytes.Buffer
+	released  bool
+	suppress  bool
+	onRelease func()
+}
+
+func (g *answerGate) Write(p []byte) (int, error) {
+	if g == nil {
+		return len(p), nil
+	}
+	if g.released {
+		if g.dst == nil {
+			return len(p), nil
+		}
+		return g.dst.Write(p)
+	}
+	return g.hold.Write(p)
+}
+
+func (g *answerGate) Consider(text string) {
+	if g == nil || g.released || g.suppress {
+		return
+	}
+	if strings.TrimSpace(text) == "" || !strings.Contains(text, "\n") {
+		return
+	}
+	if intent.IsPromise(text) {
+		return
+	}
+	g.release()
+}
+
+func (g *answerGate) release() {
+	if g == nil || g.released || g.suppress {
+		return
+	}
+	g.released = true
+	if g.onRelease != nil {
+		fn := g.onRelease
+		g.onRelease = nil
+		fn()
+	}
+	if g.hold.Len() == 0 || g.dst == nil {
+		g.hold.Reset()
+		return
+	}
+	_, _ = io.Copy(g.dst, &g.hold)
+	g.hold.Reset()
+}
+
+func (g *answerGate) discard() {
+	if g == nil {
+		return
+	}
+	g.suppress = true
+	g.hold.Reset()
+}
+
+func (g *answerGate) reset() {
+	if g == nil {
+		return
+	}
+	g.released = false
+	g.suppress = false
+	g.hold.Reset()
 }
 
 func printDiffStat(w io.Writer, root string) {
