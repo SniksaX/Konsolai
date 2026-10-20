@@ -980,6 +980,17 @@ func TestFormatSummaryAndTrace(t *testing.T) {
 	if got != want {
 		t.Fatalf("summary %q want %q", got, want)
 	}
+	if strings.Contains(got, "tok/s") {
+		t.Fatalf("build summary has tok/s %q", got)
+	}
+	ans := FormatSummary("answer", Stats{
+		ModelTime:        17 * time.Second,
+		PromptTokens:     623,
+		CompletionTokens: 1105,
+	})
+	if ans != "17.0s · 623 → 1.1k tok · 65 tok/s" {
+		t.Fatalf("answer summary %q", ans)
+	}
 	tr := FormatTrace(2, true, 12300*time.Millisecond, 58400, 300, 94200, []string{"tool_a", "tool_b"})
 	want = "  [step 2] think=on  12.3s  in=58.4k out=0.3k  ctx 62% (58.4k/94.2k)  -> tool_a, tool_b"
 	if tr != want {
@@ -1398,6 +1409,9 @@ func TestPromptNotes(t *testing.T) {
 	}
 	if !strings.Contains(AnswerPrompt, "Never claim you cannot search or run commands") {
 		t.Fatal("answer capability rule")
+	}
+	if !strings.Contains(AnswerPrompt, "Answer concisely.") || !strings.Contains(AnswerPrompt, "at most one short example") || !strings.Contains(AnswerPrompt, "explain in depth") {
+		t.Fatal("answer concise rule")
 	}
 	if ReplyInstruction("fr") != "Reply in French, the language of the user's latest message." {
 		t.Fatalf("fr %q", ReplyInstruction("fr"))
