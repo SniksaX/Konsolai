@@ -238,13 +238,16 @@ func TestContextMeter(t *testing.T) {
 	}
 }
 
-func TestEchoPrimaryBoldNotLink(t *testing.T) {
+func TestEchoUsesHeadingNotBold(t *testing.T) {
 	restore := theme.Force(true, true, "glacier", theme.Dark)
 	defer restore()
 	var b bytes.Buffer
 	echoInput(&b, "/theme")
 	s := b.String()
-	mark := "\x1b[1;39m/theme\x1b[0m"
+	mark := theme.InputEcho("/theme")
+	if mark != theme.Style(theme.Heading, "/theme") {
+		t.Fatalf("echo %q", mark)
+	}
 	idx := strings.Index(s, mark)
 	if idx < 0 {
 		t.Fatalf("body %q", s)
@@ -252,8 +255,8 @@ func TestEchoPrimaryBoldNotLink(t *testing.T) {
 	if !strings.Contains(s[:idx], "38;2;76;201;240") {
 		t.Fatalf("chevron should be accent %q", s)
 	}
-	if strings.Contains(s[idx:], "38;2;") || strings.Contains(s[idx:], "4;") {
-		t.Fatalf("echo text colored %q", s)
+	if strings.Contains(mark, "\x1b[1") || strings.Contains(mark, ";39m") {
+		t.Fatalf("echo is bold or default %q", mark)
 	}
 }
 
