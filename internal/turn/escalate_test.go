@@ -36,6 +36,55 @@ func TestRunAnswerDiscardsPromise(t *testing.T) {
 	}
 }
 
+func TestRunAnswerEscalateRerunsAsAct(t *testing.T) {
+	client := fakeLLM(t, []llm.Message{
+		{
+			Role:    llm.RoleAssistant,
+			Content: "Sure, I'll check the port now.",
+			ToolCalls: []llm.ToolCall{{
+				ID: "1", Type: "function",
+				Function: llm.FunctionCall{Name: "escalate", Arguments: `{"intent":"act","reason":"kill a process"}`},
+			}},
+		},
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{
+			ID: "2", Type: "function",
+			Function: llm.FunctionCall{Name: "propose_plan", Arguments: `{"summary":"kill it","steps":["stop the process"],"commands":["true"]}`},
+		}}},
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{
+			ID: "3", Type: "function", Function: llm.FunctionCall{Name: "run_shell", Arguments: `{"cmd":"true"}`},
+		}}},
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{
+			ID: "4", Type: "function", Function: llm.FunctionCall{Name: "finish", Arguments: `{"summary":"checked"}`},
+		}}},
+	})
+	var out bytes.Buffer
+	r := testRunner(t, client, autoConfirm{})
+	r.Out = &out
+	r.Err = &out
+	r.Profile = config.Builtin()
+	r.Profile.Name = "default"
+	r.Profile.UI.Badge = true
+	res := r.RunTurn(context.Background(), Request{
+		Text: "okey kill it", Intent: "answer", Yes: true, Plain: true, Cwd: t.TempDir(), New: true,
+	})
+	if res.ExitCode != 0 {
+		t.Fatalf("exit %d %s", res.ExitCode, out.String())
+	}
+	if res.Intent != "act" {
+		t.Fatalf("intent %q", res.Intent)
+	}
+	got := out.String()
+	if strings.Contains(got, "I'll check the port") || strings.Contains(got, "Sure, I'll") {
+		t.Fatalf("printed escalate text: %q", got)
+	}
+	if !strings.Contains(got, "act") || !strings.Contains(got, "escalated") {
+		t.Fatalf("missing escalate badge: %q", got)
+	}
+	if !strings.Contains(got, "checked") {
+		t.Fatalf("act finish missing: %q", got)
+	}
+}
+
 func TestContinueAfterPromise(t *testing.T) {
 	r := &Runner{
 		lastPromise:  true,
