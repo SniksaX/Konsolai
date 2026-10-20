@@ -4,6 +4,7 @@ const (
 	esc         = "\x1b["
 	ClearHome   = "\x1b[H\x1b[2J"
 	ClearScroll = "\x1b[H\x1b[2J\x1b[3J"
+	ResetScroll = "\x1b[r"
 	ClearBelow  = "\x1b[0J"
 	HideCursor  = "\x1b[?25l"
 	ShowCursor  = "\x1b[?25h"
@@ -14,6 +15,15 @@ const (
 // 39 keeps a surrounding accent color from sticking.
 func InputEcho(text string) string {
 	return "\x1b[1;39m" + text + "\x1b[0m"
+}
+
+// ScrollRegion limits scrolling to rows top through bottom, 1-based.
+// The lines above top stay fixed. ResetScroll restores the full screen.
+func ScrollRegion(top, bottom int) string {
+	if top < 1 || bottom < top {
+		return ""
+	}
+	return esc + itoa(top) + ";" + itoa(bottom) + "r"
 }
 
 func CursorUp(n int) string {
