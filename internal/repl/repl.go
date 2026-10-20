@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/SniksaX/Konsolai/internal/banner"
@@ -53,6 +54,8 @@ type session struct {
 	mode       *shellmode.Session
 	welcome    *welcomeState
 	resumeIdle bool
+	pinRows    int
+	regionOn   bool
 	cancel     context.CancelFunc
 	warns      []string
 }
@@ -206,16 +209,43 @@ func Run(ctx context.Context, cfg Config) int {
 		ui.SetKeyReader(kr.ReadKey)
 		defer ui.SetKeyReader(nil)
 	}
+	paintClear := func() { st.afterClear(out, env, info) }
 	if clr, ok := rd.(interface{ SetOnClear(func()) }); ok {
-		clr.SetOnClear(func() {
-			fmt.Fprintln(out, banner.Compact(info, ui.Current()))
-		})
+		clr.SetOnClear(paintClear)
 	}
-	env.OnClear = func() {
-		fmt.Fprintln(out, banner.Compact(info, ui.Current()))
-	}
+	env.OnClear = paintClear
 	if st.mode != nil {
-		st.mode.OnClear = env.OnClear
+		st.mode.OnClear = paintClear
+	}
+	if tty {
+		defer func() {
+			if rec := recover(); rec != nil {
+				st.resetRegion(out)
+				panic(rec)
+			}
+		}()
+		defer st.resetRegion(out)
+		sigCh := make(chan os.Signal, 4)
+		done := make(chan struct{})
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGWINCH)
+		defer close(done)
+		defer signal.Stop(sigCh)
+		go func() {
+			for {
+				select {
+				case <-done:
+					return
+				case s := <-sigCh:
+					st.resetRegion(out)
+					if s == syscall.SIGWINCH {
+						st.reapplyRegion(out)
+					}
+				}
+			}
+		}()
+		if env.Profile.PinnedHeader() {
+			st.holdHeader(out, welcome.rows)
+		}
 	}
 	defer func() { _ = rd.Close() }()
 	setShell := func(on bool) {
@@ -259,6 +289,7 @@ func Run(ctx context.Context, cfg Config) int {
 		default:
 		}
 		flushWarns(errw, st)
+		st.reapplyRegion(out)
 		ui.ResetDisplay()
 		tracked.ensureNL()
 		st.mu.Lock()
@@ -500,6 +531,86 @@ func wireEnv(env *commands.Env, st *session, cfg Config) {
 		return runCompact(ctx, cfg.Runner, env, st)
 	}
 	env.OnExit = func() int { return -1 }
+}
+
+func (st *session) afterClear(w io.Writer, env *commands.Env, base banner.Info) {
+	st.mu.Lock()
+	cwd := st.cwd
+	wel := st.welcome
+	st.regionOn = false
+	st.mu.Unlock()
+	mode := "full"
+	pin := false
+	var projectID *int64
+	if env != nil {
+		mode = env.Profile.ClearHeader()
+		pin = env.Profile.PinnedHeader()
+		projectID = env.ProjectID
+	}
+	base.Dir = shortPath(cwd)
+	base.Branch = gitBranch(cwd)
+	rows := 0
+	switch mode {
+	case "none":
+	case "compact":
+		fmt.Fprintln(w, banner.Compact(base, ui.Current()))
+		rows = 1
+	default:
+		if wel != nil {
+			wel.retarget(cwd, base.Dir, base.Branch, projectID)
+			rows = wel.redraw(w)
+		}
+	}
+	if pin && rows > 0 {
+		st.holdHeader(w, rows)
+		return
+	}
+	st.mu.Lock()
+	st.pinRows = 0
+	st.mu.Unlock()
+}
+
+func (st *session) holdHeader(w io.Writer, rows int) {
+	if st == nil || w == nil || rows < 1 {
+		return
+	}
+	_, height := termBox(w)
+	top := rows + 1
+	if top >= height {
+		return
+	}
+	fmt.Fprint(w, theme.ScrollRegion(top, height))
+	st.mu.Lock()
+	st.pinRows = rows
+	st.regionOn = true
+	st.mu.Unlock()
+}
+
+func (st *session) reapplyRegion(w io.Writer) {
+	if st == nil {
+		return
+	}
+	st.mu.Lock()
+	rows := st.pinRows
+	on := st.regionOn
+	st.mu.Unlock()
+	if on || rows < 1 {
+		return
+	}
+	st.holdHeader(w, rows)
+}
+
+func (st *session) resetRegion(w io.Writer) {
+	if st == nil {
+		return
+	}
+	st.mu.Lock()
+	on := st.regionOn
+	st.regionOn = false
+	st.mu.Unlock()
+	if on && w != nil {
+		fmt.Fprint(w, theme.ResetScroll)
+	}
 }
 
 func (st *session) switchDir(env *commands.Env, abs string) error {
