@@ -11,21 +11,47 @@ import (
 )
 
 func runHistory(ctx context.Context, env *Env, args []string) int {
-	n, errMsg := parseN(args, 10, 50)
+	n, here, errMsg := parseHistoryArgs(args)
 	if errMsg != "" {
 		fmt.Fprintln(env.errw(), errMsg)
 		return 2
 	}
-	items := loadHistoryFixed(ctx, env, n)
+	items := loadHistory(ctx, env, n, here)
 	if len(items) == 0 {
 		fmt.Fprintln(env.out(), "no sessions")
 		return 0
 	}
 	for i, it := range items {
+		cwd := orDash(it.CWD)
+		if it.Other {
+			cwd = ui.Current().Muted(cwd)
+		}
 		fmt.Fprintf(env.out(), "%d  %s  %s  %s  %s  %s\n",
-			i+1, ageLabel(it.Age), orDash(it.Mode), orDash(it.Status), clipTitle(it.Title), orDash(it.CWD))
+			i+1, ageLabel(it.Age), orDash(it.Mode), orDash(it.Status), clipTitle(it.Title), cwd)
 	}
 	return 0
+}
+
+func parseHistoryArgs(args []string) (int, bool, string) {
+	n := 10
+	here := false
+	seenN := false
+	for _, a := range args {
+		if a == "--here" || a == "here" {
+			here = true
+			continue
+		}
+		if seenN {
+			return 0, false, "usage: /history [n] [--here]"
+		}
+		v, errMsg := parseN([]string{a}, 10, 50)
+		if errMsg != "" {
+			return 0, false, errMsg
+		}
+		n = v
+		seenN = true
+	}
+	return n, here, ""
 }
 
 func orDash(s string) string {
@@ -41,7 +67,7 @@ func runShow(ctx context.Context, env *Env, args []string) int {
 		fmt.Fprintln(env.errw(), "usage: /show <n>")
 		return 2
 	}
-	items := loadHistoryFixed(ctx, env, 50)
+	items := loadHistory(ctx, env, 50, false)
 	if n > len(items) {
 		fmt.Fprintln(env.errw(), "no such session")
 		return 1
@@ -70,7 +96,7 @@ func runResume(ctx context.Context, env *Env, args []string) int {
 		fmt.Fprintln(env.errw(), "usage: /resume <n> \"<request>\"")
 		return 2
 	}
-	items := loadHistoryFixed(ctx, env, 50)
+	items := loadHistory(ctx, env, 50, false)
 	if n > len(items) {
 		fmt.Fprintln(env.errw(), "no such session")
 		return 1
@@ -127,7 +153,7 @@ func runDiff(ctx context.Context, env *Env, args []string) int {
 			return 2
 		}
 	}
-	items := loadHistoryFixed(ctx, env, 50)
+	items := loadHistory(ctx, env, 50, false)
 	if n > len(items) || len(items) == 0 {
 		fmt.Fprintln(env.errw(), "no such session")
 		return 1
