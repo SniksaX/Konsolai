@@ -179,6 +179,9 @@ func ColorDiff(s string) string {
 	for i, line := range lines {
 		t := string(line)
 		switch {
+		// File headers are not changes; colouring them as an add and a delete reads as one.
+		case strings.HasPrefix(t, "+++ "), strings.HasPrefix(t, "--- "), strings.HasPrefix(t, "diff "):
+			t = p.Heading(t)
 		case len(t) > 0 && t[0] == '+':
 			t = p.Success(t)
 		case len(t) > 0 && t[0] == '-':
