@@ -7,6 +7,11 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 
+# Compose supplies a default for every variable, so no .env file is required.
+# Bash does not export UID. Compose reads these for the konsolai service user.
+export KONSOLAI_UID="$(id -u)"
+export KONSOLAI_GID="$(id -g)"
+
 usage() {
 	cat <<'EOF'
 usage: scripts/docker.sh build [base|full]

@@ -448,10 +448,6 @@ func sanitizeAnswerHistory(hist []llm.Message) []llm.Message {
 	return turn.SanitizeAnswerHistory(hist)
 }
 
-func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, think, plain bool) (string, llm.Usage, error) {
-	return turn.StreamAnswer(ctx, client, msgs, think, plain, os.Stdout, os.Stderr, 0, 0)
-}
-
 func modelErrorLine(endpoint string, err error, trace bool) string {
 	return turn.ModelErrorLine(endpoint, err, trace)
 }

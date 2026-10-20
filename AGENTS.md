@@ -25,7 +25,7 @@ Embed and rerank are optional URLs on `roles.embed` and `roles.rerank`. When `ra
 Never touch the developer's own database container. Integration tests use `scripts/test-db.sh`. Compose uses its own volume and published port and never the developer's database.
 Config path is `--config`, then `KONSOLAI_CONFIG`, then `$XDG_CONFIG_HOME/konsolai/config.yaml` or `~/.config/konsolai/config.yaml`. Writes resolve symlinks and land in the real file, mode 0600.
 A new setting is ONE entry in `internal/config/keys.go`. Every configuration change goes through `/set`.
-Env overrides are the `Env` column of that table, plus `KONSOLAI_PROFILE` and `KONSOLAI_CONFIG`. `--profile` beats `KONSOLAI_PROFILE` beats `default_profile` beats built-in `default`. `--config` beats `KONSOLAI_CONFIG` beats the XDG path.
+Prefer `config.yaml`. Env vars are for containers and CI. Overrides are the `Env` column of that table, plus `KONSOLAI_PROFILE` and `KONSOLAI_CONFIG`. `--profile` beats `KONSOLAI_PROFILE` beats `default_profile` beats built-in `default`. `--config` beats `KONSOLAI_CONFIG` beats the XDG path.
 
 ## Architecture
 
@@ -68,7 +68,8 @@ The plan gate is always on for build. Act requires a plan only at high effort.
 
 ## Config
 
-A new key is ONE entry in `internal/config/keys.go`. That entry supplies the default, validation, docs, sample file, env override, and `/config` output.
+Configuration lives in `config.yaml`. `config.example.yaml` is generated documentation. The repo has no other config files. `/set default` and `/set default all` write `InitYAML()` from the key table.
+A new key is ONE entry in `internal/config/keys.go`. That entry supplies the default, validation, docs, the example file, the env override, and `/config` output.
 Accessors are the only `<= 0` means default logic (`nonzero` and the ratio accessors).
 `TestConfigKeysComplete` walks every leaf of `Config` by reflection and fails if a field has no table entry, or a table entry has no field.
 
@@ -85,7 +86,9 @@ Accessors are the only `<= 0` means default logic (`nonzero` and the ratio acces
 - The fast client is preferred when reachable. If an answer stream fails on it, the turn retries on main. Fast is skipped when the prompt passes `context_guard_ratio`.
 - Reply language comes from the user message (`intent.Detect` / `ResolveLanguage`, en and fr), then the previous user line, then a router hint that is in the profile list.
 - `export_doc` accepts only `html` and `pdf`. Shell PDF and HTML printers are refused. A docs plan that asks for PDF or HTML must name `export_doc`.
+- Tests that need external binaries skip when they are missing; CI installs them.
 - `memory.Guard` disables itself on the first store error and reports one line. A `turn_stats` insert failure never fails the turn.
+- The first embedding of a process is compared with `memory_chunks`. A mismatch disables RAG for that process, prints one line, and does not insert. Turns still finish. `/set rag reset-dim` drops and recreates `memory_chunks` and `memory_files` at the current model dimension after the single-key confirm (`--yes` skips). `/status` shows `embed dims n (index m)` when both are known.
 - Prompts tell the model to use `search`, `find_files`, and `outline` before `recall` on code.
 - Color is theme roles. Submitted lines use `theme.InputEcho`. Raw ANSI stays in `internal/ui/theme` and `_test.go`.
 - The slash menu is Konsolai's `slashMenu`. A bare `/name` returns no readline completions. The placeholder is only `SetInlineSuggestion`.
@@ -105,9 +108,9 @@ Work lands on `dev`. Config keys are the single table in `internal/config/keys.g
 - REPL welcome: `split`, `frame`, and `minimal`. Paint once after probes. Height from the wrapped TTY.
 - `turn_stats`: best-effort token and timing rows. Welcome rates use `ModelRate`.
 - `/theme`: picker. Esc does not change the theme or clear the screen. Enter applies the palette in place and does not redraw the welcome.
-- Frame side text removed; theme applies in place. `/set default <name>` restores one key. `/set default all` asks y/n first (`--yes` skips), reports how many keys differ and that models, roles, and endpoints reset, backs up the real file as `config.yaml.bak-<timestamp>` (mode 0600, five kept), then writes the factory document. Decline leaves the file. The symlink stays.
-- Docker: `Dockerfile` targets `base` and `full` (Debian Chromium via `KONSOLAI_CHROME`). `compose.yaml` project `konsolai` starts only the database on `docker compose up -d`, on its own volume and port, never the developer's database. `scripts/docker.sh` builds, runs the database, and runs the CLI. Inside the container the model server is `http://host.docker.internal:<port>/v1`.
-- CI: `.github/workflows/ci.yml` on push and pull request to `dev` and `prod` runs gofmt, vet, and `go test` against pgvector, and builds the base image with no push. `.github/workflows/release.yml` on `v*` tags pushes `ghcr.io/sniksax/konsolai:<tag>`, `:latest`, and `:<tag>-full`, and attaches linux amd64 and arm64 binaries. The token is `GITHUB_TOKEN`.
+- Frame side text removed; theme applies in place. `/set default <name>` restores one key. `/set default all` asks y/n first (`--yes` skips), reports how many keys differ and that models, roles, and endpoints reset, backs up the real file as `config.yaml.bak-<timestamp>` (mode 0600, five kept), then writes the factory document from `InitYAML()`. Decline leaves the file. The symlink stays.
+- Docker: `Dockerfile` targets `base` and `full` (Debian Chromium via `KONSOLAI_CHROME`). The `konsolai` service runs as the host uid (`KONSOLAI_UID` / `KONSOLAI_GID`). `compose.yaml` project `konsolai` starts only the database on `docker compose up -d`. Every variable has a default (password `konsolai`, port `55434`) and there is no env file. `KONSOLAI_DATABASE_URL` in the compose file points at host `db` and overrides the mounted file. The user's `config.yaml` keeps models and roles. Own volume and port, never the developer's database. `scripts/docker.sh` builds, runs the database, and runs the CLI. Inside the container the model server is `http://host.docker.internal:<port>/v1`. The optional embed service defaults to `BAAI/bge-m3` (1024-wide). `BAAI/bge-base-en-v1.5` is a commented 768-wide alternative; it was the previous default because the machine-name guard rejects that id.
+- CI: `.github/workflows/ci.yml` on push and pull request to `dev` and `prod` runs gofmt, vet, and `go test` against pgvector, and builds the base image with no push. Tests that need external binaries skip when they are missing; CI installs poppler-utils and sets `KONSOLAI_CHROME` when Chrome is already on the runner. `.github/workflows/release.yml` runs that test job before it publishes on `v*` tags: `ghcr.io/sniksax/konsolai:<tag>`, `:latest`, and `:<tag>-full`, plus linux amd64 and arm64 binaries. The token is `GITHUB_TOKEN`.
 - Placeholder: inline suggestion only. Enter does not submit it.
 - Footer context meter: last prompt tokens against the window (`ctx_warn_pct`, `ctx_hot_pct`, `ctx_cells`).
 - `propose_plan`: a command-only plan may omit `files` when the plan does not write or edit files.
@@ -115,7 +118,7 @@ Work lands on `dev`. Config keys are the single table in `internal/config/keys.g
 - File splits: agent helpers, safety plan rules and segments, welcome paint helpers.
 - README at the repo root. Header image `docs/assets/konsolai-header.svg`. No screenshots in the tree. `TestReadmeSlashTable` locks the slash-command table to `commands.Default()`.
 - `/stats [today|week|all]` (default week) reads `turn_stats` and sessions. Per model: calls, tokens, average tok/s, and p50/p95 of `model_ms`. Per intent: turns, average steps (mean `turn_stats` rows per session), and average wall time (mean `model_ms`; there is no separate wall-clock column). With memory off: `stats need the database (memory is not configured)`.
-- `/doctor` prints one line per check (`✓`, `!`, or `✗`) and a fix for every line that is not `✓`. Exit 1 only when a line is `✗`. Network probes use the welcome probe timeout.
+- `/doctor` prints one line per check (`✓`, `!`, or `✗`) and a fix for every line that is not `✓`. Exit 1 only when a line is `✗`. Network probes use the welcome probe timeout. Embed dimensions are ok, the mismatch line, or `not configured`.
 - `/save [file]` writes the last answer as Markdown. `/pdf [file]` renders it through `docrender`, the same pipeline as `export_doc`. The default name is a slug of the session title. Overwrite needs `--force`. Paths go through the Guard. `konsolai new "<request>"` is one turn; `/save` then reads that answer from the session store, or from the local last-session file when the database is off.
 - `/explain` runs an answer turn at high effort for the latest failed shell-mode command and does not re-run it. With no capture, a readable `$HISTFILE` is explained after `no captured output; explaining the command only`. The help text documents `PROMPT_COMMAND="history -a"`.
 - The first mutating call rejected by the plan gate forces the next request to `propose_plan` (thinking follows `plan_step`) and does not spend the explore budget. Later gate rejects are unchanged. `run_shell` still needs an accepted plan.

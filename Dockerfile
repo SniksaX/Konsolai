@@ -30,17 +30,23 @@ RUN apt-get update \
 	&& rm -rf /var/lib/apt/lists/* \
 	&& groupadd --gid 1000 konsolai \
 	&& useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash konsolai \
-	&& mkdir -p /work /config \
+	&& mkdir -p /work /config /tmp/home \
+	&& chmod 1777 /tmp/home \
 	&& chown konsolai:konsolai /work
 
 COPY --from=build /out/konsolai /usr/local/bin/konsolai
+COPY scripts/container-entrypoint.sh /usr/local/bin/konsolai-entrypoint
+RUN chmod 755 /usr/local/bin/konsolai-entrypoint
 
 USER konsolai
 WORKDIR /work
-ENV KONSOLAI_CONFIG=/config/config.yaml \
+# HOME is writable by any uid. The entrypoint points config, cache, and the
+# runtime directory under it so Chromium does not need a passwd home.
+ENV HOME=/tmp/home \
+	KONSOLAI_CONFIG=/config/config.yaml \
 	TERM=xterm-256color \
 	COLORTERM=truecolor
-ENTRYPOINT ["konsolai"]
+ENTRYPOINT ["/usr/local/bin/konsolai-entrypoint"]
 
 FROM base AS full
 

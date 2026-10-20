@@ -305,6 +305,37 @@ func TestSetDefaultAllDeclineLeavesFile(t *testing.T) {
 	}
 }
 
+func TestSetDefaultAllWithoutRepoFiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	env, out, errb := testEnv(t)
+	path := filepath.Join(dir, "config.yaml")
+	before := "defaults:\n  ui:\n    theme: jade\n"
+	if err := os.WriteFile(path, []byte(before), 0600); err != nil {
+		t.Fatal(err)
+	}
+	env.ConfigPath = path
+	env.Profile = config.Builtin()
+	env.Profile.UI.Theme = "jade"
+	env.Confirm = boomConf{}
+	if code := runSet(context.Background(), env, []string{"default", "all", "--yes"}); code != 0 {
+		t.Fatal(errb.String())
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != config.InitYAML() {
+		t.Fatal("factory document was not written from the binary")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "config.default.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("config.default.yaml: %v", err)
+	}
+	if !strings.Contains(out.String(), "applied now") {
+		t.Fatalf("out %q", out.String())
+	}
+}
+
 func TestSetDefaultAllYesSkipsPrompt(t *testing.T) {
 	env, out, errb := setEnv(t)
 	before := "defaults:\n  ui:\n    theme: jade\n"

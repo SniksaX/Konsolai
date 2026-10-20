@@ -10,7 +10,13 @@ permissions:
   packages: write
 
 jobs:
+  test:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/test.yml
+
   release:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

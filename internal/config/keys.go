@@ -979,40 +979,31 @@ func DiffText(path, profile string) (string, error) {
 	return b.String(), nil
 }
 
-// EnvExample is the .env.example body generated from the table.
-func EnvExample() string {
+// EnvOverrideTable is the README table of file overrides.
+// Rows with a key path come from the Env column, in table order.
+// The following rows are overrides that are not a key column.
+func EnvOverrideTable() string {
 	var b strings.Builder
-	b.WriteString("# Konsolai environment overrides. Unset variables keep the config file or built-in default.\n")
-	b.WriteString("# A database password belongs in ~/.pgpass, not in the URL.\n")
-	b.WriteString(modelEnvLines())
+	b.WriteString("| Variable | Sets |\n| --- | --- |\n")
 	for i := range keyTable {
 		k := &keyTable[i]
 		if k.Env == "" {
 			continue
 		}
-		val := exampleEnvValue(*k)
-		fmt.Fprintf(&b, "# %s\n%s=%s\n", k.Doc, k.Env, val)
+		fmt.Fprintf(&b, "| `%s` | `%s` |\n", k.Env, k.Path)
+	}
+	extras := [][2]string{
+		{"KONSOLAI_ENDPOINT", "main model endpoint"},
+		{"KONSOLAI_MODEL", "main model id"},
+		{"KONSOLAI_FAST_ENDPOINT", "fast model endpoint"},
+		{"KONSOLAI_FAST_MODEL", "fast model id"},
+		{"KONSOLAI_EMBED_ENDPOINT", "`roles.embed`"},
+		{"KONSOLAI_RERANK_ENDPOINT", "`roles.rerank`"},
+		{"KONSOLAI_PROFILE", "profile name, when `--profile` is empty"},
+		{"KONSOLAI_CONFIG", "config file, when `--config` is empty"},
+	}
+	for _, row := range extras {
+		fmt.Fprintf(&b, "| `%s` | %s |\n", row[0], row[1])
 	}
 	return b.String()
-}
-
-func exampleEnvValue(k Key) string {
-	if k.Path == "database.url" {
-		return "postgres://user@localhost:5432/konsolai"
-	}
-	c := Builtin()
-	switch k.Kind {
-	case KindString, KindEnum:
-		return k.GetStr(c)
-	case KindBool:
-		return strconv.FormatBool(k.GetBool(c))
-	case KindInt, KindDurationMS:
-		return strconv.Itoa(k.GetInt(c))
-	case KindFloat:
-		return strconv.FormatFloat(k.GetFloat(c), 'g', -1, 64)
-	case KindList:
-		return strings.Join(k.GetList(c), ",")
-	default:
-		return ""
-	}
 }

@@ -31,9 +31,12 @@ func TestRootWithoutGit(t *testing.T) {
 }
 
 func TestFilesGitLs(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("needs git")
+	}
 	dir := t.TempDir()
 	if err := exec.Command("git", "init", "-q", dir).Run(); err != nil {
-		t.Skip("git init:", err)
+		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a\n"), 0644); err != nil {
 		t.Fatal(err)

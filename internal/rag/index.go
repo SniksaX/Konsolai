@@ -84,7 +84,7 @@ func Index(ctx context.Context, st IndexBackend, emb Embedder, profile string, p
 func IndexTune(ctx context.Context, st IndexBackend, emb Embedder, profile string, projectID int64, root, filter string, tune Tune, hooks IndexHooks) (IndexStats, error) {
 	var stats IndexStats
 	start := time.Now()
-	if st == nil || emb == nil || !st.RAGAvailable(ctx) {
+	if st == nil || emb == nil || !st.RAGAvailable(ctx) || ragBlocked(nil) {
 		stats.Duration = time.Since(start)
 		return stats, nil
 	}
@@ -188,6 +188,10 @@ func IndexTune(ctx context.Context, st IndexBackend, emb Embedder, profile strin
 			stats.Failed++
 			stats.LastError = fmt.Errorf("embed: got %d vectors for %d chunks", len(vecs), len(chunks))
 			continue
+		}
+		if len(vecs) > 0 && !acceptDims(ctx, indexCatalog(st), len(vecs[0]), nil) {
+			stats.Duration = time.Since(start)
+			return stats, nil
 		}
 		ins := make([]store.ChunkIn, len(chunks))
 		for i, c := range chunks {

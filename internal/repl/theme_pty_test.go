@@ -108,6 +108,9 @@ func themePickerChild() {
 
 func driveThemePicker(t *testing.T, testName, child, keys string) ([]byte, string) {
 	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("needs git")
+	}
 	home := t.TempDir()
 	dir := filepath.Join(home, "src", "app")
 	if err := os.MkdirAll(dir, 0755); err != nil {

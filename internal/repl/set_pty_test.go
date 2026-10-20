@@ -24,6 +24,9 @@ func TestSetMenuPicksEnum(t *testing.T) {
 	if _, err := os.Stat("/dev/ptmx"); err != nil {
 		t.Skip("no /dev/ptmx")
 	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("needs git")
+	}
 	home := t.TempDir()
 	dir := filepath.Join(home, "src", "app")
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -230,6 +233,9 @@ func driveSetDefault(t *testing.T, testName, child, cfgBody, keys string) ([]byt
 	t.Helper()
 	if _, err := os.Stat("/dev/ptmx"); err != nil {
 		t.Skip("no /dev/ptmx")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("needs git")
 	}
 	home := t.TempDir()
 	dir := filepath.Join(home, "src", "app")

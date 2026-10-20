@@ -24,6 +24,4 @@ func TestGeneratedExamplesMatch(t *testing.T) {
 		}
 	}
 	check("config.example.yaml", InitYAML())
-	check("config.default.yaml", InitYAML())
-	check(".env.example", EnvExample()+ComposeEnvExample())
 }

@@ -62,6 +62,8 @@ Stamp the version yourself with `-ldflags "-X main.version=..."`.
 
 ## Configuration
 
+Configuration lives in `config.yaml`. `/config init` creates that file, `/set` changes it, and [config.example.yaml](config.example.yaml) is the generated reference. Factory values come from the binary.
+
 Every change goes through `/set`. A new setting is one entry in `internal/config/keys.go`.
 
 ```sh
@@ -77,24 +79,42 @@ Secrets are refused. A database password belongs in `~/.pgpass` or `KONSOLAI_DAT
 
 `/theme`, `/think`, `/yes`, `/trace`, and `/models` remain for one release. Each prints `now: /set ...`. `/think`, `/yes`, and `/trace` stay session-only.
 
-The active file is `--config`, then `KONSOLAI_CONFIG`, then `$XDG_CONFIG_HOME/konsolai/config.yaml` or `~/.config/konsolai/config.yaml`. A checkout may point that path at `config.yaml` in the repo (mode `0600`, gitignored). `/config path` prints the configured path and the path after symlinks are resolved. Writes go to the real file. [config.example.yaml](config.example.yaml) and [config.default.yaml](config.default.yaml) are the commented factory defaults, generated from the key table. `/set default all` writes that document after the confirmation above. [.env.example](.env.example) lists the environment overrides, and a separate block at the bottom lists the Compose variables.
+The active file is `--config`, then `KONSOLAI_CONFIG`, then `$XDG_CONFIG_HOME/konsolai/config.yaml` or `~/.config/konsolai/config.yaml`. A checkout may point that path at `config.yaml` in the repo (mode `0600`, gitignored). `/config path` prints the configured path and the path after symlinks are resolved. Writes go to the real file. [config.example.yaml](config.example.yaml) is the generated reference for the factory document. `/set default` and `/set default all` write that document from the binary, after the confirmation above.
 
 `/config init` writes the defaults, mode `0600`, and refuses to replace an existing file without `--force`. `/config init --from-current` writes the effective config. `/config diff` lists keys that differ from the defaults. `/config show` masks a password in `database.url`. `/config validate` checks the file.
 
 `--profile NAME` selects the profile. If that flag is empty, `KONSOLAI_PROFILE` is used, then `default_profile`, then the built-in name `default`.
 
-| Variable | Field |
+### Environment overrides
+
+Prefer `config.yaml`. Environment variables are for containers and CI.
+
+| Variable | Sets |
 | --- | --- |
 | `KONSOLAI_DATABASE_URL` | `database.url` |
+| `KONSOLAI_BUILD_THINKING` | `agent.build_thinking` |
 | `KONSOLAI_ENDPOINT` | main model endpoint |
 | `KONSOLAI_MODEL` | main model id |
 | `KONSOLAI_FAST_ENDPOINT` | fast model endpoint |
 | `KONSOLAI_FAST_MODEL` | fast model id |
-| `KONSOLAI_BUILD_THINKING` | `agent.build_thinking` |
 | `KONSOLAI_EMBED_ENDPOINT` | `roles.embed` |
 | `KONSOLAI_RERANK_ENDPOINT` | `roles.rerank` |
 | `KONSOLAI_PROFILE` | profile name, when `--profile` is empty |
 | `KONSOLAI_CONFIG` | config file, when `--config` is empty |
+
+Compose-only variables are not config keys. `/set` does not write them.
+
+| Variable | Default | Use |
+| --- | --- | --- |
+| `KONSOLAI_UID` | `1000` | container user id; `scripts/docker.sh` sets `id -u` |
+| `KONSOLAI_GID` | `1000` | container group id; `scripts/docker.sh` sets `id -g` |
+| `KONSOLAI_DB_PASSWORD` | `konsolai` | local Compose database password |
+| `KONSOLAI_DB_PORT` | `55434` | published host port |
+| `KONSOLAI_TARGET` | `base` | image stage, `base` or `full` |
+| `KONSOLAI_WORKDIR` | `.` | host directory mounted at `/work` |
+| `KONSOLAI_CONFIG_FILE` | `./config.yaml` | config file mounted at `/config/config.yaml` |
+| `KONSOLAI_EMBED_MODEL` | `BAAI/bge-m3` | embedding service model id |
+| `KONSOLAI_EMBED_PORT` | `8080` | published embedding port |
 
 Friendly names:
 
@@ -286,24 +306,26 @@ The image contains no config and no secrets. Mount the project at `/work` and a 
 ```sh
 docker build --target base -t konsolai:dev .
 docker run -it --rm \
+  --user "$(id -u):$(id -g)" \
   -v "$PWD":/work \
   -v "$PWD/config.yaml":/config/config.yaml \
   konsolai:dev
 ```
 
-`scripts/docker.sh build base` is that build. `scripts/docker.sh build full` is the PDF image: Debian Chromium at `KONSOLAI_CHROME=/usr/bin/chromium`. The `konsolai` user runs it with `--no-sandbox`, so `/pdf` and `export_doc` can render diagrams.
+`--user "$(id -u):$(id -g)"` runs the container as the host user. The mounted config is mode `0600` and owned by that user, so another uid in the container cannot read it. Files the container creates in `/work` belong to the host user. `scripts/docker.sh` exports `KONSOLAI_UID` and `KONSOLAI_GID` from `id -u` and `id -g`, and Compose applies them to the `konsolai` service. Without `--user`, the image still starts as the non-root user `konsolai` (uid 1000). `HOME` is `/tmp/home` (mode `1777`), and Chromium's config, cache, and runtime directory are created under that home, so any uid can run.
 
-Memory uses Compose. Set `KONSOLAI_DB_PASSWORD` first (see the Compose block in [.env.example](.env.example); the value is not a default password). `docker compose up -d` starts only the database, on its own volume and its own published port (`KONSOLAI_DB_PORT`, default `55434`). It does not use the developer's database. `scripts/docker.sh db down` stops that Compose project only.
+`scripts/docker.sh build base` is that build. `scripts/docker.sh build full` is the PDF image: Debian Chromium at `KONSOLAI_CHROME=/usr/bin/chromium`. Headless Chromium uses `--no-sandbox`, so `/pdf` and `export_doc` can render diagrams.
+
+`docker compose up -d` starts only the database. Every Compose variable has a default, so there is no env file to create. The database is a local development database on its own volume and a non-default published port (`KONSOLAI_DB_PORT`, default `55434`). The password defaults to `konsolai` (`KONSOLAI_DB_PASSWORD`). Override either value from the shell. It does not use the developer's database. `scripts/docker.sh` exports the host uid and gid and does not read an env file. `scripts/docker.sh db down` stops that Compose project only.
 
 ```sh
-export KONSOLAI_DB_PASSWORD=change-me
 docker compose up -d
 scripts/docker.sh run
 ```
 
-The app service is profile `app`. Its `KONSOLAI_DATABASE_URL` points at the Compose database and uses the same password. `scripts/docker.sh run` is `docker compose run --rm konsolai` with the current directory mounted. `scripts/docker.sh shell` opens bash in the image.
+The app service is profile `app`. Inside Compose the database hostname is `db`. [compose.yaml](compose.yaml) sets `KONSOLAI_DATABASE_URL` to `postgres://postgres:<password>@db:5432/konsolai?sslmode=disable`, with the same password. That variable overrides `database.url` in the mounted file, so `docker compose run` reaches the Compose database even when the file's URL is empty. The mounted `config.yaml` still holds models and roles. A host database URL in that file stays for use outside Compose. `scripts/docker.sh run` is `docker compose run --rm konsolai` with the current directory mounted. `scripts/docker.sh shell` opens bash in the image.
 
-From inside the container, a model server on the host is `http://host.docker.internal:<port>/v1`. `localhost` is the container itself. [compose.yaml](compose.yaml) comments the `network_mode: host` alternative. The optional embedding service is profile `rag` (`docker compose --profile rag up -d`). Set `KONSOLAI_EMBED_MODEL` to choose its model; the default is `BAAI/bge-base-en-v1.5`.
+From inside the container, a model server on the host is `http://host.docker.internal:<port>/v1`. `localhost` is the container itself. [compose.yaml](compose.yaml) comments the `network_mode: host` alternative. The optional embedding service is profile `rag` (`docker compose --profile rag up -d`). Set `KONSOLAI_EMBED_MODEL` to choose its model; the default is `BAAI/bge-m3` (1024-wide, matching `memory_chunks`). `BAAI/bge-base-en-v1.5` is a 768-wide alternative.
 
 ## Development
 
