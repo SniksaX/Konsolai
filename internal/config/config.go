@@ -195,6 +195,7 @@ type UI struct {
 	StripEmoji          bool     `yaml:"strip_emoji"`
 	ProbeDeadlineMS     int      `yaml:"probe_deadline_ms"`
 	ProbeTimeoutMS      int      `yaml:"probe_timeout_ms"`
+	EscTimeoutMS        int      `yaml:"esc_timeout_ms"`
 	GitQueryMS          int      `yaml:"git_query_ms"`
 	MemoryQueryMS       int      `yaml:"memory_query_ms"`
 	StartupCapMS        int      `yaml:"startup_cap_ms"`
@@ -667,6 +668,12 @@ func (c Config) ProbeDeadline() time.Duration {
 // ProbeTimeout is one welcome endpoint probe. Omitted config keeps 300ms.
 func (c Config) ProbeTimeout() time.Duration {
 	return time.Duration(nonzero(c.UI.ProbeTimeoutMS, 300)) * time.Millisecond
+}
+
+// EscTimeout is the gap allowed between bytes of one escape sequence.
+// Omitted config keeps 30ms. A lone Esc is the sequence that never continues.
+func (c Config) EscTimeout() time.Duration {
+	return time.Duration(nonzero(c.UI.EscTimeoutMS, 30)) * time.Millisecond
 }
 
 // GitQueryTimeout bounds git status checks. Omitted config keeps 200ms.
