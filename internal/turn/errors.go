@@ -36,7 +36,7 @@ func ModelErrorLine(endpoint string, err error, trace bool) string {
 		}
 	}
 	if isDialErr(err) {
-		return "konsolai: cannot reach the model server at " + host + "."
+		return "konsolai: cannot reach the model server at " + host + ". Run /doctor to check every endpoint."
 	}
 	s := err.Error()
 	if strings.Contains(s, "{") || strings.Contains(s, `"error"`) {

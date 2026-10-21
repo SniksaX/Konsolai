@@ -73,7 +73,7 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	defer r.endStats()
 	client := r.client()
 	if _, err := client.ResolveModel(ctx); err != nil {
-		fmt.Fprintln(r.errw(), "konsolai:", err)
+		fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.MainEndpoint(), err, req.Trace))
 		return Result{ExitCode: 1}
 	}
 	thinkMode := r.ThinkMode

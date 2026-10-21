@@ -361,7 +361,7 @@ func TestModelErrorLine(t *testing.T) {
 		t.Fatalf("4xx %q", got)
 	}
 	dial := errors.New("llm: chat: dial tcp: connection refused")
-	if got := modelErrorLine(ep, dial, false); got != "konsolai: cannot reach the model server at gpu-box:8000." {
+	if got := modelErrorLine(ep, dial, false); got != "konsolai: cannot reach the model server at gpu-box:8000. Run /doctor to check every endpoint." {
 		t.Fatalf("dial %q", got)
 	}
 	if got := modelErrorLine(ep, llm.ErrIdleTimeout, true); !strings.Contains(got, llm.ErrIdleTimeout.Error()) {

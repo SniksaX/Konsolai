@@ -51,3 +51,12 @@ func TestStatsRenderGolden(t *testing.T) {
 		t.Fatalf("golden mismatch:\n%s", got)
 	}
 }
+
+func TestPadCellUsesDisplayWidth(t *testing.T) {
+	if got := padCell("ab…", 5, false); got != "ab…  " {
+		t.Fatalf("left %q", got)
+	}
+	if got := padCell("日本", 6, true); got != "  日本" {
+		t.Fatalf("right %q", got)
+	}
+}

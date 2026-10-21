@@ -3,11 +3,13 @@ package commands
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/SniksaX/Konsolai/internal/memory"
 	"github.com/SniksaX/Konsolai/internal/turn"
 	"github.com/SniksaX/Konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 )
 
 func runHistory(ctx context.Context, env *Env, args []string) int {
@@ -21,15 +23,42 @@ func runHistory(ctx context.Context, env *Env, args []string) int {
 		fmt.Fprintln(env.out(), "no sessions")
 		return 0
 	}
+	rows := make([][5]string, len(items))
+	var widths [5]int
 	for i, it := range items {
+		rows[i] = [5]string{strconv.Itoa(i + 1), ageLabel(it.Age), orDash(it.Mode), orDash(it.Status), clipTitle(it.Title)}
+		for j, cell := range rows[i] {
+			widths[j] = max(widths[j], theme.DisplayWidth(cell))
+		}
+	}
+	p := ui.Current()
+	for i, it := range items {
+		r := rows[i]
 		cwd := orDash(it.CWD)
 		if it.Other {
-			cwd = ui.Current().Muted(cwd)
+			cwd = p.Muted(cwd)
 		}
-		fmt.Fprintf(env.out(), "%d  %s  %s  %s  %s  %s\n",
-			i+1, ageLabel(it.Age), orDash(it.Mode), orDash(it.Status), clipTitle(it.Title), cwd)
+		fmt.Fprintf(env.out(), "%s  %s  %s  %s  %s  %s\n",
+			padCell(r[0], widths[0], true), p.Muted(padCell(r[1], widths[1], false)),
+			p.Accent(padCell(r[2], widths[2], false)), statusCell(r[3], widths[3]),
+			padCell(r[4], widths[4], false), cwd)
 	}
 	return 0
+}
+
+// statusCell pads a session status and colours it by outcome.
+func statusCell(status string, width int) string {
+	cell := padCell(status, width, false)
+	p := ui.Current()
+	switch status {
+	case "failed":
+		return p.Error(cell)
+	case "aborted":
+		return p.Warn(cell)
+	case "finished":
+		return p.Muted(cell)
+	}
+	return cell
 }
 
 func parseHistoryArgs(args []string) (int, bool, string) {
