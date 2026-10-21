@@ -78,7 +78,8 @@ func TestPinnedHeaderOnPTY(t *testing.T) {
 		_ = cmd.Wait()
 	}()
 	v := startView(t, ptmx, 40, 120)
-	v.expect("prompt", screenHas("›"))
+	// Setting the region homes the cursor; the prompt must still land below the welcome.
+	v.expect("prompt below the pinned welcome", screenHasAll("ask anything", "! shell"))
 	setRe := regexp.MustCompile(`\x1b\[\d+;\d+r`)
 	if !setRe.Match(v.raw()) {
 		t.Fatalf("region was not set\n%s", rawTail(v.raw()))
