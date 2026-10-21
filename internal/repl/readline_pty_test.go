@@ -526,9 +526,10 @@ func partialRules(sc *screen, width int) []int {
 }
 
 type screen struct {
-	h, w int
-	r, c int
-	cell [][]rune
+	h, w   int
+	r, c   int
+	sr, sc int
+	cell   [][]rune
 }
 
 func newScreen(h, w int) *screen {
@@ -672,6 +673,12 @@ func (s *screen) csi(p []byte, i int) int {
 		}
 		s.applyCSI(p[j], parseCSIArgs(string(p[i+2:paramEnd])))
 		return j + 1
+	case '7':
+		s.sr, s.sc = s.r, s.c
+		return i + 2
+	case '8':
+		s.r, s.c = s.sr, s.sc
+		return i + 2
 	default:
 		return i + 2
 	}
@@ -764,6 +771,10 @@ func (s *screen) applyCSI(cmd byte, args []int) {
 		}
 	case 'K':
 		s.clearLine()
+	case 'r':
+		// Like a real terminal, setting the scroll region homes the cursor.
+		// The region itself is not emulated.
+		s.r, s.c = 0, 0
 	}
 }
 
