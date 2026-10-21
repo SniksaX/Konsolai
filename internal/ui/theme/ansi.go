@@ -18,11 +18,13 @@ func InputEcho(text string) string {
 
 // ScrollRegion limits scrolling to rows top through bottom, 1-based.
 // The lines above top stay fixed. ResetScroll restores the full screen.
+// Setting a region moves the cursor to the top-left corner, so the cursor is
+// saved and restored around it; otherwise the next write lands on the header.
 func ScrollRegion(top, bottom int) string {
 	if top < 1 || bottom < top {
 		return ""
 	}
-	return esc + itoa(top) + ";" + itoa(bottom) + "r"
+	return "\x1b7" + esc + itoa(top) + ";" + itoa(bottom) + "r" + "\x1b8"
 }
 
 func CursorUp(n int) string {
