@@ -226,3 +226,61 @@ func waitPrompt(t *testing.T, out *bytes.Buffer, needle string) {
 	}
 	t.Fatalf("prompt %q not seen in %q", needle, out.String())
 }
+
+func TestConfirmStrayKeyKeepsSummaryOnce(t *testing.T) {
+	p, w, out := testPrompter(t)
+	done := make(chan Decision, 1)
+	go func() {
+		d, _, err := p.Confirm("plan: write a.txt", "1. write a.txt")
+		if err != nil {
+			t.Error(err)
+		}
+		done <- d
+	}()
+	waitPrompt(t, out, "1. write a.txt")
+	if _, err := w.Write([]byte("xzy")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout")
+	}
+	s := out.String()
+	if n := strings.Count(s, "plan: write a.txt"); n != 1 {
+		t.Fatalf("summary printed %d times: %q", n, s)
+	}
+	if n := strings.Count(s, "1. write a.txt"); n != 1 {
+		t.Fatalf("preview printed %d times: %q", n, s)
+	}
+	if n := strings.Count(s, "answer y, n, a or q"); n != 2 {
+		t.Fatalf("want two warnings, got %d: %q", n, s)
+	}
+}
+
+func TestConfirmEchoesDecision(t *testing.T) {
+	for _, tc := range []struct {
+		key  string
+		want Decision
+		echo string
+	}{
+		{"y", Approve, "✓ approved"},
+		{"a", ApproveAll, "✓ approved all"},
+		{"n", Reject, "✗ rejected"},
+		{"q", Quit, "quit"},
+	} {
+		p, w, out := testPrompter(t)
+		if _, err := w.Write([]byte(tc.key)); err != nil {
+			t.Fatal(err)
+		}
+		d, _, err := p.Confirm("do it", "")
+		if err != nil || d != tc.want {
+			t.Fatalf("%s: %v %v", tc.key, d, err)
+		}
+		line := strings.Split(strings.TrimSpace(out.String()), "\n")
+		last := line[len(line)-1]
+		if !strings.Contains(last, "]uit") || !strings.HasSuffix(last, tc.echo) {
+			t.Fatalf("%s: options line %q", tc.key, last)
+		}
+	}
+}

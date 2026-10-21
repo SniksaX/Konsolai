@@ -234,19 +234,36 @@ func commandNames(c Command) string {
 
 func (c Command) DisplayNames() string { return commandNames(c) }
 
-func SlashRow(names, desc string, selected bool) string {
-	p := ui.Current()
-	if selected {
-		return p.Accent("› ") + p.Heading(names) + "  " + p.Meta(desc)
-	}
-	return "  " + theme.Style(theme.Primary, names) + "  " + p.Muted(desc)
-}
-
 func runHelp(ctx context.Context, env *Env, _ []string) int {
-	for _, c := range Default().All() {
-		fmt.Fprintln(env.out(), SlashRow(commandNames(c), c.Summary, false))
+	cmds := Default().All()
+	width := 0
+	for _, c := range cmds {
+		width = max(width, theme.DisplayWidth(commandNames(c)+helpArgs(c)))
+	}
+	p := ui.Current()
+	for _, c := range cmds {
+		names, args := commandNames(c), helpArgs(c)
+		pad := strings.Repeat(" ", width-theme.DisplayWidth(names+args))
+		fmt.Fprintln(env.out(), "  "+theme.Style(theme.Primary, names)+p.Meta(args)+pad+"  "+p.Muted(c.Summary))
+	}
+	if env.InRepl {
+		fmt.Fprintln(env.out())
+		fmt.Fprintln(env.out(), "  "+p.Muted("type / for the menu · ? on a row shows details · <required> [optional]"))
 	}
 	return 0
+}
+
+// helpArgs lists a command's arguments as " <required> [optional]".
+func helpArgs(c Command) string {
+	var b strings.Builder
+	for _, a := range c.Args {
+		if a.Required {
+			b.WriteString(" <" + a.Name + ">")
+		} else {
+			b.WriteString(" [" + a.Name + "]")
+		}
+	}
+	return b.String()
 }
 
 func Default() *Registry {
