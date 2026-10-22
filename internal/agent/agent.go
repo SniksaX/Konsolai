@@ -80,6 +80,7 @@ type Config struct {
 	PlanText          string
 	TokenCap          int
 	ThinkingMaxTokens int
+	PlanThink         string
 	ElideTrigger      float64
 	ElideTarget       float64
 	IdenticalRejects  int
@@ -300,7 +301,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		if err != nil {
 			return err
 		}
-		if cfg.ThinkingPolicy == ThinkPlanStep && !think && !planApproved && hasProposePlan(msg) && proposePlanValid(cfg.Tools, msg) {
+		if cfg.ThinkingPolicy == ThinkPlanStep && !think && !planApproved && hasProposePlan(msg) && (!proposePlanValid(cfg.Tools, msg) || planThinkAlways(cfg.PlanThink)) {
 			if cfg.Trace {
 				st.Steps++
 				st.ModelTime += modelElapsed
