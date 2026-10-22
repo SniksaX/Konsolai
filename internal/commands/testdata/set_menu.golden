@@ -47,6 +47,7 @@ agent
   agent.explore_budget.build_docs 16
   agent.explore_budget.build_analysis 12
   agent.build_thinking         plan_step
+  agent.plan_think             on_reject
   agent.think_mode             auto
   agent.think_answer           auto
   agent.think_lookup           auto
