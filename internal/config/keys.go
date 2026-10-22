@@ -231,6 +231,8 @@ var keyTable = []Key{
 		func(c *Config, v int) { c.Agent.ExploreBudget.BuildAnalysis = v }, func(c Config) int { return c.Agent.ExploreBudget.BuildAnalysis }),
 	ks("agent.build_thinking", "plan_step | until_plan", "KONSOLAI_BUILD_THINKING", "plan_step",
 		func(c *Config, v string) { c.Agent.BuildThinking = v }, func(c Config) string { return c.Agent.BuildThinking }).allowed("plan_step", "until_plan").when(ApplyNext),
+	ks("agent.plan_think", "always | on_reject", "", "on_reject",
+		func(c *Config, v string) { c.Agent.PlanThink = v }, func(c Config) string { return c.Agent.PlanThink }).allowed("always", "on_reject").when(ApplyNext),
 	ks("agent.think_mode", "auto | on | off", "", "auto",
 		func(c *Config, v string) { c.Agent.ThinkMode = v }, func(c Config) string { return c.Agent.ThinkMode }).allowed("auto", "on", "off").named("think").when(ApplyNow),
 	ks("agent.think_answer", "auto | on | off", "", "auto",
