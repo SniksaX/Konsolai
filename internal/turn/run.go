@@ -394,6 +394,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			Prompt:            agent.ActPrompt + "\n" + lang,
 			ThinkingPolicy:    policyFor(*dec, r.Profile, thinkMode),
 			ThinkingMaxTokens: r.Profile.ThinkingMaxTokens(),
+			PlanThink:         r.Profile.PlanThink(),
 			Trace:             req.Trace,
 			SessionID:         sessionID,
 			Intent:            string(dec.Intent),
