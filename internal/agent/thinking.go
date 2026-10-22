@@ -43,6 +43,11 @@ func applyThinkBudget(opts *llm.ChatOptions, budget int) {
 	opts.ThinkingBudget = 0
 }
 
+// planThinkAlways reports whether a valid propose_plan on a think=off step is discarded and rerun with thinking.
+func planThinkAlways(mode string) bool {
+	return strings.EqualFold(strings.TrimSpace(mode), "always")
+}
+
 func (p ThinkingPolicy) enabled(planApproved, shellFail bool, consecFail int) bool {
 	recover := shellFail || consecFail >= 2
 	switch p {
