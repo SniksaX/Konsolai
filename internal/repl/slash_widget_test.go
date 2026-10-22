@@ -14,6 +14,7 @@ import (
 )
 
 func TestSlashWidgetDownSelectsHelp(t *testing.T) {
+	quietStdout(t)
 	rd, err := NewReadline(nil, nil, nil, commands.Default())
 	if err != nil {
 		t.Fatal(err)
@@ -28,6 +29,7 @@ func TestSlashWidgetDownSelectsHelp(t *testing.T) {
 }
 
 func TestSlashEmacsBindsArrows(t *testing.T) {
+	quietStdout(t)
 	rd, err := NewReadline(nil, nil, nil, commands.Default())
 	if err != nil {
 		t.Fatal(err)
