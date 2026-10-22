@@ -46,6 +46,7 @@ type Config struct {
 	Tools    Tools            `yaml:"tools"`
 	Store    Store            `yaml:"store"`
 	Stats    Stats            `yaml:"stats"`
+	Docs     Docs             `yaml:"docs"`
 }
 
 // Model is one named chat endpoint. Context 0 means the server reports the window.
@@ -258,6 +259,10 @@ type ToolShell struct {
 type Store struct {
 	QueryTimeoutMS   int `yaml:"query_timeout_ms"`
 	MigrateTimeoutMS int `yaml:"migrate_timeout_ms"`
+}
+
+type Docs struct {
+	RenderTimeoutMS int `yaml:"render_timeout_ms"`
 }
 
 type Stats struct {
