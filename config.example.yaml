@@ -61,6 +61,7 @@ defaults:
       build_docs: 16   # docs-task read budget
       build_analysis: 12   # build analysis read budget
     build_thinking: plan_step   # plan_step | until_plan
+    plan_think: on_reject   # always | on_reject
     think_mode: auto   # auto | on | off
     think_answer: auto   # auto | on | off
     think_lookup: auto   # auto | on | off | plan_step | until_plan
