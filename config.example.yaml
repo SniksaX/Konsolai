@@ -142,6 +142,8 @@ defaults:
     migrate_timeout_ms: 15000   # schema migration limit
   stats:
     insert_timeout_ms: 2000   # turn stat insert limit
+  docs:
+    render_timeout_ms: 60000   # mermaid diagram render limit
   language:
     mode: auto   # auto | en | fr
     languages: ["en", "fr"]   # reply languages the router may pick
