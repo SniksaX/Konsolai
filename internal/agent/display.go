@@ -178,6 +178,12 @@ func PrintSummary(w io.Writer, intent string, s Stats) {
 	fmt.Fprintln(w, "    "+ui.Current().Muted(line))
 }
 
+func FormatStatsLine(s Stats) string {
+	return fmt.Sprintf("stats: steps=%d rejects=%d outside_plan=%d think_tokens=%d max_step_s=%s",
+		s.Steps, s.Rejects, s.OutsidePlan, s.ReasoningTokens,
+		strconv.FormatFloat(s.MaxStep.Seconds(), 'f', 3, 64))
+}
+
 func PrintTrace(w io.Writer, step int, think bool, d time.Duration, in, out, thinkTok, window int, names []string) {
 	if w == nil {
 		return
