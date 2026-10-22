@@ -1050,6 +1050,10 @@ func TestFormatSummaryAndTrace(t *testing.T) {
 	if !strings.Contains(sum, "think 7.1k") {
 		t.Fatalf("summary %q", sum)
 	}
+	line := FormatStatsLine(Stats{Steps: 6, Rejects: 1, OutsidePlan: 2, ReasoningTokens: 7100, MaxStep: 4200 * time.Millisecond})
+	if line != "stats: steps=6 rejects=1 outside_plan=2 think_tokens=7100 max_step_s=4.200" {
+		t.Fatalf("stats %q", line)
+	}
 	labels := FormatTraceCalls([]llm.ToolCall{call("1", "export_doc", strings.Repeat("a", 4100))})
 	if len(labels) != 1 || labels[0] != "export_doc(args 4.1KB)" {
 		t.Fatalf("labels %v", labels)
@@ -1100,6 +1104,9 @@ func TestRunAccumulatesStats(t *testing.T) {
 	}
 	if !strings.Contains(errW.String(), "in=1.0k out=0.2k") {
 		t.Fatalf("per-call tokens %q", errW.String())
+	}
+	if !strings.Contains(errW.String(), "stats: steps=2 rejects=0 outside_plan=0 think_tokens=0 max_step_s=") {
+		t.Fatalf("stats line %q", errW.String())
 	}
 	if !strings.Contains(errW.String(), "2.0k → 400 tok") {
 		t.Fatalf("totals %q", errW.String())
@@ -1275,6 +1282,27 @@ func TestPlanMatchTraceRules(t *testing.T) {
 	s := errW.String()
 	if !strings.Contains(s, "R3 mkdir") || !strings.Contains(s, "✓") {
 		t.Fatalf("trace %q", s)
+	}
+}
+
+func TestTraceCountsOutsideAndRejects(t *testing.T) {
+	var errW strings.Builder
+	var st Stats
+	_, _, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "propose_plan", `{"summary":"a","steps":["w"],"files":["a.txt"]}`)),
+		assistant(call("2", "run_shell", `{"cmd":"mkdir -p stray"}`)),
+		assistant(call("3", "finish", `{"summary":"done"}`)),
+	}, &seqConfirm{ds: []ui.Decision{ui.Approve, ui.Reject}}, Config{
+		RequirePlan: true, Trace: true, Err: &errW, Stats: &st, Intent: "build", MaxSteps: 6,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.OutsidePlan != 1 || st.Rejects != 1 {
+		t.Fatalf("outside %d rejects %d", st.OutsidePlan, st.Rejects)
+	}
+	if !strings.Contains(errW.String(), "stats: steps=") || !strings.Contains(errW.String(), "rejects=1") || !strings.Contains(errW.String(), "outside_plan=1") {
+		t.Fatalf("stats %q", errW.String())
 	}
 }
 
