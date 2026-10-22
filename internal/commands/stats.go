@@ -63,10 +63,13 @@ func renderStats(window string, rep store.UsageReport) string {
 	var b strings.Builder
 	p := ui.Current()
 	fmt.Fprintf(&b, "%s\n\n", p.Heading("stats  "+window))
-	writeTable(&b, "models",
-		[]string{"model", "calls", "prompt", "completion", "tok/s", "p50 ms", "p95 ms"},
-		modelRows(rep.Models),
-		[]bool{false, true, true, true, true, true, true})
+	headers := []string{"model", "calls", "prompt", "completion", "tok/s", "p50 ms", "p95 ms"}
+	right := []bool{false, true, true, true, true, true, true}
+	if modelsHaveThink(rep.Models) {
+		headers = []string{"model", "calls", "prompt", "completion", "think", "tok/s", "p50 ms", "p95 ms"}
+		right = []bool{false, true, true, true, true, true, true, true}
+	}
+	writeTable(&b, "models", headers, modelRows(rep.Models, modelsHaveThink(rep.Models)), right)
 	b.WriteByte('\n')
 	writeTable(&b, "intents",
 		[]string{"intent", "turns", "avg steps", "avg wall ms"},
@@ -84,18 +87,29 @@ func renderStats(window string, rep store.UsageReport) string {
 	return b.String()
 }
 
-func modelRows(rows []store.ModelStat) [][]string {
+func modelsHaveThink(rows []store.ModelStat) bool {
+	for _, r := range rows {
+		if r.ReasoningTokens > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func modelRows(rows []store.ModelStat, think bool) [][]string {
 	out := make([][]string, len(rows))
 	for i, r := range rows {
-		out[i] = []string{
+		row := []string{
 			r.Model,
 			strconv.Itoa(r.Calls),
 			strconv.Itoa(r.PromptTokens),
 			strconv.Itoa(r.CompletionTokens),
-			fmtRate(r.TokPerSec),
-			fmtMS(r.P50MS),
-			fmtMS(r.P95MS),
 		}
+		if think {
+			row = append(row, strconv.Itoa(r.ReasoningTokens))
+		}
+		row = append(row, fmtRate(r.TokPerSec), fmtMS(r.P50MS), fmtMS(r.P95MS))
+		out[i] = row
 	}
 	return out
 }
