@@ -219,7 +219,7 @@ func FriendlyTable() string {
 		{"cursor", "on | off", "ui.cursor_color"},
 		{"steps", "<n> | lookup|act|build <n>", "agent.max_steps.lookup, agent.max_steps.act, agent.max_steps.build"},
 		{"budget", "<intent> <n>", "agent.explore_budget.*"},
-		{"think", "on|off|auto | <intent> on|off|plan_step|until_plan", "agent.think_mode, agent.think_answer, agent.think_lookup, agent.think_act, agent.build_thinking"},
+		{"think", "on|off|auto | <intent> on|off|plan_step|until_plan | plan_think always|on_reject", "agent.think_mode, agent.think_answer, agent.think_lookup, agent.think_act, agent.build_thinking, agent.plan_think"},
 		{"temperature", "<x> [intent]", "llm.temperature.answer, llm.temperature.lookup, llm.temperature.act, llm.temperature.build"},
 		{"top_p", "<x>", "llm.top_p"},
 		{"approve", "ask | in_plan | all_safe", "agent.approve"},
@@ -269,7 +269,10 @@ func CompleteSet(parts []string, partial string, haveSpace bool) []string {
 		return filterPrefix([]string{"ask", "in_plan", "all_safe"}, partial)
 	case "think":
 		if len(parts) == 1 || (len(parts) == 2 && !haveSpace) {
-			return filterPrefix([]string{"on", "off", "auto", "answer", "lookup", "act", "build"}, partial)
+			return filterPrefix([]string{"on", "off", "auto", "answer", "lookup", "act", "build", "plan_think"}, partial)
+		}
+		if len(parts) >= 2 && parts[1] == "plan_think" {
+			return filterPrefix([]string{"always", "on_reject"}, partial)
 		}
 		return filterPrefix([]string{"on", "off", "auto", "plan_step", "until_plan"}, partial)
 	case "model":
