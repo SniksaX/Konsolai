@@ -172,6 +172,8 @@ var keyTable = []Key{
 		func(c *Config, v int) { c.LLM.MaxTokens.Act = v }, func(c Config) int { return c.LLM.MaxTokens.Act }),
 	ki("llm.max_tokens.build", "build intent token cap", 12288,
 		func(c *Config, v int) { c.LLM.MaxTokens.Build = v }, func(c Config) int { return c.LLM.MaxTokens.Build }),
+	ki("llm.thinking_max_tokens", "thinking token cap", 4096,
+		func(c *Config, v int) { c.LLM.ThinkingMaxTokens = v }, func(c Config) int { return c.LLM.ThinkingMaxTokens }).named("think.max").when(ApplyNext),
 	ktemp("llm.temperature.answer", "answer sampling temperature", 0.3,
 		func(c *Config, v float64) { c.LLM.Temperature.Answer = v }, func(c Config) float64 { return c.LLM.Temperature.Answer }).named("temperature").when(ApplyNext),
 	ktemp("llm.temperature.lookup", "lookup sampling temperature", 0.2,
