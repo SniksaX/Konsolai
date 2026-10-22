@@ -282,6 +282,9 @@ func TestFastUnreachableFallsBack(t *testing.T) {
 	if !strings.Contains(errB.String(), "router") || !strings.Contains(errB.String(), "effort") {
 		t.Fatalf("trace %q", errB.String())
 	}
+	if !strings.Contains(errB.String(), "stats: steps=1 rejects=0 outside_plan=0 think_tokens=") {
+		t.Fatalf("stats %q", errB.String())
+	}
 }
 
 func TestRunTurnAbortExit(t *testing.T) {
