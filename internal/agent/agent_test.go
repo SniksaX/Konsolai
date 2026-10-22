@@ -928,11 +928,10 @@ func TestPlanStepThinkingSchedule(t *testing.T) {
 	_, rep, err := setupCfg(t, []llm.Message{
 		assistant(call("1", "list_dir", `{"path":"."}`)),
 		assistant(call("2", "propose_plan", `{"summary":"add a.txt","steps":["write"],"files":["a.txt"]}`)),
-		assistant(call("3", "propose_plan", `{"summary":"add a.txt","steps":["write"],"files":["a.txt"]}`)),
-		assistant(call("4", "write_file", `{"path":"a.txt","content":"x"}`)),
-		assistant(call("5", "run_shell", `{"cmd":"false"}`)),
-		assistant(call("6", "write_file", `{"path":"a.txt","content":"y"}`)),
-		assistant(call("7", "finish", `{"summary":"done"}`)),
+		assistant(call("3", "write_file", `{"path":"a.txt","content":"x"}`)),
+		assistant(call("4", "run_shell", `{"cmd":"false"}`)),
+		assistant(call("5", "write_file", `{"path":"a.txt","content":"y"}`)),
+		assistant(call("6", "finish", `{"summary":"done"}`)),
 	}, stubConfirm{d: ui.Approve}, Config{
 		RequirePlan:    true,
 		AutoApprove:    true,
@@ -941,7 +940,7 @@ func TestPlanStepThinkingSchedule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []bool{false, false, true, false, false, true, false}
+	want := []bool{false, false, false, false, true, false}
 	if len(rep.think) != len(want) {
 		t.Fatalf("think calls %v want %v", rep.think, want)
 	}
@@ -950,13 +949,37 @@ func TestPlanStepThinkingSchedule(t *testing.T) {
 			t.Fatalf("think[%d]=%v want %v (%v)", i, g, want[i], rep.think)
 		}
 	}
-	var choice struct {
-		Type     string `json:"type"`
-		Function struct {
-			Name string `json:"name"`
-		} `json:"function"`
+	if choiceName(rep.toolChoices[1]) == "propose_plan" {
+		t.Fatal("a valid plan must not be re-requested")
 	}
-	if err := json.Unmarshal(rep.toolChoices[2], &choice); err != nil || choice.Function.Name != "propose_plan" {
+}
+
+func TestPlanThinkAlwaysReruns(t *testing.T) {
+	_, rep, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "list_dir", `{"path":"."}`)),
+		assistant(call("2", "propose_plan", `{"summary":"add a.txt","steps":["write"],"files":["a.txt"]}`)),
+		assistant(call("3", "propose_plan", `{"summary":"add a.txt","steps":["write"],"files":["a.txt"]}`)),
+		assistant(call("4", "write_file", `{"path":"a.txt","content":"x"}`)),
+		assistant(call("5", "finish", `{"summary":"done"}`)),
+	}, stubConfirm{d: ui.Approve}, Config{
+		RequirePlan:    true,
+		AutoApprove:    true,
+		ThinkingPolicy: ThinkPlanStep,
+		PlanThink:      "always",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []bool{false, false, true, false, false}
+	if len(rep.think) != len(want) {
+		t.Fatalf("think calls %v want %v", rep.think, want)
+	}
+	for i, g := range rep.think {
+		if g != want[i] {
+			t.Fatalf("think[%d]=%v want %v (%v)", i, g, want[i], rep.think)
+		}
+	}
+	if choiceName(rep.toolChoices[2]) != "propose_plan" {
 		t.Fatalf("retry tool_choice %s", rep.toolChoices[2])
 	}
 	if !samePrefix(rep.reqs[1], rep.reqs[2]) {
@@ -2431,14 +2454,13 @@ func TestRejectedPlanThinksOnNext(t *testing.T) {
 	_, rep, err := setupCfg(t, []llm.Message{
 		assistant(call("1", "list_dir", `{"path":"."}`)),
 		assistant(call("2", "propose_plan", `{"summary":"a","steps":["w"],"files":["a.txt"]}`)),
-		assistant(call("2b", "propose_plan", `{"summary":"a","steps":["w"],"files":["a.txt"]}`)),
 		assistant(call("3", "propose_plan", `{"summary":"a","steps":["w"],"files":["a.txt"]}`)),
 		assistant(call("4", "finish", `{"summary":"done"}`)),
 	}, conf, Config{RequirePlan: true, ThinkingPolicy: ThinkPlanStep, MaxSteps: 8})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []bool{false, false, true, true, false}
+	want := []bool{false, false, true, false}
 	if len(rep.think) != len(want) {
 		t.Fatalf("think %v want %v", rep.think, want)
 	}
@@ -2449,29 +2471,31 @@ func TestRejectedPlanThinksOnNext(t *testing.T) {
 	}
 }
 
-func TestPlanStepInvalidPlanNoRetry(t *testing.T) {
+func TestPlanStepInvalidPlanThinks(t *testing.T) {
 	_, rep, err := setupCfg(t, []llm.Message{
 		assistant(call("1", "propose_plan", `{"summary":"x"}`)),
-		assistant(call("2", "finish", `{"summary":"stopped"}`)),
+		assistant(call("2", "propose_plan", `{"summary":"a","steps":["w"],"files":["a.txt"]}`)),
+		assistant(call("3", "finish", `{"summary":"stopped"}`)),
 	}, stubConfirm{d: ui.Approve}, Config{
 		RequirePlan: true, AutoApprove: true, ThinkingPolicy: ThinkPlanStep, MaxSteps: 6,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rep.think) != 2 || rep.think[0] || rep.think[1] {
-		t.Fatalf("think %v", rep.think)
+	want := []bool{false, true, false}
+	if len(rep.think) != len(want) {
+		t.Fatalf("think %v want %v", rep.think, want)
 	}
-	got := ""
-	for _, msgs := range rep.reqs {
-		for _, m := range msgs {
-			if m.Role == llm.RoleTool && m.ToolCallID == "1" {
-				got = m.Content
-			}
+	for i, g := range rep.think {
+		if g != want[i] {
+			t.Fatalf("think[%d]=%v want %v (%v)", i, g, want[i], rep.think)
 		}
 	}
-	if !strings.Contains(got, "error:") {
-		t.Fatalf("want prepare error, got %q", got)
+	if choiceName(rep.toolChoices[1]) != "propose_plan" {
+		t.Fatalf("retry tool_choice %s", rep.toolChoices[1])
+	}
+	if !samePrefix(rep.reqs[0], rep.reqs[1]) {
+		t.Fatal("invalid plan retry must re-issue the same messages")
 	}
 }
 
