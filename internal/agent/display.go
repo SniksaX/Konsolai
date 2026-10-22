@@ -67,7 +67,11 @@ func FormatSummary(intent string, s Stats) string {
 		parts = append(parts, formatDuration(total))
 	}
 	if s.PromptTokens > 0 || s.CompletionTokens > 0 {
-		parts = append(parts, formatTok(s.PromptTokens)+" → "+formatTok(s.CompletionTokens)+" tok")
+		tok := formatTok(s.PromptTokens) + " → " + formatTok(s.CompletionTokens) + " tok"
+		if s.ReasoningTokens > 0 {
+			tok += " · think " + formatTok(s.ReasoningTokens)
+		}
+		parts = append(parts, tok)
 	}
 	if intent == "answer" && s.CompletionTokens > 0 && s.ModelTime > 0 {
 		secs := s.ModelTime.Seconds()
@@ -94,7 +98,7 @@ func FormatTraceCalls(calls []llm.ToolCall) []string {
 	return names
 }
 
-func FormatTrace(step int, think bool, d time.Duration, in, out, window int, names []string) string {
+func FormatTrace(step int, think bool, d time.Duration, in, out, thinkTok, window int, names []string) string {
 	th := "off"
 	if think {
 		th = "on"
@@ -103,8 +107,12 @@ func FormatTrace(step int, think bool, d time.Duration, in, out, window int, nam
 	if window > 0 {
 		pct = int(float64(in)*100/float64(window) + 0.5)
 	}
+	outField := FormatTokens(out)
+	if thinkTok > 0 {
+		outField += " think=" + FormatTokens(thinkTok)
+	}
 	return fmt.Sprintf("  [step %d] think=%s  %s  in=%s out=%s  ctx %d%% (%s/%s)  -> %s",
-		step, th, formatDuration(d), FormatTokens(in), FormatTokens(out),
+		step, th, formatDuration(d), FormatTokens(in), outField,
 		pct, FormatTokens(in), FormatTokens(window), strings.Join(names, ", "))
 }
 
@@ -170,11 +178,11 @@ func PrintSummary(w io.Writer, intent string, s Stats) {
 	fmt.Fprintln(w, "    "+ui.Current().Muted(line))
 }
 
-func PrintTrace(w io.Writer, step int, think bool, d time.Duration, in, out, window int, names []string) {
+func PrintTrace(w io.Writer, step int, think bool, d time.Duration, in, out, thinkTok, window int, names []string) {
 	if w == nil {
 		return
 	}
-	fmt.Fprintln(w, FormatTrace(step, think, d, in, out, window, names))
+	fmt.Fprintln(w, FormatTrace(step, think, d, in, out, thinkTok, window, names))
 }
 
 func ShortModel(id string) string {
