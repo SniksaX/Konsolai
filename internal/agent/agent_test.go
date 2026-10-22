@@ -111,9 +111,28 @@ func (r *replay) serve(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if i < len(r.truncates) && r.truncates[i] {
+		delta := map[string]any{}
+		if r.replies[i].Content != "" {
+			delta["content"] = r.replies[i].Content
+		}
+		if len(r.replies[i].ToolCalls) > 0 {
+			var tcs []map[string]any
+			for idx, tc := range r.replies[i].ToolCalls {
+				tcs = append(tcs, map[string]any{
+					"index": idx,
+					"id":    tc.ID,
+					"type":  "function",
+					"function": map[string]any{
+						"name":      tc.Function.Name,
+						"arguments": tc.Function.Arguments,
+					},
+				})
+			}
+			delta["tool_calls"] = tcs
+		}
 		payload, err := json.Marshal(map[string]any{
 			"choices": []map[string]any{{
-				"delta":         map[string]any{"content": r.replies[i].Content},
+				"delta":         delta,
 				"finish_reason": "length",
 			}},
 		})
@@ -991,14 +1010,22 @@ func TestFormatSummaryAndTrace(t *testing.T) {
 	if ans != "17.0s · 623 → 1.1k tok · 65 tok/s" {
 		t.Fatalf("answer summary %q", ans)
 	}
-	tr := FormatTrace(2, true, 12300*time.Millisecond, 58400, 300, 94200, []string{"tool_a", "tool_b"})
+	tr := FormatTrace(2, true, 12300*time.Millisecond, 58400, 300, 0, 94200, []string{"tool_a", "tool_b"})
 	want = "  [step 2] think=on  12.3s  in=58.4k out=0.3k  ctx 62% (58.4k/94.2k)  -> tool_a, tool_b"
 	if tr != want {
 		t.Fatalf("trace %q want %q", tr, want)
 	}
-	tr = FormatTrace(1, false, time.Second, 0, 0, 32768, nil)
+	tr = FormatTrace(1, false, time.Second, 0, 0, 0, 32768, nil)
 	if !strings.Contains(tr, "think=off") || !strings.Contains(tr, "ctx 0%") || !strings.Contains(tr, "->") {
 		t.Fatalf("off %q", tr)
+	}
+	tr = FormatTrace(2, true, 12300*time.Millisecond, 58400, 300, 7100, 94200, []string{"tool_a", "tool_b"})
+	if !strings.Contains(tr, "out=0.3k think=7.1k") {
+		t.Fatalf("think trace %q", tr)
+	}
+	sum := FormatSummary("build", Stats{PromptTokens: 1000, CompletionTokens: 300, ReasoningTokens: 7100})
+	if !strings.Contains(sum, "think 7.1k") {
+		t.Fatalf("summary %q", sum)
 	}
 	labels := FormatTraceCalls([]llm.ToolCall{call("1", "export_doc", strings.Repeat("a", 4100))})
 	if len(labels) != 1 || labels[0] != "export_doc(args 4.1KB)" {
