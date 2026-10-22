@@ -89,7 +89,7 @@ func TestSchemaProbeCurrent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if latest != 8 {
+	if latest != 9 {
 		t.Fatalf("latest %d", latest)
 	}
 	got, err := s.SchemaVersion(ctx)
