@@ -38,7 +38,7 @@ func matchSeg(p Plan, seg string) SegHit {
 	if IsReadOnlyCommand(seg) {
 		return SegHit{Segment: seg, Rule: "R1 " + headline(seg), OK: true}
 	}
-	if matchDeclared(p.Commands, seg) {
+	if matchDeclared(p.Commands, seg) || matchStep(p, seg) {
 		return SegHit{Segment: seg, Rule: "R2 " + headline(seg), OK: true}
 	}
 	if kind, targets, ok := fileFamily(p, seg); ok {
@@ -47,7 +47,225 @@ func matchSeg(p Plan, seg string) SegHit {
 	if desc, ok := gitFamily(p, seg); ok {
 		return SegHit{Segment: seg, Rule: "R4 " + desc, OK: true}
 	}
+	if isStrictDeletion(seg) {
+		if paths := deletionPaths(seg); exactPlanned(p.Files, paths) {
+			return SegHit{Segment: seg, Rule: "R3 rm " + strings.Join(displayTargets(paths), " "), OK: true}
+		}
+		return SegHit{Segment: seg, Rule: "R? " + headline(seg), OK: false}
+	}
+	if rule, ok := matchVariant(p, seg); ok {
+		return SegHit{Segment: seg, Rule: rule, OK: true}
+	}
 	return SegHit{Segment: seg, Rule: "R? " + headline(seg), OK: false}
+}
+
+func matchStep(p Plan, cmd string) bool {
+	want := EquivCommand(cmd)
+	if want == "" {
+		return false
+	}
+	for _, line := range strings.Split(p.Text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if EquivCommand(line) == want {
+			return true
+		}
+		for _, s := range SplitPlanCommand(line) {
+			if EquivCommand(s) == want {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func coverGitAdd(p Plan, segs []string, hits []SegHit) {
+	if !commitDeclared(p, hits) {
+		return
+	}
+	for i, s := range segs {
+		if hits[i].OK {
+			continue
+		}
+		if sub, _, ok := gitArgs(s); ok && sub == "add" {
+			hits[i] = SegHit{Segment: s, Rule: "R4 git add", OK: true}
+		}
+	}
+}
+
+func commitDeclared(p Plan, hits []SegHit) bool {
+	blob := p.Text + "\n" + strings.Join(p.Commands, "\n")
+	if strings.Contains(blob, "git commit") {
+		return true
+	}
+	for _, h := range hits {
+		if h.OK && strings.Contains(h.Rule, "git commit") {
+			return true
+		}
+	}
+	return false
+}
+
+func isStrictDeletion(seg string) bool {
+	if sub, _, ok := gitArgs(seg); ok && sub == "rm" {
+		return true
+	}
+	switch SegmentBinary(seg) {
+	case "rm", "unlink", "rmdir":
+		return true
+	default:
+		return false
+	}
+}
+
+func deletionPaths(seg string) []string {
+	if sub, rest, ok := gitArgs(seg); ok && sub == "rm" {
+		var paths []string
+		for _, a := range rest {
+			if strings.HasPrefix(a, "-") || a == "" {
+				continue
+			}
+			paths = append(paths, a)
+		}
+		return paths
+	}
+	bin := SegmentBinary(seg)
+	var paths []string
+	seen := false
+	for _, t := range tokenizeWords(seg) {
+		w := unquote(t.word)
+		if !seen {
+			if filepath.Base(w) == bin {
+				seen = true
+			}
+			continue
+		}
+		if strings.HasPrefix(w, "-") {
+			continue
+		}
+		paths = append(paths, w)
+	}
+	return paths
+}
+
+func exactPlanned(files, targets []string) bool {
+	if len(targets) == 0 {
+		return false
+	}
+	norms := plannedPaths(files)
+	for _, t := range targets {
+		n := normPlanPath(t)
+		found := false
+		for _, f := range norms {
+			if f == n {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+type cmdShape struct {
+	prog string
+	sub  string
+	file string
+}
+
+func commandShape(seg string) (cmdShape, bool) {
+	var words []string
+	for _, t := range tokenizeWords(seg) {
+		w := unquote(t.word)
+		if len(words) == 0 && reAssign.MatchString(w) {
+			continue
+		}
+		words = append(words, w)
+	}
+	if len(words) == 0 {
+		return cmdShape{}, false
+	}
+	var pos []string
+	for _, w := range words[1:] {
+		if strings.HasPrefix(w, "-") {
+			continue
+		}
+		pos = append(pos, w)
+	}
+	if len(pos) == 0 {
+		return cmdShape{}, false
+	}
+	file := ""
+	for _, p := range pos {
+		if strings.ContainsAny(p, "./") {
+			file = filepath.Base(p)
+			break
+		}
+	}
+	if file == "" || file == "." || file == ".." {
+		return cmdShape{}, false
+	}
+	return cmdShape{prog: filepath.Base(words[0]), sub: pos[0], file: file}, true
+}
+
+func matchVariant(p Plan, seg string) (string, bool) {
+	sh, ok := commandShape(seg)
+	if !ok {
+		return "", false
+	}
+	for _, other := range planVariantShapes(p) {
+		if sh.prog == other.prog && sh.sub == other.sub && sh.file == other.file {
+			return "R2b in plan (variant) " + headline(seg), true
+		}
+	}
+	return "", false
+}
+
+func planVariantShapes(p Plan) []cmdShape {
+	var out []cmdShape
+	seen := map[cmdShape]bool{}
+	add := func(s string) {
+		sh, ok := commandShape(s)
+		if !ok || seen[sh] {
+			return
+		}
+		seen[sh] = true
+		out = append(out, sh)
+	}
+	for _, c := range p.Commands {
+		add(c)
+		for _, s := range SplitPlanCommand(c) {
+			add(s)
+		}
+	}
+	for _, line := range strings.Split(p.Text, "\n") {
+		add(line)
+		for _, s := range SplitPlanCommand(line) {
+			add(s)
+		}
+		fields := strings.Fields(line)
+		for i := range fields {
+			var b strings.Builder
+			n := 0
+			for j := i; j < len(fields) && n < 8; j++ {
+				tok := strings.Trim(fields[j], "`\"'.,:;()[]{}")
+				if tok == "" || tok == "&&" || tok == "||" || tok == "|" {
+					break
+				}
+				if n > 0 {
+					b.WriteByte(' ')
+				}
+				b.WriteString(tok)
+				n++
+			}
+			add(b.String())
+		}
+	}
+	return out
 }
 
 func matchDeclared(cmds []string, cmd string) bool {
