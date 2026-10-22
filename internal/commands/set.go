@@ -421,21 +421,22 @@ func setBudget(env *Env, args []string, session bool) int {
 
 func setThink(env *Env, args []string, session bool) int {
 	if len(args) == 0 {
-		fmt.Fprintf(env.out(), "think %s\nanswer %s\nlookup %s\nact %s\nbuild %s\n",
-			env.Profile.Agent.ThinkMode, env.Profile.AnswerThinking(), env.Profile.LookupThinking(), env.Profile.ActThinking(), env.Profile.BuildThink())
+		fmt.Fprintf(env.out(), "think %s\nanswer %s\nlookup %s\nact %s\nbuild %s\nplan_think %s\n",
+			env.Profile.Agent.ThinkMode, env.Profile.AnswerThinking(), env.Profile.LookupThinking(), env.Profile.ActThinking(), env.Profile.BuildThink(), env.Profile.PlanThink())
 		return 0
 	}
 	if len(args) == 1 {
 		return setOne(env, "agent.think_mode", args, session)
 	}
 	path := map[string]string{
-		"answer": "agent.think_answer",
-		"lookup": "agent.think_lookup",
-		"act":    "agent.think_act",
-		"build":  "agent.build_thinking",
+		"answer":     "agent.think_answer",
+		"lookup":     "agent.think_lookup",
+		"act":        "agent.think_act",
+		"build":      "agent.build_thinking",
+		"plan_think": "agent.plan_think",
 	}[strings.ToLower(args[0])]
 	if path == "" {
-		fmt.Fprintln(env.errw(), "think is an enum; allowed: on, off, auto, answer, lookup, act, build")
+		fmt.Fprintln(env.errw(), "think is an enum; allowed: on, off, auto, answer, lookup, act, build, plan_think")
 		return 2
 	}
 	return setOne(env, path, args[1:], session)
