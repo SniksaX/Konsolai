@@ -374,6 +374,9 @@ var keyTable = []Key{
 	km("stats.insert_timeout_ms", "turn stat insert limit", 2000,
 		func(c *Config, v int) { c.Stats.InsertTimeoutMS = v }, func(c Config) int { return c.Stats.InsertTimeoutMS }),
 
+	km("docs.render_timeout_ms", "mermaid diagram render limit", 60000,
+		func(c *Config, v int) { c.Docs.RenderTimeoutMS = v }, func(c Config) int { return c.Docs.RenderTimeoutMS }).named("docs").when(ApplyNow),
+
 	ks("language.mode", "auto | en | fr", "", "auto",
 		func(c *Config, v string) { c.Language.Mode = v }, func(c Config) string { return c.Language.Mode }).allowed("auto", "en", "fr").named("language").when(ApplyNext),
 	kli("language.languages", "reply languages the router may pick", []string{"en", "fr"},
