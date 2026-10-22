@@ -16,6 +16,7 @@ import (
 	"github.com/SniksaX/Konsolai/internal/agent"
 	"github.com/SniksaX/Konsolai/internal/commands"
 	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/docrender"
 	"github.com/SniksaX/Konsolai/internal/embed"
 	"github.com/SniksaX/Konsolai/internal/intent"
 	"github.com/SniksaX/Konsolai/internal/llm"
@@ -216,6 +217,7 @@ func run() int {
 	}
 	ui.ApplyUIOpts(prof.PaletteName(), prof.Appearance(), inv.Plain, prof.CodeHighlightOn(), prof.StripEmojiOn())
 	theme.SetCursorColor(prof.CursorColorOn())
+	docrender.SetRenderTimeout(time.Duration(prof.Docs.RenderTimeoutMS) * time.Millisecond)
 	inv.Endpoint = prof.MainEndpoint()
 
 	needMem := inv.Cmd == cmdUndo || inv.Cmd == cmdFacts || inv.Cmd == cmdPrune || inv.Cmd == cmdRemember || inv.Cmd == cmdForget
