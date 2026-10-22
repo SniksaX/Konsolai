@@ -607,6 +607,7 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 	st := agent.Stats{
 		Steps:            1,
 		ModelTime:        modelTime,
+		MaxStep:          modelTime,
 		PromptTokens:     usage.PromptTokens,
 		LastPromptTokens: usage.PromptTokens,
 		CompletionTokens: usage.CompletionTokens,
@@ -615,6 +616,7 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 	}
 	if req.Trace {
 		agent.PrintTrace(r.errw(), 1, think, modelTime, usage.PromptTokens, usage.CompletionTokens, usage.ReasoningTokens, main.ContextWindow(), nil)
+		fmt.Fprintln(r.errw(), agent.FormatStatsLine(st))
 	}
 	if r.Profile.ShowStatsLine() {
 		agent.PrintSummary(r.errw(), string(dec.Intent), st)
