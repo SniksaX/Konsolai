@@ -132,6 +132,13 @@ func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 	}
 	resolved, err := t.guard.ResolvePath(cwd)
 	if err != nil {
+		var denied *safety.DeniedError
+		if errors.As(err, &denied) {
+			return nil, fmt.Errorf("cwd outside the project: %s", cwd)
+		}
+		return nil, err
+	}
+	if err := t.guard.CheckCommandPaths(args.Cmd, resolved); err != nil {
 		return nil, err
 	}
 	sec := args.TimeoutSec
