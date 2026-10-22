@@ -22,30 +22,34 @@ var mermaidJS []byte
 const mermaidBoot = `
 mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });
 (async function () {
+  var loadMs = Math.round(performance.now());
   var nodes = document.querySelectorAll("pre.mermaid");
   var marker = document.createElement("div");
   marker.id = "mermaid-done";
+  marker.setAttribute("data-load-ms", String(loadMs > 0 ? loadMs : 0));
+  function finish(status, index, msg, runMs) {
+    marker.setAttribute("data-status", status);
+    marker.setAttribute("data-run-ms", String(runMs > 0 ? runMs : 0));
+    if (index) marker.setAttribute("data-index", String(index));
+    if (msg) marker.textContent = msg;
+    document.body.appendChild(marker);
+  }
   for (var i = 0; i < nodes.length; i++) {
     try {
       await mermaid.parse(nodes[i].textContent);
     } catch (e) {
       var msg = (e && (e.str || e.message)) || String(e);
-      marker.setAttribute("data-status", "error");
-      marker.setAttribute("data-index", String(i + 1));
-      marker.textContent = msg;
-      document.body.appendChild(marker);
+      finish("error", i + 1, msg, 0);
       return;
     }
   }
+  var runStart = performance.now();
   try {
     await mermaid.run({ querySelector: "pre.mermaid" });
-    marker.setAttribute("data-status", "ok");
+    finish("ok", 0, "", Math.round(performance.now() - runStart));
   } catch (e) {
-    marker.setAttribute("data-status", "error");
-    marker.setAttribute("data-index", "1");
-    marker.textContent = (e && (e.str || e.message)) || String(e);
+    finish("error", 1, (e && (e.str || e.message)) || String(e), Math.round(performance.now() - runStart));
   }
-  document.body.appendChild(marker);
 })();
 `
 
@@ -136,16 +140,27 @@ func dumpDOM(ctx context.Context, bin, dir, htmlPath string, attempt int) (strin
 	if err != nil {
 		return "", fmt.Errorf("docrender: mermaid path: %w", err)
 	}
+	wait := scaledRenderTimeout()
+	ms := int(wait / time.Millisecond)
+	if ms < 1000 {
+		ms = 1000
+	}
+	chromeMS := ms - 2000
+	if chromeMS < 5000 {
+		chromeMS = ms
+	}
 	args := append(headlessArgs(profile),
-		"--virtual-time-budget=12000",
-		"--timeout=20000",
+		fmt.Sprintf("--virtual-time-budget=%d", ms),
+		fmt.Sprintf("--timeout=%d", chromeMS),
 		"--run-all-compositor-stages-before-draw",
 		"--dump-dom",
 		pageURL,
 	)
-	stdout, stderr, err := runGrouped(ctx, 30*time.Second, dir, chromeEnv(), true, bin, args...)
+	t0 := time.Now()
+	stdout, stderr, launch, err := runGroupedClock(ctx, wait, dir, chromeEnv(), true, bin, args...)
+	noteRenderTrace(launch, time.Since(t0), string(stdout))
 	if err != nil {
-		return "", fmt.Errorf("docrender: chrome: %s", tailErr(stderr, err))
+		return "", fmt.Errorf("docrender: chrome: %s", chromeFail(stderr, err, wait, "diagram render"))
 	}
 	return string(stdout), nil
 }
