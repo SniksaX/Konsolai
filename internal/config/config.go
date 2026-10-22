@@ -69,6 +69,7 @@ type Roles struct {
 type LLM struct {
 	IdleTimeoutSeconds int          `yaml:"idle_timeout_seconds"`
 	MaxTokens          MaxTokens    `yaml:"max_tokens"`
+	ThinkingMaxTokens  int          `yaml:"thinking_max_tokens"`
 	Temperature        Temperatures `yaml:"temperature"`
 	TopP               float64      `yaml:"top_p"`
 	Retries            int          `yaml:"retries"`
@@ -565,6 +566,10 @@ func (c Config) AnswerEffortCap(effort string) int {
 	default:
 		return 0
 	}
+}
+
+func (c Config) ThinkingMaxTokens() int {
+	return nonzero(c.LLM.ThinkingMaxTokens, 4096)
 }
 
 func (c Config) TokenCap(intent string) int {
