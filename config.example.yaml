@@ -26,6 +26,7 @@ defaults:
       lookup: 4096   # lookup intent token cap
       act: 4096   # act intent token cap
       build: 12288   # build intent token cap
+    thinking_max_tokens: 4096   # thinking token cap
     temperature:
       answer: 0.3   # answer sampling temperature
       lookup: 0.2   # lookup sampling temperature
