@@ -683,7 +683,10 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			elapsed := time.Since(start)
 			st.ToolTime += elapsed
 			if err != nil {
-				return err
+				if ctx.Err() != nil {
+					return err
+				}
+				result = tools.Result{Output: err.Error(), IsError: true, Meta: err.Error()}
 			}
 			if result.Final {
 				result.Output = longerText(narration, result.Output)
