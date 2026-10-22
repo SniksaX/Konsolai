@@ -113,6 +113,7 @@ func TestSetTreeEnumsMatchAllowed(t *testing.T) {
 		"agent.think_lookup":   {"think", "lookup"},
 		"agent.think_act":      {"think", "act"},
 		"agent.build_thinking": {"think", "build"},
+		"agent.plan_think":     {"think", "plan_think"},
 		"agent.approve":        {"approve"},
 		"ui.appearance":        {"appearance"},
 		"ui.welcome":           {"welcome"},
