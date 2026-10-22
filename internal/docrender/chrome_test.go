@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -74,6 +75,20 @@ func TestFindChromeMissing(t *testing.T) {
 	_, err := FindChrome()
 	if err == nil || err.Error() != "install chromium (sudo pacman -S chromium) or set KONSOLAI_CHROME" {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestHeadlessArgsQuiet(t *testing.T) {
+	joined := strings.Join(headlessArgs("/tmp/p"), "\n")
+	for _, flag := range []string{
+		"--disable-gpu",
+		"--disable-dev-shm-usage",
+		"--no-first-run",
+		"--no-default-browser-check",
+	} {
+		if !strings.Contains(joined, flag) {
+			t.Fatalf("missing %s", flag)
+		}
 	}
 }
 
