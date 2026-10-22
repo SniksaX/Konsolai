@@ -12,6 +12,7 @@ type ModelStat struct {
 	Calls            int
 	PromptTokens     int
 	CompletionTokens int
+	ReasoningTokens  int
 	// TokPerSec is nil when every call in the window has model_ms = 0.
 	TokPerSec *float64
 	P50MS     float64
@@ -77,6 +78,7 @@ func (s *Store) modelStats(ctx context.Context, since any) (UsageReport, error) 
 			count(*)::int,
 			COALESCE(SUM(prompt_tokens), 0)::int,
 			COALESCE(SUM(completion_tokens), 0)::int,
+			COALESCE(SUM(reasoning_tokens), 0)::int,
 			COALESCE(SUM(completion_tokens) FILTER (WHERE model_ms > 0), 0)::float8,
 			COALESCE(SUM(model_ms) FILTER (WHERE model_ms > 0), 0)::float8,
 			COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY model_ms), 0)::float8,
@@ -93,7 +95,7 @@ func (s *Store) modelStats(ctx context.Context, since any) (UsageReport, error) 
 	for rows.Next() {
 		var row ModelStat
 		var compPos, msPos float64
-		if err := rows.Scan(&row.Model, &row.Calls, &row.PromptTokens, &row.CompletionTokens,
+		if err := rows.Scan(&row.Model, &row.Calls, &row.PromptTokens, &row.CompletionTokens, &row.ReasoningTokens,
 			&compPos, &msPos, &row.P50MS, &row.P95MS); err != nil {
 			return UsageReport{}, fmt.Errorf("store: usage models: %w", err)
 		}
