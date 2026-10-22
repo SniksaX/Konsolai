@@ -249,7 +249,7 @@ func TestRunMaxSteps(t *testing.T) {
 }
 
 func TestRunRepeatedFailureNote(t *testing.T) {
-	fail := `{"cmd":"cp /no-such-src /no-such-dst"}`
+	fail := `{"cmd":"cp no-such-src no-such-dst"}`
 	_, rep, err := setup(t, []llm.Message{
 		assistant(call("1", "run_shell", fail)),
 		assistant(call("2", "run_shell", fail)),
