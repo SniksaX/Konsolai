@@ -47,6 +47,7 @@ func TestReadEscapeTail(t *testing.T) {
 }
 
 func TestEscapeActionForEditingKeys(t *testing.T) {
+	quietStdout(t)
 	rd, err := NewReadline(nil, nil, nil, commands.Default())
 	if err != nil {
 		t.Fatal(err)
