@@ -15,6 +15,7 @@ llm
   llm.max_tokens.lookup        4096
   llm.max_tokens.act           4096
   llm.max_tokens.build         12288
+  llm.thinking_max_tokens      4096
   llm.temperature.answer       0.3
   llm.temperature.lookup       0.2
   llm.temperature.act          0.2
