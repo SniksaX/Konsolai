@@ -2,6 +2,8 @@ package agent
 
 import (
 	"strings"
+
+	"github.com/SniksaX/Konsolai/internal/llm"
 )
 
 type ThinkingPolicy int
@@ -21,6 +23,24 @@ func ParseBuildThinking(s string) ThinkingPolicy {
 	default:
 		return ThinkPlanStep
 	}
+}
+
+func (cfg Config) thinkingBudget() int {
+	if cfg.ThinkingMaxTokens > 0 {
+		return cfg.ThinkingMaxTokens
+	}
+	return 4096
+}
+
+func applyThinkBudget(opts *llm.ChatOptions, budget int) {
+	if opts == nil {
+		return
+	}
+	if opts.Thinking && budget > 0 {
+		opts.ThinkingBudget = budget
+		return
+	}
+	opts.ThinkingBudget = 0
 }
 
 func (p ThinkingPolicy) enabled(planApproved, shellFail bool, consecFail int) bool {
