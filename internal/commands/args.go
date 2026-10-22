@@ -494,6 +494,7 @@ func thinkLevel(env *Env) []Choice {
 		{"lookup", "agent.think_lookup"},
 		{"act", "agent.think_act"},
 		{"build", "agent.build_thinking"},
+		{"plan_think", "agent.plan_think"},
 	}
 	for _, s := range subs {
 		s := s
