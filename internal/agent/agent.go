@@ -47,41 +47,42 @@ type Confirmer interface {
 }
 
 type Config struct {
-	Client           *llm.Client
-	Tools            *tools.Registry
-	Confirmer        Confirmer
-	Out              io.Writer
-	MaxSteps         int
-	ThinkingPolicy   ThinkingPolicy
-	RequirePlan      bool
-	Prompt           string
-	Temperature      float64
-	Recorder         Recorder
-	History          []llm.Message
-	AutoApprove      bool
-	Approve          string
-	TopP             float64
-	ExploreBudget    int
-	ExploreNote      string
-	Trace            bool
-	SessionID        string
-	Intent           string
-	Task             string
-	RouterTime       time.Duration
-	Err              io.Writer
-	Stats            *Stats
-	Plain            bool
-	HideStats        bool
-	OnShell          func(output string)
-	Guard            *safety.Guard
-	ResumePlan       bool
-	PlanFiles        []string
-	PlanCmds         []string
-	PlanText         string
-	TokenCap         int
-	ElideTrigger     float64
-	ElideTarget      float64
-	IdenticalRejects int
+	Client            *llm.Client
+	Tools             *tools.Registry
+	Confirmer         Confirmer
+	Out               io.Writer
+	MaxSteps          int
+	ThinkingPolicy    ThinkingPolicy
+	RequirePlan       bool
+	Prompt            string
+	Temperature       float64
+	Recorder          Recorder
+	History           []llm.Message
+	AutoApprove       bool
+	Approve           string
+	TopP              float64
+	ExploreBudget     int
+	ExploreNote       string
+	Trace             bool
+	SessionID         string
+	Intent            string
+	Task              string
+	RouterTime        time.Duration
+	Err               io.Writer
+	Stats             *Stats
+	Plain             bool
+	HideStats         bool
+	OnShell           func(output string)
+	Guard             *safety.Guard
+	ResumePlan        bool
+	PlanFiles         []string
+	PlanCmds          []string
+	PlanText          string
+	TokenCap          int
+	ThinkingMaxTokens int
+	ElideTrigger      float64
+	ElideTarget       float64
+	IdenticalRejects  int
 }
 
 type Stats struct {
@@ -91,6 +92,7 @@ type Stats struct {
 	PromptTokens     int
 	LastPromptTokens int
 	CompletionTokens int
+	ReasoningTokens  int
 	RouterTime       time.Duration
 }
 
@@ -268,6 +270,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			live.SetLabel(ProgressLabel(label, p))
 		}
 		t0 := time.Now()
+		applyThinkBudget(&opts, cfg.thinkingBudget())
 		msg, usage, err := cfg.Client.Complete(ctx, msgs, stepSpecs, opts)
 		modelElapsed := time.Since(t0)
 		live.Stop()
@@ -286,6 +289,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				live.SetLabel(ProgressLabel(label, p))
 			}
 			t0 = time.Now()
+			applyThinkBudget(&opts, cfg.thinkingBudget())
 			msg, usage, err = cfg.Client.Complete(ctx, msgs, stepSpecs, opts)
 			modelElapsed += time.Since(t0)
 			live.Stop()
@@ -302,16 +306,18 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				st.ModelTime += modelElapsed
 				st.PromptTokens += usage.PromptTokens
 				st.CompletionTokens += usage.CompletionTokens
+				st.ReasoningTokens += usage.ReasoningTokens
 				if usage.PromptTokens > 0 {
 					st.LastPromptTokens = usage.PromptTokens
 				}
 				dumpTrace(cfg.SessionID, st.Steps, msg)
-				PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, cfg.Client.ContextWindow(), FormatTraceCalls(msg.ToolCalls))
+				PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, usage.ReasoningTokens, cfg.Client.ContextWindow(), FormatTraceCalls(msg.ToolCalls))
 			} else {
 				st.Steps++
 				st.ModelTime += modelElapsed
 				st.PromptTokens += usage.PromptTokens
 				st.CompletionTokens += usage.CompletionTokens
+				st.ReasoningTokens += usage.ReasoningTokens
 				if usage.PromptTokens > 0 {
 					st.LastPromptTokens = usage.PromptTokens
 				}
@@ -337,6 +343,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				live.SetLabel(ProgressLabel(label, p))
 			}
 			t0 := time.Now()
+			applyThinkBudget(&opts, cfg.thinkingBudget())
 			msg, usage, err = cfg.Client.Complete(ctx, msgs, stepSpecs, opts)
 			modelElapsed = time.Since(t0)
 			live.Stop()
@@ -355,6 +362,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					live.SetLabel(ProgressLabel(label, p))
 				}
 				t0 = time.Now()
+				applyThinkBudget(&opts, cfg.thinkingBudget())
 				msg, usage, err = cfg.Client.Complete(ctx, msgs, stepSpecs, opts)
 				modelElapsed += time.Since(t0)
 				live.Stop()
@@ -373,12 +381,13 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		st.ModelTime += modelElapsed
 		st.PromptTokens += usage.PromptTokens
 		st.CompletionTokens += usage.CompletionTokens
+		st.ReasoningTokens += usage.ReasoningTokens
 		if usage.PromptTokens > 0 {
 			st.LastPromptTokens = usage.PromptTokens
 		}
 		if cfg.Trace {
 			dumpTrace(cfg.SessionID, st.Steps, msg)
-			PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, cfg.Client.ContextWindow(), FormatTraceCalls(msg.ToolCalls))
+			PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, usage.ReasoningTokens, cfg.Client.ContextWindow(), FormatTraceCalls(msg.ToolCalls))
 		}
 		narration := trimLeadingBlanks(msg.Content)
 		if strings.TrimSpace(narration) != "" && len(msg.ToolCalls) > 0 && !hasFinishCall(msg) {
