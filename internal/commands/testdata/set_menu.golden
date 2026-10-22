@@ -118,6 +118,8 @@ store
   store.migrate_timeout_ms     15000
 stats
   stats.insert_timeout_ms      2000
+docs
+  docs.render_timeout_ms       60000
 language
   language.mode                auto
   language.languages           ["en", "fr"]
