@@ -117,6 +117,7 @@ type e2eSess struct {
 	ptmx       *os.File
 	mu         sync.Mutex
 	buf        bytes.Buffer
+	mark       int
 	rows, cols int
 }
 
@@ -267,22 +268,80 @@ func splitE2EKeys(keys string) []string {
 func (s *e2eSess) typeKeysWithin(keys string, done func(*slashScreen) bool, d time.Duration) {
 	s.t.Helper()
 	parts := splitE2EKeys(keys)
+	if len(parts) == 0 {
+		if done != nil {
+			s.expectWithin("rendered text", d, done)
+		}
+		return
+	}
+	var acc strings.Builder
 	for i, part := range parts {
-		beforeN := len(s.raw())
-		beforeDump := s.screen().dump()
-		s.send(part)
+		before := s.screen().dump()
+		mark := s.send(part)
 		last := i == len(parts)-1
-		s.expectWithin(strconv.Quote(part), d, func(sc *slashScreen) bool {
-			moved := sc.dump() != beforeDump || len(s.raw()) > beforeN
-			if !moved {
+		why := "rendered text"
+		want := ""
+		if e2ePrintable(part) {
+			acc.WriteString(part)
+			want = acc.String()
+			if !(last && done != nil) {
+				why = "prompt shows " + want
+			}
+		}
+		s.expectWithin(why, d, func(sc *slashScreen) bool {
+			if len(s.raw()) <= mark {
 				return false
 			}
 			if last && done != nil {
 				return done(sc)
 			}
-			return true
+			if e2ePrintable(part) {
+				return slashShows(sc, want)
+			}
+			if sc.dump() != before {
+				return true
+			}
+			raw := s.raw()
+			if mark > len(raw) {
+				return false
+			}
+			return e2eRenderedLen(raw[mark:]) > 200
 		})
 	}
+}
+
+func slashShows(sc *slashScreen, want string) bool {
+	if sc == nil || want == "" {
+		return false
+	}
+	if strings.Contains(slashPromptText(sc), want) {
+		return true
+	}
+	for _, row := range sc.cell {
+		if strings.Contains(string(row), want) {
+			return true
+		}
+	}
+	return !strings.HasSuffix(want, " ") && strings.Contains(sc.dump(), want)
+}
+
+func e2eRenderedLen(chunk []byte) int {
+	plain := ansiReE2E.ReplaceAll(chunk, nil)
+	n := 0
+	for _, r := range string(plain) {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			n++
+		}
+	}
+	return n
+}
+
+func e2ePrintable(part string) bool {
+	if part == "" || strings.HasPrefix(part, "\x1b") {
+		return false
+	}
+	r, size := utf8.DecodeRuneInString(part)
+	return size == len(part) && r >= 0x20 && r != 0x7f
 }
 
 func (s *e2eSess) typeKeys(keys string, done func(*slashScreen) bool) {
@@ -290,11 +349,16 @@ func (s *e2eSess) typeKeys(keys string, done func(*slashScreen) bool) {
 	s.typeKeysWithin(keys, done, ptyTimeout())
 }
 
-func (s *e2eSess) send(keys string) {
+func (s *e2eSess) send(keys string) int {
 	s.t.Helper()
+	s.mu.Lock()
+	s.mark = s.buf.Len()
+	mark := s.mark
+	s.mu.Unlock()
 	if _, err := s.ptmx.Write([]byte(keys)); err != nil {
 		s.t.Fatal(err)
 	}
+	return mark
 }
 
 func (s *e2eSess) waitExit(d time.Duration) {
