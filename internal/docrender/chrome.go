@@ -55,6 +55,8 @@ func headlessArgs(profile string) []string {
 		"--no-sandbox",
 		"--disable-dev-shm-usage",
 		"--disable-extensions",
+		"--no-first-run",
+		"--no-default-browser-check",
 		"--ozone-platform=headless",
 		"--user-data-dir=" + profile,
 	}
