@@ -118,6 +118,7 @@ type Agent struct {
 	MaxSteps         Steps         `yaml:"max_steps"`
 	ExploreBudget    ExploreBudget `yaml:"explore_budget"`
 	BuildThinking    string        `yaml:"build_thinking"`
+	PlanThink        string        `yaml:"plan_think"`
 	ThinkMode        string        `yaml:"think_mode"`
 	ThinkAnswer      string        `yaml:"think_answer"`
 	ThinkLookup      string        `yaml:"think_lookup"`
@@ -522,6 +523,14 @@ func (c Config) BuildThink() string {
 		return s
 	}
 	return "plan_step"
+}
+
+// PlanThink is always (the plan step thinks) or on_reject (think only when the plan fails validation).
+func (c Config) PlanThink() string {
+	if strings.EqualFold(strings.TrimSpace(c.Agent.PlanThink), "always") {
+		return "always"
+	}
+	return "on_reject"
 }
 
 // AnswerThinking is auto, on, or off. Empty means auto (high effort only).
