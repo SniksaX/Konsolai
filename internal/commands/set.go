@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/docrender"
 	"github.com/SniksaX/Konsolai/internal/turn"
 	"github.com/SniksaX/Konsolai/internal/ui"
 	"github.com/SniksaX/Konsolai/internal/ui/theme"
@@ -729,6 +730,8 @@ func applyLive(env *Env, k config.Key) {
 		if env.Profile.CursorColorOn() && theme.Enabled() {
 			theme.ApplyCursor(env.out())
 		}
+	case "docs.render_timeout_ms":
+		docrender.SetRenderTimeout(time.Duration(env.Profile.Docs.RenderTimeoutMS) * time.Millisecond)
 	}
 }
 
