@@ -95,6 +95,16 @@ type Stats struct {
 	CompletionTokens int
 	ReasoningTokens  int
 	RouterTime       time.Duration
+	Rejects          int
+	OutsidePlan      int
+	MaxStep          time.Duration
+}
+
+func (s *Stats) noteModel(d time.Duration) {
+	s.ModelTime += d
+	if d > s.MaxStep {
+		s.MaxStep = d
+	}
 }
 
 var (
@@ -187,6 +197,9 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	defer func() {
 		if cfg.Stats != nil {
 			*cfg.Stats = st
+		}
+		if cfg.Trace && cfg.Err != nil {
+			fmt.Fprintln(cfg.Err, FormatStatsLine(st))
 		}
 		if skipSummary || cfg.HideStats {
 			return
@@ -304,7 +317,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		if cfg.ThinkingPolicy == ThinkPlanStep && !think && !planApproved && hasProposePlan(msg) && (!proposePlanValid(cfg.Tools, msg) || planThinkAlways(cfg.PlanThink)) {
 			if cfg.Trace {
 				st.Steps++
-				st.ModelTime += modelElapsed
+				st.noteModel(modelElapsed)
 				st.PromptTokens += usage.PromptTokens
 				st.CompletionTokens += usage.CompletionTokens
 				st.ReasoningTokens += usage.ReasoningTokens
@@ -315,7 +328,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, usage.ReasoningTokens, cfg.Client.ContextWindow(), FormatTraceCalls(msg.ToolCalls))
 			} else {
 				st.Steps++
-				st.ModelTime += modelElapsed
+				st.noteModel(modelElapsed)
 				st.PromptTokens += usage.PromptTokens
 				st.CompletionTokens += usage.CompletionTokens
 				st.ReasoningTokens += usage.ReasoningTokens
@@ -379,7 +392,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			msg.Content = ""
 		}
 		st.Steps++
-		st.ModelTime += modelElapsed
+		st.noteModel(modelElapsed)
 		st.PromptTokens += usage.PromptTokens
 		st.CompletionTokens += usage.CompletionTokens
 		st.ReasoningTokens += usage.ReasoningTokens
@@ -451,6 +464,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				prepRejects = 0
 				reason := "unknown tool " + call.Function.Name
 				printReject(cfg.Out, call.Function.Name, call.Function.Arguments, reason)
+				st.Rejects++
 				tm := llm.Message{
 					Role:       llm.RoleTool,
 					Content:    "error: " + reason,
@@ -468,6 +482,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					return err
 				}
 				printReject(cfg.Out, call.Function.Name, call.Function.Arguments, err.Error())
+				st.Rejects++
 				content := "error: " + err.Error()
 				failKey := call.Function.Name + "\x00" + call.Function.Arguments
 				if failKey == prepRejectKey {
@@ -504,6 +519,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			if kind == tools.Mutating && cfg.RequirePlan && !planApproved {
 				reason := "call propose_plan first"
 				printReject(cfg.Out, call.Function.Name, call.Function.Arguments, reason)
+				st.Rejects++
 				tm := llm.Message{
 					Role:       llm.RoleTool,
 					Content:    "error: " + reason,
@@ -556,6 +572,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				}
 				if outside {
 					summary = "⚠ outside plan: " + summary
+					st.OutsidePlan++
 				}
 			}
 			if inPlanHit {
@@ -564,6 +581,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			if outside && cfg.Approve == "in_plan" && kind == tools.Mutating {
 				reason := "outside the plan"
 				printReject(cfg.Out, call.Function.Name, call.Function.Arguments, reason)
+				st.Rejects++
 				tm := llm.Message{Role: llm.RoleTool, Content: "error: " + reason, ToolCallID: call.ID}
 				msgs = append(msgs, tm)
 				_ = rec.Message(ctx, tm)
@@ -601,6 +619,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					}
 					switch d {
 					case ui.Reject:
+						st.Rejects++
 						if kind == tools.Plan {
 							planRejected = true
 						}
@@ -880,7 +899,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		}
 	} else {
 		st.Steps++
-		st.ModelTime += time.Since(t0)
+		st.noteModel(time.Since(t0))
 		st.PromptTokens += usage.PromptTokens
 		st.CompletionTokens += usage.CompletionTokens
 		if usage.PromptTokens > 0 {
