@@ -20,13 +20,13 @@ type SegHit struct {
 	OK      bool
 }
 
-// MatchPlan reports whether cmd is in the approved plan (R1–R4).
+// MatchPlan reports whether cmd is in the approved plan (R1–R4, R2b).
 func MatchPlan(p Plan, cmd string) (bool, []SegHit) {
 	cmd = strings.TrimSpace(cmd)
 	if cmd == "" {
 		return false, nil
 	}
-	if matchDeclared(p.Commands, cmd) {
+	if matchDeclared(p.Commands, cmd) || matchStep(p, cmd) {
 		return true, []SegHit{{Segment: cmd, Rule: "R2 " + headline(cmd), OK: true}}
 	}
 	segs := SplitPlanCommand(cmd)
@@ -34,10 +34,12 @@ func MatchPlan(p Plan, cmd string) (bool, []SegHit) {
 		return false, nil
 	}
 	hits := make([]SegHit, 0, len(segs))
-	all := true
 	for _, s := range segs {
-		h := matchSeg(p, s)
-		hits = append(hits, h)
+		hits = append(hits, matchSeg(p, s))
+	}
+	coverGitAdd(p, segs, hits)
+	all := true
+	for _, h := range hits {
 		if !h.OK {
 			all = false
 		}
