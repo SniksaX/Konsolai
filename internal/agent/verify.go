@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+
+	"github.com/SniksaX/Konsolai/internal/safety"
 )
 
 // VerifiedCall is a successful tool result from the current turn.
@@ -33,9 +35,7 @@ var finishClaimRules = []claimRule{
 	{
 		name: "created/wrote",
 		re:   regexp.MustCompile(`(?i)\b(created|wrote|written|créé|cree)\b`),
-		ok: func(calls []VerifiedCall) bool {
-			return hasTool(calls, "write_file", "edit_file")
-		},
+		ok:   mutatingCall,
 	},
 	{
 		name: "deleted",
@@ -44,7 +44,15 @@ var finishClaimRules = []claimRule{
 			if hasTool(calls, "delete_file") {
 				return true
 			}
-			return shellMatched(`(?i)\b(rm|unlink|shred)\b`)(calls)
+			if shellMatched(`(?i)\b(rm|unlink|shred)\b`)(calls) {
+				return true
+			}
+			for _, c := range calls {
+				if c.Tool == "edit_file" && editRemovedLines(c.Out) {
+					return true
+				}
+			}
+			return false
 		},
 	},
 }
@@ -82,6 +90,34 @@ func shellMatched(pattern string) func([]VerifiedCall) bool {
 		}
 		return false
 	}
+}
+
+func mutatingCall(calls []VerifiedCall) bool {
+	for _, c := range calls {
+		switch c.Tool {
+		case "write_file", "edit_file":
+			return true
+		case "run_shell":
+			if !safety.IsReadOnlyCommand(shellCmd(c.Args)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+var editRemoval = regexp.MustCompile(`\(\+\d+ -([1-9]\d*)\)`)
+
+func editRemovedLines(out string) bool {
+	if editRemoval.MatchString(out) {
+		return true
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
+			return true
+		}
+	}
+	return false
 }
 
 func hasTool(calls []VerifiedCall, names ...string) bool {
