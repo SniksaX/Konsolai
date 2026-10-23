@@ -277,6 +277,7 @@ func TestChromeNoiseFilterCILines(t *testing.T) {
 func TestRenderTimeoutScales(t *testing.T) {
 	prev := RenderTimeout()
 	t.Cleanup(func() { SetRenderTimeout(prev) })
+	t.Setenv("KONSOLAI_TEST_TIMEOUT_SCALE", "")
 	SetRenderTimeout(60 * time.Second)
 	if scaledRenderTimeout() != 60*time.Second {
 		t.Fatalf("%s", scaledRenderTimeout())
