@@ -15,6 +15,7 @@ llm
   llm.max_tokens.lookup        4096
   llm.max_tokens.act           4096
   llm.max_tokens.build         12288
+  llm.thinking_max_tokens      4096
   llm.temperature.answer       0.3
   llm.temperature.lookup       0.2
   llm.temperature.act          0.2
@@ -46,6 +47,7 @@ agent
   agent.explore_budget.build_docs 16
   agent.explore_budget.build_analysis 12
   agent.build_thinking         plan_step
+  agent.plan_think             on_reject
   agent.think_mode             auto
   agent.think_answer           auto
   agent.think_lookup           auto
@@ -118,6 +120,8 @@ store
   store.migrate_timeout_ms     15000
 stats
   stats.insert_timeout_ms      2000
+docs
+  docs.render_timeout_ms       60000
 language
   language.mode                auto
   language.languages           ["en", "fr"]

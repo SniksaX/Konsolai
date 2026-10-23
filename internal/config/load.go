@@ -222,6 +222,9 @@ func normalizeLanguage(c *Config) {
 	if c.Agent.BuildThinking == "" {
 		c.Agent.BuildThinking = "plan_step"
 	}
+	if c.Agent.PlanThink == "" {
+		c.Agent.PlanThink = "on_reject"
+	}
 }
 
 func normalizeUI(c *Config) {

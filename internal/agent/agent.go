@@ -47,41 +47,43 @@ type Confirmer interface {
 }
 
 type Config struct {
-	Client           *llm.Client
-	Tools            *tools.Registry
-	Confirmer        Confirmer
-	Out              io.Writer
-	MaxSteps         int
-	ThinkingPolicy   ThinkingPolicy
-	RequirePlan      bool
-	Prompt           string
-	Temperature      float64
-	Recorder         Recorder
-	History          []llm.Message
-	AutoApprove      bool
-	Approve          string
-	TopP             float64
-	ExploreBudget    int
-	ExploreNote      string
-	Trace            bool
-	SessionID        string
-	Intent           string
-	Task             string
-	RouterTime       time.Duration
-	Err              io.Writer
-	Stats            *Stats
-	Plain            bool
-	HideStats        bool
-	OnShell          func(output string)
-	Guard            *safety.Guard
-	ResumePlan       bool
-	PlanFiles        []string
-	PlanCmds         []string
-	PlanText         string
-	TokenCap         int
-	ElideTrigger     float64
-	ElideTarget      float64
-	IdenticalRejects int
+	Client            *llm.Client
+	Tools             *tools.Registry
+	Confirmer         Confirmer
+	Out               io.Writer
+	MaxSteps          int
+	ThinkingPolicy    ThinkingPolicy
+	RequirePlan       bool
+	Prompt            string
+	Temperature       float64
+	Recorder          Recorder
+	History           []llm.Message
+	AutoApprove       bool
+	Approve           string
+	TopP              float64
+	ExploreBudget     int
+	ExploreNote       string
+	Trace             bool
+	SessionID         string
+	Intent            string
+	Task              string
+	RouterTime        time.Duration
+	Err               io.Writer
+	Stats             *Stats
+	Plain             bool
+	HideStats         bool
+	OnShell           func(output string)
+	Guard             *safety.Guard
+	ResumePlan        bool
+	PlanFiles         []string
+	PlanCmds          []string
+	PlanText          string
+	TokenCap          int
+	ThinkingMaxTokens int
+	PlanThink         string
+	ElideTrigger      float64
+	ElideTarget       float64
+	IdenticalRejects  int
 }
 
 type Stats struct {
@@ -91,7 +93,18 @@ type Stats struct {
 	PromptTokens     int
 	LastPromptTokens int
 	CompletionTokens int
+	ReasoningTokens  int
 	RouterTime       time.Duration
+	Rejects          int
+	OutsidePlan      int
+	MaxStep          time.Duration
+}
+
+func (s *Stats) noteModel(d time.Duration) {
+	s.ModelTime += d
+	if d > s.MaxStep {
+		s.MaxStep = d
+	}
 }
 
 var (
@@ -185,6 +198,9 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		if cfg.Stats != nil {
 			*cfg.Stats = st
 		}
+		if cfg.Trace && cfg.Err != nil {
+			fmt.Fprintln(cfg.Err, FormatStatsLine(st))
+		}
 		if skipSummary || cfg.HideStats {
 			return
 		}
@@ -268,6 +284,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			live.SetLabel(ProgressLabel(label, p))
 		}
 		t0 := time.Now()
+		applyThinkBudget(&opts, cfg.thinkingBudget())
 		msg, usage, err := cfg.Client.Complete(ctx, msgs, stepSpecs, opts)
 		modelElapsed := time.Since(t0)
 		live.Stop()
@@ -286,6 +303,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				live.SetLabel(ProgressLabel(label, p))
 			}
 			t0 = time.Now()
+			applyThinkBudget(&opts, cfg.thinkingBudget())
 			msg, usage, err = cfg.Client.Complete(ctx, msgs, stepSpecs, opts)
 			modelElapsed += time.Since(t0)
 			live.Stop()
@@ -296,22 +314,24 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		if err != nil {
 			return err
 		}
-		if cfg.ThinkingPolicy == ThinkPlanStep && !think && !planApproved && hasProposePlan(msg) && proposePlanValid(cfg.Tools, msg) {
+		if cfg.ThinkingPolicy == ThinkPlanStep && !think && !planApproved && hasProposePlan(msg) && (!proposePlanValid(cfg.Tools, msg) || planThinkAlways(cfg.PlanThink)) {
 			if cfg.Trace {
 				st.Steps++
-				st.ModelTime += modelElapsed
+				st.noteModel(modelElapsed)
 				st.PromptTokens += usage.PromptTokens
 				st.CompletionTokens += usage.CompletionTokens
+				st.ReasoningTokens += usage.ReasoningTokens
 				if usage.PromptTokens > 0 {
 					st.LastPromptTokens = usage.PromptTokens
 				}
 				dumpTrace(cfg.SessionID, st.Steps, msg)
-				PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, cfg.Client.ContextWindow(), FormatTraceCalls(msg.ToolCalls))
+				PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, usage.ReasoningTokens, cfg.Client.ContextWindow(), FormatTraceCalls(msg.ToolCalls))
 			} else {
 				st.Steps++
-				st.ModelTime += modelElapsed
+				st.noteModel(modelElapsed)
 				st.PromptTokens += usage.PromptTokens
 				st.CompletionTokens += usage.CompletionTokens
+				st.ReasoningTokens += usage.ReasoningTokens
 				if usage.PromptTokens > 0 {
 					st.LastPromptTokens = usage.PromptTokens
 				}
@@ -337,6 +357,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				live.SetLabel(ProgressLabel(label, p))
 			}
 			t0 := time.Now()
+			applyThinkBudget(&opts, cfg.thinkingBudget())
 			msg, usage, err = cfg.Client.Complete(ctx, msgs, stepSpecs, opts)
 			modelElapsed = time.Since(t0)
 			live.Stop()
@@ -355,6 +376,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					live.SetLabel(ProgressLabel(label, p))
 				}
 				t0 = time.Now()
+				applyThinkBudget(&opts, cfg.thinkingBudget())
 				msg, usage, err = cfg.Client.Complete(ctx, msgs, stepSpecs, opts)
 				modelElapsed += time.Since(t0)
 				live.Stop()
@@ -370,15 +392,16 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			msg.Content = ""
 		}
 		st.Steps++
-		st.ModelTime += modelElapsed
+		st.noteModel(modelElapsed)
 		st.PromptTokens += usage.PromptTokens
 		st.CompletionTokens += usage.CompletionTokens
+		st.ReasoningTokens += usage.ReasoningTokens
 		if usage.PromptTokens > 0 {
 			st.LastPromptTokens = usage.PromptTokens
 		}
 		if cfg.Trace {
 			dumpTrace(cfg.SessionID, st.Steps, msg)
-			PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, cfg.Client.ContextWindow(), FormatTraceCalls(msg.ToolCalls))
+			PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, usage.ReasoningTokens, cfg.Client.ContextWindow(), FormatTraceCalls(msg.ToolCalls))
 		}
 		narration := trimLeadingBlanks(msg.Content)
 		if strings.TrimSpace(narration) != "" && len(msg.ToolCalls) > 0 && !hasFinishCall(msg) {
@@ -441,6 +464,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				prepRejects = 0
 				reason := "unknown tool " + call.Function.Name
 				printReject(cfg.Out, call.Function.Name, call.Function.Arguments, reason)
+				st.Rejects++
 				tm := llm.Message{
 					Role:       llm.RoleTool,
 					Content:    "error: " + reason,
@@ -458,6 +482,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					return err
 				}
 				printReject(cfg.Out, call.Function.Name, call.Function.Arguments, err.Error())
+				st.Rejects++
 				content := "error: " + err.Error()
 				failKey := call.Function.Name + "\x00" + call.Function.Arguments
 				if failKey == prepRejectKey {
@@ -494,6 +519,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			if kind == tools.Mutating && cfg.RequirePlan && !planApproved {
 				reason := "call propose_plan first"
 				printReject(cfg.Out, call.Function.Name, call.Function.Arguments, reason)
+				st.Rejects++
 				tm := llm.Message{
 					Role:       llm.RoleTool,
 					Content:    "error: " + reason,
@@ -546,6 +572,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				}
 				if outside {
 					summary = "⚠ outside plan: " + summary
+					st.OutsidePlan++
 				}
 			}
 			if inPlanHit {
@@ -554,6 +581,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			if outside && cfg.Approve == "in_plan" && kind == tools.Mutating {
 				reason := "outside the plan"
 				printReject(cfg.Out, call.Function.Name, call.Function.Arguments, reason)
+				st.Rejects++
 				tm := llm.Message{Role: llm.RoleTool, Content: "error: " + reason, ToolCallID: call.ID}
 				msgs = append(msgs, tm)
 				_ = rec.Message(ctx, tm)
@@ -591,6 +619,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					}
 					switch d {
 					case ui.Reject:
+						st.Rejects++
 						if kind == tools.Plan {
 							planRejected = true
 						}
@@ -683,7 +712,10 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			elapsed := time.Since(start)
 			st.ToolTime += elapsed
 			if err != nil {
-				return err
+				if ctx.Err() != nil {
+					return err
+				}
+				result = tools.Result{Output: err.Error(), IsError: true, Meta: err.Error()}
 			}
 			if result.Final {
 				result.Output = longerText(narration, result.Output)
@@ -867,7 +899,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		}
 	} else {
 		st.Steps++
-		st.ModelTime += time.Since(t0)
+		st.noteModel(time.Since(t0))
 		st.PromptTokens += usage.PromptTokens
 		st.CompletionTokens += usage.CompletionTokens
 		if usage.PromptTokens > 0 {

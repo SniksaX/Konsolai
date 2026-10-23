@@ -213,3 +213,60 @@ func TestMatchPlanTraceRuleFormat(t *testing.T) {
 		t.Fatalf("rule %q", hits[0].Rule)
 	}
 }
+
+func TestMatchPlanBenchStepsAndVariants(t *testing.T) {
+	commit := Plan{
+		Files: []string{".gitignore"},
+		Text:  `Create a .gitignore ignoring node_modules/, dist/ and .env, then commit only that file with message "Add gitignore".`,
+	}
+	ok, hits := MatchPlan(commit, `git add .gitignore && git commit -m "Add gitignore"`)
+	if !ok {
+		t.Fatalf("git add after commit: %v", hits)
+	}
+	if !strings.HasPrefix(hits[0].Rule, "R4 git add") {
+		t.Fatalf("add %q", hits[0].Rule)
+	}
+	if !strings.Contains(hits[1].Rule, "git commit") {
+		t.Fatalf("commit %q", hits[1].Rule)
+	}
+
+	steps := "Rename the five notes\n" +
+		"git mv notes/groceries.txt notes/groceries.md\n" +
+		"git mv notes/ideas.txt notes/ideas.md\n" +
+		"git mv notes/monday.txt notes/monday.md\n" +
+		"git mv notes/reading.txt notes/reading.md\n" +
+		"git mv notes/tuesday.txt notes/tuesday.md"
+	ok, hits = MatchPlan(Plan{Text: steps}, "git mv notes/groceries.txt notes/groceries.md && git mv notes/ideas.txt notes/ideas.md && git mv notes/monday.txt notes/monday.md && git mv notes/reading.txt notes/reading.md && git mv notes/tuesday.txt notes/tuesday.md")
+	if !ok {
+		t.Fatalf("git mv steps: %v", hits)
+	}
+	for _, h := range hits {
+		if !h.OK || !strings.HasPrefix(h.Rule, "R2 ") {
+			t.Fatalf("mv %q", h.Rule)
+		}
+	}
+
+	node := Plan{Text: "Add a --json flag to cli.js so `node cli.js 1 2 3 --json` prints {\"sum\":6}, keeping plain `6` output without the flag."}
+	ok, hits = MatchPlan(node, "node cli.js 1 2 3 --json && node cli.js 1 2 3")
+	if !ok {
+		t.Fatalf("node variants: %v", hits)
+	}
+	for _, h := range hits {
+		if !strings.HasPrefix(h.Rule, "R2b in plan (variant)") {
+			t.Fatalf("variant %q", h.Rule)
+		}
+	}
+
+	ok, hits = MatchPlan(node, "rm -rf out")
+	if ok {
+		t.Fatalf("undeclared rm must prompt: %v", hits)
+	}
+	ok, _ = MatchPlan(Plan{Files: []string{"out"}, Text: "remove build output"}, "rm -rf /tmp/x")
+	if ok {
+		t.Fatal("rm of a different path must prompt")
+	}
+	ok, hits = MatchPlan(Plan{Text: "clean\nrm -rf out"}, "rm -rf out")
+	if !ok || !strings.HasPrefix(hits[0].Rule, "R2 ") {
+		t.Fatalf("declared rm %v", hits)
+	}
+}

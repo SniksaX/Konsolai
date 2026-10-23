@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHTMLGoldenStructure(t *testing.T) {
@@ -130,6 +131,10 @@ func TestMermaidHTMLInlineSVG(t *testing.T) {
 	if strings.Contains(html, "SIL Open Font License") || strings.Contains(html, "@font-face") {
 		t.Fatalf("font license left in html")
 	}
+	if os.Getenv("KONSOLAI_TEST_TRACE") == "1" {
+		tr := LastRenderTrace()
+		t.Logf("launch=%s page=%s run=%s dump=%s", tr.Launch, tr.Page, tr.Run, tr.Dump)
+	}
 }
 
 func TestMermaidSyntaxErrorNamesDiagram(t *testing.T) {
@@ -238,4 +243,56 @@ func skipWithoutChrome(t *testing.T) {
 		return
 	}
 	t.Skip("needs chromium")
+}
+
+func TestChromeNoiseFilterCILines(t *testing.T) {
+	stderr := []byte(strings.Join([]string{
+		`[99:99:ERROR:bus.cc:1] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")`,
+		`Fontconfig warning: "/etc/fonts/fonts.conf", line 1: not well-formed`,
+		`UPower: Failed to query upower`,
+		`ERROR:gpu_process_host.cc] GPU process isn't usable. Goodbye.`,
+	}, "\n"))
+	got := chromeFail(stderr, context.DeadlineExceeded, 30*time.Second, "diagram render")
+	if got != "diagram render did not finish within 30s" {
+		t.Fatalf("%q", got)
+	}
+	low := strings.ToLower(got)
+	for _, noise := range []string{"bus", "fontconfig", "upower", "gpu"} {
+		if strings.Contains(low, noise) {
+			t.Fatalf("noise %q leaked: %s", noise, got)
+		}
+	}
+	cmd := exec.Command("sh", "-c", "exit 7")
+	err := cmd.Run()
+	got = chromeFail(stderr, err, 30*time.Second, "diagram render")
+	if got != "exit status 7" {
+		t.Fatalf("noise-only exit: %q", got)
+	}
+	got = chromeFail([]byte(string(stderr)+"\nrender failed: syntax\n"), err, 30*time.Second, "diagram render")
+	if got != "exit status 7: render failed: syntax" {
+		t.Fatalf("meaningful: %q", got)
+	}
+}
+
+func TestRenderTimeoutScales(t *testing.T) {
+	prev := RenderTimeout()
+	t.Cleanup(func() { SetRenderTimeout(prev) })
+	SetRenderTimeout(60 * time.Second)
+	if scaledRenderTimeout() != 60*time.Second {
+		t.Fatalf("%s", scaledRenderTimeout())
+	}
+	t.Setenv("KONSOLAI_TEST_TIMEOUT_SCALE", "5")
+	if scaledRenderTimeout() != 300*time.Second {
+		t.Fatalf("%s", scaledRenderTimeout())
+	}
+}
+
+func TestChromeEnvDropsBus(t *testing.T) {
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/tmp/bus")
+	t.Setenv("DBUS_SESSION_BUS_PID", "1")
+	for _, e := range chromeEnv() {
+		if strings.HasPrefix(e, "DBUS_SESSION_BUS_") {
+			t.Fatalf("kept %s", e)
+		}
+	}
 }

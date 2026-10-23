@@ -383,27 +383,29 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		})
 		reg = registryForRAG(reg, r.Profile.RAGEnabled())
 		cfg := agent.Config{
-			Client:         client,
-			Tools:          reg,
-			Confirmer:      confirmer,
-			Out:            r.out(),
-			Recorder:       rec,
-			History:        history,
-			AutoApprove:    req.Yes || r.Profile.Agent.Approve == "all_safe",
-			Approve:        r.Profile.Agent.Approve,
-			Prompt:         agent.ActPrompt + "\n" + lang,
-			ThinkingPolicy: policyFor(*dec, r.Profile, thinkMode),
-			Trace:          req.Trace,
-			SessionID:      sessionID,
-			Intent:         string(dec.Intent),
-			RouterTime:     routerTime,
-			Err:            r.errw(),
-			Plain:          req.Plain,
-			HideStats:      !r.Profile.ShowStatsLine(),
-			Task:           string(dec.Task),
-			Stats:          &agent.Stats{},
-			OnShell:        r.RememberShell,
-			Guard:          sg,
+			Client:            client,
+			Tools:             reg,
+			Confirmer:         confirmer,
+			Out:               r.out(),
+			Recorder:          rec,
+			History:           history,
+			AutoApprove:       req.Yes || r.Profile.Agent.Approve == "all_safe",
+			Approve:           r.Profile.Agent.Approve,
+			Prompt:            agent.ActPrompt + "\n" + lang,
+			ThinkingPolicy:    policyFor(*dec, r.Profile, thinkMode),
+			ThinkingMaxTokens: r.Profile.ThinkingMaxTokens(),
+			PlanThink:         r.Profile.PlanThink(),
+			Trace:             req.Trace,
+			SessionID:         sessionID,
+			Intent:            string(dec.Intent),
+			RouterTime:        routerTime,
+			Err:               r.errw(),
+			Plain:             req.Plain,
+			HideStats:         !r.Profile.ShowStatsLine(),
+			Task:              string(dec.Task),
+			Stats:             &agent.Stats{},
+			OnShell:           r.RememberShell,
+			Guard:             sg,
 		}
 		if files, cmds, text, ok := agent.RestoreApprovedPlan(history); ok && strings.Contains(req.Text, continueNote) {
 			cfg.ResumePlan = true
@@ -537,7 +539,7 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 	}}
 	tokCap := r.Profile.AnswerEffortCap(string(dec.EffectiveEffort()))
 	answerTools := answerEscalateTools(client, main)
-	out, calls, usage, streamErr := streamAnswer(ctx, client, msgs, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap, answerTools)
+	out, calls, usage, streamErr := streamAnswer(ctx, client, msgs, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap, answerTools, r.Profile.ThinkingMaxTokens())
 	cut := errors.Is(streamErr, llm.ErrTruncated)
 	if streamErr != nil && !cut && !usedMain && !gate.released {
 		if req.Trace {
@@ -547,12 +549,12 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 		usedMain = true
 		gate.reset()
 		answerTools = answerEscalateTools(client, main)
-		out, calls, usage, streamErr = streamAnswer(ctx, client, msgs, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap, answerTools)
+		out, calls, usage, streamErr = streamAnswer(ctx, client, msgs, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap, answerTools, r.Profile.ThinkingMaxTokens())
 		cut = errors.Is(streamErr, llm.ErrTruncated)
 	}
 	if streamErr == nil && strings.TrimSpace(out) == "" && len(calls) == 0 && !gate.released {
 		gate.reset()
-		out, calls, usage, streamErr = streamAnswer(ctx, client, []llm.Message{system, user}, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap, answerTools)
+		out, calls, usage, streamErr = streamAnswer(ctx, client, []llm.Message{system, user}, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap, answerTools, r.Profile.ThinkingMaxTokens())
 		cut = errors.Is(streamErr, llm.ErrTruncated)
 	}
 	modelTime := time.Since(t0)
@@ -605,13 +607,16 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 	st := agent.Stats{
 		Steps:            1,
 		ModelTime:        modelTime,
+		MaxStep:          modelTime,
 		PromptTokens:     usage.PromptTokens,
 		LastPromptTokens: usage.PromptTokens,
 		CompletionTokens: usage.CompletionTokens,
+		ReasoningTokens:  usage.ReasoningTokens,
 		RouterTime:       routerTime,
 	}
 	if req.Trace {
-		agent.PrintTrace(r.errw(), 1, think, modelTime, usage.PromptTokens, usage.CompletionTokens, main.ContextWindow(), nil)
+		agent.PrintTrace(r.errw(), 1, think, modelTime, usage.PromptTokens, usage.CompletionTokens, usage.ReasoningTokens, main.ContextWindow(), nil)
+		fmt.Fprintln(r.errw(), agent.FormatStatsLine(st))
 	}
 	if r.Profile.ShowStatsLine() {
 		agent.PrintSummary(r.errw(), string(dec.Intent), st)
@@ -641,7 +646,7 @@ func SanitizeAnswerHistory(hist []llm.Message) []llm.Message {
 }
 
 func StreamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, think, plain bool, outw, errw io.Writer, temp, topP float64) (string, llm.Usage, error) {
-	out, _, usage, err := streamAnswer(ctx, client, msgs, think, plain, outw, errw, temp, topP, 0, nil)
+	out, _, usage, err := streamAnswer(ctx, client, msgs, think, plain, outw, errw, temp, topP, 0, nil, 0)
 	return out, usage, err
 }
 
@@ -652,7 +657,7 @@ func answerEscalateTools(client, main *llm.Client) []llm.ToolSpec {
 	return []llm.ToolSpec{EscalateTool}
 }
 
-func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, think, plain bool, outw, errw io.Writer, temp, topP float64, tokenCap int, tools []llm.ToolSpec) (string, []llm.ToolCall, llm.Usage, error) {
+func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, think, plain bool, outw, errw io.Writer, temp, topP float64, tokenCap int, tools []llm.ToolSpec, thinkBudget int) (string, []llm.ToolCall, llm.Usage, error) {
 	if outw == nil {
 		outw = os.Stdout
 	}
@@ -690,8 +695,15 @@ func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 	if temp <= 0 {
 		temp = 0.3
 	}
+	budget := 0
+	if think {
+		budget = thinkBudget
+		if budget <= 0 {
+			budget = 4096
+		}
+	}
 	msg, usage, err := client.StreamTools(ctx, msgs, tools, llm.ChatOptions{
-		Thinking: think, Temperature: temp, TopP: topP, MaxTokens: maxTok,
+		Thinking: think, ThinkingBudget: budget, Temperature: temp, TopP: topP, MaxTokens: maxTok,
 		OnProgress: func(p llm.Progress) { live.SetLabel(agent.ProgressLabel("thinking", p)) },
 	}, func(delta string) error {
 		s := filter.Write(delta)

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"syscall"
@@ -94,6 +95,76 @@ type shellAction struct {
 
 var reCD = regexp.MustCompile(`(^|[;&|(]\s*)cd(\s|$)`)
 
+// rewriteLeadingCD turns a leading "cd DIR && rest" or "cd DIR; rest" into
+// cwd=DIR and the remaining command. Other cd uses stay in the command.
+func rewriteLeadingCD(cmd, cwd string) (string, string, bool) {
+	s := strings.TrimLeft(cmd, " \t\n")
+	if len(s) < 3 || !strings.HasPrefix(s, "cd") || (s[2] != ' ' && s[2] != '\t') {
+		return cmd, cwd, false
+	}
+	i := 2
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+		i++
+	}
+	dir, next, ok := takeShellWord(s, i)
+	if !ok || dir == "" || strings.HasPrefix(dir, "-") {
+		return cmd, cwd, false
+	}
+	for next < len(s) && (s[next] == ' ' || s[next] == '\t') {
+		next++
+	}
+	if next >= len(s) {
+		return cmd, cwd, false
+	}
+	var sep int
+	switch {
+	case strings.HasPrefix(s[next:], "&&"):
+		sep = 2
+	case s[next] == ';':
+		sep = 1
+	default:
+		return cmd, cwd, false
+	}
+	rest := strings.TrimSpace(s[next+sep:])
+	if rest == "" {
+		return cmd, cwd, false
+	}
+	base := strings.TrimSpace(cwd)
+	if base == "" || base == "." {
+		cwd = dir
+	} else if filepath.IsAbs(dir) || strings.HasPrefix(dir, "~") {
+		cwd = dir
+	} else {
+		cwd = filepath.Join(base, dir)
+	}
+	return rest, cwd, true
+}
+
+func takeShellWord(s string, i int) (string, int, bool) {
+	if i >= len(s) {
+		return "", i, false
+	}
+	if s[i] == '\'' || s[i] == '"' {
+		q := s[i]
+		j := i + 1
+		for j < len(s) && s[j] != q {
+			j++
+		}
+		if j >= len(s) {
+			return "", i, false
+		}
+		return s[i+1 : j], j + 1, true
+	}
+	j := i
+	for j < len(s) && s[j] != ' ' && s[j] != '\t' && s[j] != ';' && s[j] != '&' && s[j] != '|' && s[j] != '\n' {
+		j++
+	}
+	if j == i {
+		return "", i, false
+	}
+	return s[i:j], j, true
+}
+
 var shellQuietFor = time.Second
 
 func (t *shellTool) Prepare(rawArgs string) (Action, error) {
@@ -103,23 +174,28 @@ func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 	if err := dec.Decode(&args); err != nil {
 		return nil, fmt.Errorf("tools: decode run_shell: %w", err)
 	}
-	if strings.TrimSpace(args.Cmd) == "" {
+	cmd := strings.TrimSpace(args.Cmd)
+	if cmd == "" {
 		return nil, errors.New("tools: run_shell: cmd is required")
 	}
-	if reCD.MatchString(args.Cmd) {
+	if rewritten, dir, ok := rewriteLeadingCD(cmd, args.Cwd); ok {
+		cmd = rewritten
+		args.Cwd = dir
+	}
+	if reCD.MatchString(cmd) {
 		return nil, errors.New("do not use cd; set the cwd argument instead (relative to the current directory)")
 	}
-	if err := t.guard.CheckCommand(args.Cmd); err != nil {
+	if err := t.guard.CheckCommand(cmd); err != nil {
 		return nil, err
 	}
-	if blocksExport(args.Cmd) {
+	if blocksExport(cmd) {
 		return nil, errors.New("use the export_doc tool for diagrams and PDF/HTML export")
 	}
-	ro := safety.IsReadOnlyCommand(args.Cmd)
+	ro := safety.IsReadOnlyCommand(cmd)
 	if t.readOnlyOnly && !ro {
 		return nil, ErrLookupMutating
 	}
-	if t.docsTask && !ro && docsBlockedCmd(args.Cmd) {
+	if t.docsTask && !ro && docsBlockedCmd(cmd) {
 		return nil, errors.New(DocsSourceReject)
 	}
 	kind := Mutating
@@ -132,6 +208,13 @@ func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 	}
 	resolved, err := t.guard.ResolvePath(cwd)
 	if err != nil {
+		var denied *safety.DeniedError
+		if errors.As(err, &denied) {
+			return nil, fmt.Errorf("cwd outside the project: %s", cwd)
+		}
+		return nil, err
+	}
+	if err := t.guard.CheckCommandPaths(cmd, resolved); err != nil {
 		return nil, err
 	}
 	sec := args.TimeoutSec
@@ -142,7 +225,7 @@ func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 	if sec < 1 || sec > maxSec {
 		return nil, fmt.Errorf("tools: run_shell: timeout_sec must be between 1 and %d", maxSec)
 	}
-	return &shellAction{cmd: args.Cmd, cwd: resolved, timeout: time.Duration(sec) * time.Second, waitDelay: t.waitDelay, out: t.out, kind: kind, displayLines: t.displayLines}, nil
+	return &shellAction{cmd: cmd, cwd: resolved, timeout: time.Duration(sec) * time.Second, waitDelay: t.waitDelay, out: t.out, kind: kind, displayLines: t.displayLines}, nil
 }
 
 func (a *shellAction) Summary() string { return "run: " + CommandHeadline(a.cmd) }
@@ -156,6 +239,14 @@ func (a *shellAction) Kind() ActionKind    { return a.kind }
 func (a *shellAction) PlanCommand() string { return a.cmd }
 
 func (a *shellAction) Run(ctx context.Context) (Result, error) {
+	if fi, err := os.Stat(a.cwd); err != nil || !fi.IsDir() {
+		msg := fmt.Sprintf("cwd does not exist: %s", a.cwd)
+		if err != nil && !os.IsNotExist(err) {
+			msg = err.Error()
+		}
+		return Result{Output: msg, IsError: true, Meta: msg}, nil
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, a.timeout)
 	defer cancel()
 

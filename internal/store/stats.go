@@ -13,6 +13,7 @@ type TurnStat struct {
 	Endpoint         string
 	PromptTokens     int
 	CompletionTokens int
+	ReasoningTokens  int
 	ModelMS          int
 }
 
@@ -32,10 +33,10 @@ func (s *Store) RecordTurnStat(ctx context.Context, st TurnStat) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO turn_stats (
 			session_id, intent, model, endpoint,
-			prompt_tokens, completion_tokens, model_ms
-		) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)`,
+			prompt_tokens, completion_tokens, reasoning_tokens, model_ms
+		) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8)`,
 		sid, st.Intent, st.Model, st.Endpoint,
-		st.PromptTokens, st.CompletionTokens, st.ModelMS)
+		st.PromptTokens, st.CompletionTokens, st.ReasoningTokens, st.ModelMS)
 	if err != nil {
 		return fmt.Errorf("store: record turn stat: %w", err)
 	}
