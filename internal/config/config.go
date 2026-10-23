@@ -46,6 +46,7 @@ type Config struct {
 	Tools    Tools            `yaml:"tools"`
 	Store    Store            `yaml:"store"`
 	Stats    Stats            `yaml:"stats"`
+	Docs     Docs             `yaml:"docs"`
 }
 
 // Model is one named chat endpoint. Context 0 means the server reports the window.
@@ -68,6 +69,7 @@ type Roles struct {
 type LLM struct {
 	IdleTimeoutSeconds int          `yaml:"idle_timeout_seconds"`
 	MaxTokens          MaxTokens    `yaml:"max_tokens"`
+	ThinkingMaxTokens  int          `yaml:"thinking_max_tokens"`
 	Temperature        Temperatures `yaml:"temperature"`
 	TopP               float64      `yaml:"top_p"`
 	Retries            int          `yaml:"retries"`
@@ -116,6 +118,7 @@ type Agent struct {
 	MaxSteps         Steps         `yaml:"max_steps"`
 	ExploreBudget    ExploreBudget `yaml:"explore_budget"`
 	BuildThinking    string        `yaml:"build_thinking"`
+	PlanThink        string        `yaml:"plan_think"`
 	ThinkMode        string        `yaml:"think_mode"`
 	ThinkAnswer      string        `yaml:"think_answer"`
 	ThinkLookup      string        `yaml:"think_lookup"`
@@ -258,6 +261,10 @@ type ToolShell struct {
 type Store struct {
 	QueryTimeoutMS   int `yaml:"query_timeout_ms"`
 	MigrateTimeoutMS int `yaml:"migrate_timeout_ms"`
+}
+
+type Docs struct {
+	RenderTimeoutMS int `yaml:"render_timeout_ms"`
 }
 
 type Stats struct {
@@ -518,6 +525,14 @@ func (c Config) BuildThink() string {
 	return "plan_step"
 }
 
+// PlanThink is always (the plan step thinks) or on_reject (think only when the plan fails validation).
+func (c Config) PlanThink() string {
+	if strings.EqualFold(strings.TrimSpace(c.Agent.PlanThink), "always") {
+		return "always"
+	}
+	return "on_reject"
+}
+
 // AnswerThinking is auto, on, or off. Empty means auto (high effort only).
 func (c Config) AnswerThinking() string {
 	s := strings.TrimSpace(c.Agent.ThinkAnswer)
@@ -560,6 +575,10 @@ func (c Config) AnswerEffortCap(effort string) int {
 	default:
 		return 0
 	}
+}
+
+func (c Config) ThinkingMaxTokens() int {
+	return nonzero(c.LLM.ThinkingMaxTokens, 4096)
 }
 
 func (c Config) TokenCap(intent string) int {

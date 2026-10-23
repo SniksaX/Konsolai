@@ -52,6 +52,19 @@ func TestStatsRenderGolden(t *testing.T) {
 	}
 }
 
+func TestStatsRenderThinkColumn(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("TERM", "dumb")
+	got := renderStats("week", store.UsageReport{
+		Models: []store.ModelStat{
+			{Model: "main-model", Calls: 1, PromptTokens: 10, CompletionTokens: 20, ReasoningTokens: 7100},
+		},
+	})
+	if !strings.Contains(got, "think") || !strings.Contains(got, "7100") {
+		t.Fatalf("%s", got)
+	}
+}
+
 func TestPadCellUsesDisplayWidth(t *testing.T) {
 	if got := padCell("ab…", 5, false); got != "ab…  " {
 		t.Fatalf("left %q", got)

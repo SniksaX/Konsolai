@@ -172,6 +172,8 @@ var keyTable = []Key{
 		func(c *Config, v int) { c.LLM.MaxTokens.Act = v }, func(c Config) int { return c.LLM.MaxTokens.Act }),
 	ki("llm.max_tokens.build", "build intent token cap", 12288,
 		func(c *Config, v int) { c.LLM.MaxTokens.Build = v }, func(c Config) int { return c.LLM.MaxTokens.Build }),
+	ki("llm.thinking_max_tokens", "thinking token cap", 4096,
+		func(c *Config, v int) { c.LLM.ThinkingMaxTokens = v }, func(c Config) int { return c.LLM.ThinkingMaxTokens }).named("think.max").when(ApplyNext),
 	ktemp("llm.temperature.answer", "answer sampling temperature", 0.3,
 		func(c *Config, v float64) { c.LLM.Temperature.Answer = v }, func(c Config) float64 { return c.LLM.Temperature.Answer }).named("temperature").when(ApplyNext),
 	ktemp("llm.temperature.lookup", "lookup sampling temperature", 0.2,
@@ -229,6 +231,8 @@ var keyTable = []Key{
 		func(c *Config, v int) { c.Agent.ExploreBudget.BuildAnalysis = v }, func(c Config) int { return c.Agent.ExploreBudget.BuildAnalysis }),
 	ks("agent.build_thinking", "plan_step | until_plan", "KONSOLAI_BUILD_THINKING", "plan_step",
 		func(c *Config, v string) { c.Agent.BuildThinking = v }, func(c Config) string { return c.Agent.BuildThinking }).allowed("plan_step", "until_plan").when(ApplyNext),
+	ks("agent.plan_think", "always | on_reject", "", "on_reject",
+		func(c *Config, v string) { c.Agent.PlanThink = v }, func(c Config) string { return c.Agent.PlanThink }).allowed("always", "on_reject").when(ApplyNext),
 	ks("agent.think_mode", "auto | on | off", "", "auto",
 		func(c *Config, v string) { c.Agent.ThinkMode = v }, func(c Config) string { return c.Agent.ThinkMode }).allowed("auto", "on", "off").named("think").when(ApplyNow),
 	ks("agent.think_answer", "auto | on | off", "", "auto",
@@ -373,6 +377,9 @@ var keyTable = []Key{
 		func(c *Config, v int) { c.Store.MigrateTimeoutMS = v }, func(c Config) int { return c.Store.MigrateTimeoutMS }),
 	km("stats.insert_timeout_ms", "turn stat insert limit", 2000,
 		func(c *Config, v int) { c.Stats.InsertTimeoutMS = v }, func(c Config) int { return c.Stats.InsertTimeoutMS }),
+
+	km("docs.render_timeout_ms", "mermaid diagram render limit", 60000,
+		func(c *Config, v int) { c.Docs.RenderTimeoutMS = v }, func(c Config) int { return c.Docs.RenderTimeoutMS }).named("docs").when(ApplyNow),
 
 	ks("language.mode", "auto | en | fr", "", "auto",
 		func(c *Config, v string) { c.Language.Mode = v }, func(c Config) string { return c.Language.Mode }).allowed("auto", "en", "fr").named("language").when(ApplyNext),

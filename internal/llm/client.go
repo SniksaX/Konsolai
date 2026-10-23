@@ -219,6 +219,7 @@ type CallInfo struct {
 	Endpoint         string
 	PromptTokens     int
 	CompletionTokens int
+	ReasoningTokens  int
 	ModelMS          int
 }
 
@@ -254,6 +255,7 @@ func (c *Client) observeCall(usage Usage, d time.Duration) {
 		Endpoint:         c.baseURL,
 		PromptTokens:     usage.PromptTokens,
 		CompletionTokens: usage.CompletionTokens,
+		ReasoningTokens:  usage.ReasoningTokens,
 		ModelMS:          ms,
 	})
 }
@@ -438,16 +440,26 @@ type ChatOptions struct {
 	IdleTimeout    time.Duration
 	// ToolChoice is "" (auto), "required", or a function name sent as a named tool_choice.
 	ToolChoice string
+	// ThinkingBudget is the cap for a thinking step. Servers that accept
+	// chat_template_kwargs receive it as thinking_budget. Others get it
+	// added to MaxTokens.
+	ThinkingBudget int
 }
 
 type Usage struct {
 	PromptTokens     int
 	CompletionTokens int
+	ReasoningTokens  int
 }
 
 type usageJSON struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
+	PromptTokens      int                `json:"prompt_tokens"`
+	CompletionTokens  int                `json:"completion_tokens"`
+	CompletionDetails *completionDetails `json:"completion_tokens_details"`
+}
+
+type completionDetails struct {
+	ReasoningTokens int `json:"reasoning_tokens"`
 }
 
 type streamOptions struct {
@@ -491,6 +503,7 @@ type completeResponse struct {
 
 type chatTemplateKwargs struct {
 	EnableThinking bool `json:"enable_thinking"`
+	ThinkingBudget int  `json:"thinking_budget,omitempty"`
 }
 
 type streamDeltaTool struct {
@@ -523,7 +536,24 @@ func usageOf(u *usageJSON) Usage {
 	if u == nil {
 		return Usage{}
 	}
-	return Usage{PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens}
+	out := Usage{PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens}
+	if u.CompletionDetails != nil && u.CompletionDetails.ReasoningTokens > 0 {
+		out.ReasoningTokens = u.CompletionDetails.ReasoningTokens
+	}
+	return out
+}
+
+// EstimateReasoningTokens converts a streamed reasoning length with the
+// calibrated tokens-per-character ratio (chars / (1/ratio)).
+func (c *Client) EstimateReasoningTokens(chars int) int {
+	if c == nil || chars <= 0 {
+		return 0
+	}
+	ratio := c.TokensPerChar()
+	if ratio <= 0 {
+		ratio = defaultTokensPerChar
+	}
+	return int(float64(chars)*ratio + 0.5)
 }
 
 // Complete sends a streaming chat completion and returns the assembled assistant message.
@@ -605,17 +635,25 @@ func (c *Client) completeAttempt(ctx context.Context, msgs []Message, tools []To
 	if err != nil {
 		return Message{}, Usage{}, err, false
 	}
+	maxTok := opts.MaxTokens
+	if opts.Thinking && opts.ThinkingBudget > 0 && !c.sendThinkKwargs {
+		maxTok += opts.ThinkingBudget
+	}
 	reqBody := chatRequest{
 		Model:         model,
 		Messages:      msgs,
 		Stream:        true,
 		Temperature:   opts.Temperature,
 		TopP:          opts.TopP,
-		MaxTokens:     opts.MaxTokens,
+		MaxTokens:     maxTok,
 		StreamOptions: &streamOptions{IncludeUsage: true},
 	}
 	if c.sendThinkKwargs {
-		reqBody.ChatTemplateKwargs = &chatTemplateKwargs{EnableThinking: opts.Thinking}
+		kw := &chatTemplateKwargs{EnableThinking: opts.Thinking}
+		if opts.Thinking && opts.ThinkingBudget > 0 {
+			kw.ThinkingBudget = opts.ThinkingBudget
+		}
+		reqBody.ChatTemplateKwargs = kw
 	}
 	if len(tools) > 0 {
 		reqBody.Tools = tools
@@ -678,7 +716,7 @@ func (c *Client) completeAttempt(ctx context.Context, msgs []Message, tools []To
 		msg, usage, err := decodeJSONCompletion(br, opts)
 		return msg, usage, err, gotBytes
 	}
-	msg, usage, err := readSSE(ctx, reqCtx, br, opts, onDelta)
+	msg, usage, err := readSSE(ctx, reqCtx, br, opts, onDelta, c.TokensPerChar())
 	return msg, usage, err, gotBytes
 }
 
@@ -706,7 +744,7 @@ func decodeJSONCompletion(r io.Reader, opts ChatOptions) (Message, Usage, error)
 	return msg, usageOf(body.Usage), nil
 }
 
-func readSSE(parent, reqCtx context.Context, r io.Reader, opts ChatOptions, onDelta func(string) error) (Message, Usage, error) {
+func readSSE(parent, reqCtx context.Context, r io.Reader, opts ChatOptions, onDelta func(string) error, ratio float64) (Message, Usage, error) {
 	acc := newAccum()
 	prog := newProgress(opts.OnProgress)
 	defer prog.flush()
@@ -749,6 +787,7 @@ func readSSE(parent, reqCtx context.Context, r io.Reader, opts ChatOptions, onDe
 			}
 			reason := d.Reasoning + d.ReasoningContent
 			if reason != "" {
+				acc.reasonChars += len(reason)
 				prog.add(len(reason), 0)
 			}
 			for _, tc := range d.ToolCalls {
@@ -763,10 +802,13 @@ func readSSE(parent, reqCtx context.Context, r io.Reader, opts ChatOptions, onDe
 		return Message{}, Usage{}, mapRequestError(parent, reqCtx, fmt.Errorf("llm: read stream: %w", err))
 	}
 	msg, err := acc.message()
+	if acc.usage.ReasoningTokens == 0 && acc.reasonChars > 0 && ratio > 0 {
+		acc.usage.ReasoningTokens = int(float64(acc.reasonChars)*ratio + 0.5)
+	}
 	if err != nil {
 		return msg, acc.usage, err
 	}
-	if acc.finish == "length" {
+	if acc.finish == "length" && !opts.Thinking {
 		return msg, acc.usage, ErrTruncated
 	}
 	if !acc.saw && msg.Content == "" && len(msg.ToolCalls) == 0 {
@@ -776,11 +818,12 @@ func readSSE(parent, reqCtx context.Context, r io.Reader, opts ChatOptions, onDe
 }
 
 type accum struct {
-	content strings.Builder
-	calls   map[int]*ToolCall
-	finish  string
-	usage   Usage
-	saw     bool
+	content     strings.Builder
+	calls       map[int]*ToolCall
+	finish      string
+	usage       Usage
+	saw         bool
+	reasonChars int
 }
 
 func newAccum() *accum {

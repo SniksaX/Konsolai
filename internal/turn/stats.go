@@ -113,6 +113,7 @@ func (r *Runner) recordCall(info llm.CallInfo) {
 		Endpoint:         endpoint,
 		PromptTokens:     info.PromptTokens,
 		CompletionTokens: info.CompletionTokens,
+		ReasoningTokens:  info.ReasoningTokens,
 		ModelMS:          info.ModelMS,
 	}
 	go func() {

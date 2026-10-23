@@ -150,14 +150,21 @@ func driveThemePicker(t *testing.T, testName, child, keys string) ([]byte, strin
 	v.typeKeys("/theme", func(sc *screen) bool { return strings.Contains(screenPrompt(sc), "/theme") })
 	v.typeKeys("\r", screenHas("◆ build"))
 	if keys != "" {
-		done := func(sc *screen) bool {
-			d := sc.dump()
-			if strings.Contains(keys, "\r") {
-				return strings.Contains(d, "applied now") && !strings.Contains(d, "◆ build")
-			}
-			return !strings.Contains(d, "◆ build") && strings.Contains(d, "main-model")
+		if strings.Contains(keys, "\r") {
+			v.typeKeys(keys, func(sc *screen) bool {
+				return strings.Contains(sc.dump(), "applied now")
+			})
+			v.expect("prompt row", func(sc *screen) bool {
+				return strings.Contains(screenPrompt(sc), "›")
+			})
+		} else {
+			v.typeKeys(keys, func(sc *screen) bool {
+				d := sc.dump()
+				return strings.Contains(d, "main-model") &&
+					strings.Contains(screenPrompt(sc), "›") &&
+					!strings.Contains(d, "◆ build")
+			})
 		}
-		v.typeKeys(keys, done)
 	}
 	return v.raw(), cfg
 }

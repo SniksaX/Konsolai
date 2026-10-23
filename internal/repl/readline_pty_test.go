@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/SniksaX/Konsolai/internal/commands"
@@ -130,34 +131,92 @@ func splitKeys(s string) []string {
 	return out
 }
 
-// typeKeys writes one key at a time. The next key is sent only after the
-// screen or the raw stream shows the app handled the previous one. done is
-// checked on the rendered screen after the last key.
+// typeKeys writes one key at a time. The raw mark is taken before the key.
+// The wait after that mark succeeds only on rendered text: a printable key
+// must show on the prompt, and Enter, Esc, or Tab need the caller's text check.
 func (v *ptyView) typeKeys(keys string, done func(*screen) bool) {
 	v.t.Helper()
 	parts := splitKeys(keys)
 	if len(parts) == 0 {
 		if done != nil {
-			v.expect("screen", done)
+			v.expect("rendered text", done)
 		}
 		return
 	}
+	var acc strings.Builder
 	for i, part := range parts {
-		beforeN := len(v.raw())
-		beforeDump := v.shot().dump()
+		before := v.shot().dump()
 		v.write(part)
+		v.mu.Lock()
+		mark := v.mark
+		v.mu.Unlock()
 		last := i == len(parts)-1
-		v.expect(strconv.Quote(part), func(sc *screen) bool {
-			moved := sc.dump() != beforeDump || len(v.raw()) > beforeN
-			if !moved {
-				return false
+		why := "rendered text"
+		want := ""
+		if printableKey(part) {
+			acc.WriteString(part)
+			want = acc.String()
+			if !(last && done != nil) {
+				why = "prompt shows " + want
 			}
+		}
+		v.see(why, func(sc *screen) bool {
 			if last && done != nil {
 				return done(sc)
 			}
-			return true
+			if printableKey(part) {
+				return screenShows(sc, want)
+			}
+			if sc.dump() != before {
+				return true
+			}
+			raw := v.raw()
+			if mark > len(raw) {
+				return false
+			}
+			return renderedLen(raw[mark:]) > 200
 		})
 	}
+}
+
+func renderedLen(chunk []byte) int {
+	plain := ansiRe.ReplaceAll(chunk, nil)
+	plain = oscRe.ReplaceAll(plain, nil)
+	n := 0
+	for _, r := range string(plain) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			n++
+		}
+	}
+	return n
+}
+
+var oscRe = regexp.MustCompile(`\x1b\][^\x07]*(?:\x07|\x1b\\)`)
+
+func screenShows(sc *screen, want string) bool {
+	if sc == nil || want == "" {
+		return false
+	}
+	if text, _, ok := inputState(sc); ok && strings.Contains(text, want) {
+		return true
+	}
+	for _, row := range sc.cell {
+		if strings.Contains(string(row), want) {
+			return true
+		}
+	}
+	return !strings.HasSuffix(want, " ") && strings.Contains(sc.dump(), want)
+}
+
+func printableKey(part string) bool {
+	if part == "" || strings.HasPrefix(part, "\x1b") {
+		return false
+	}
+	r, size := utf8.DecodeRuneInString(part)
+	if size != len(part) || r == utf8.RuneError {
+		return false
+	}
+	return unicode.IsPrint(r)
 }
 
 func screenHas(s string) func(*screen) bool {
@@ -925,6 +984,11 @@ func driveKeys(t *testing.T, testName, child, keys, done string) string {
 				step = screenHas(done)
 			case part == "/":
 				step = screenHas("/help")
+			case !printableKey(part):
+				step = func(sc *screen) bool {
+					d := sc.dump()
+					return strings.Contains(d, "›") || strings.Contains(d, "ask anything")
+				}
 			}
 			v.typeKeys(part, step)
 		}
