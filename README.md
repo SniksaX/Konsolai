@@ -349,4 +349,4 @@ Working rules and the decisions that must not regress are in [AGENTS.md](AGENTS.
 
 ## License
 
-License: TBD
+MIT. See [LICENSE](LICENSE).
