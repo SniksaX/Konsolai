@@ -109,14 +109,14 @@ Work lands on `dev`. Config keys are the single table in `internal/config/keys.g
 - `turn_stats`: best-effort token and timing rows. Welcome rates use `ModelRate`.
 - `/theme`: picker. Esc does not change the theme or clear the screen. Enter applies the palette in place and does not redraw the welcome.
 - Frame side text removed; theme applies in place. `/set default <name>` restores one key. `/set default all` asks y/n first (`--yes` skips), reports how many keys differ and that models, roles, and endpoints reset, backs up the real file as `config.yaml.bak-<timestamp>` (mode 0600, five kept), then writes the factory document from `InitYAML()`. Decline leaves the file. The symlink stays.
-- Docker: `Dockerfile` targets `base` and `full` (Debian Chromium via `KONSOLAI_CHROME`). The `konsolai` service runs as the host uid (`KONSOLAI_UID` / `KONSOLAI_GID`). `compose.yaml` project `konsolai` starts only the database on `docker compose up -d`. Every variable has a default (password `konsolai`, port `55434`) and there is no env file. `KONSOLAI_DATABASE_URL` in the compose file points at host `db` and overrides the mounted file. The user's `config.yaml` keeps models and roles. Own volume and port, never the developer's database. `scripts/docker.sh` builds, runs the database, and runs the CLI. Inside the container the model server is `http://host.docker.internal:<port>/v1`. The optional embed service defaults to `BAAI/bge-m3` (1024-wide). `BAAI/bge-base-en-v1.5` is a commented 768-wide alternative; it was the previous default because the machine-name guard rejects that id.
+- Docker: `Dockerfile` targets `base` and `full` (Debian Chromium via `KONSOLAI_CHROME`). The `konsolai` service runs as the host uid (`KONSOLAI_UID` / `KONSOLAI_GID`). `compose.yaml` project `konsolai` starts only the database on `docker compose up -d`. Every variable has a default (password `konsolai`, port `55434`) and there is no env file. `KONSOLAI_DATABASE_URL` in the compose file points at host `db` and overrides the mounted file. The user's `config.yaml` keeps models and roles. Own volume and port, never the developer's database. `scripts/docker.sh` builds, runs the database, and runs the CLI. Inside the container the model server is `http://host.docker.internal:<port>/v1`. The optional embed service defaults to `BAAI/bge-m3` (1024-wide). `BAAI/bge-base-en-v1.5` is a commented 768-wide alternative.
 - CI: `.github/workflows/ci.yml` on push and pull request to `dev` and `prod` runs gofmt, vet, and `go test` against pgvector, and builds the base image with no push. Tests that need external binaries skip when they are missing; CI installs poppler-utils and sets `KONSOLAI_CHROME` when Chrome is already on the runner. `.github/workflows/release.yml` runs that test job before it publishes on `v*` tags: `ghcr.io/sniksax/konsolai:<tag>`, `:latest`, and `:<tag>-full`, plus linux amd64 and arm64 binaries. The token is `GITHUB_TOKEN`.
 - Placeholder: inline suggestion only. Enter does not submit it.
 - Footer context meter: last prompt tokens against the window (`ctx_warn_pct`, `ctx_hot_pct`, `ctx_cells`).
 - `propose_plan`: a command-only plan may omit `files` when the plan does not write or edit files.
 - Config keys are one table in `internal/config/keys.go`. Named models and `roles` replace `llm`/`fast` endpoints. `/set` is the configuration command. `TestConfigKeysComplete` walks every scalar leaf.
 - File splits: agent helpers, safety plan rules and segments, welcome paint helpers.
-- README at the repo root. Header image `docs/assets/konsolai-header.svg`. No screenshots in the tree. `TestReadmeSlashTable` locks the slash-command table to `commands.Default()`.
+- README at the repo root. Header image `docs/assets/konsolai-header.svg`. Screenshots live in `docs/assets/screens/`: `welcome.png`, `build.png`, `commands.png`, `themes.png`, and README embeds those four. `TestReadmeSlashTable` locks the slash-command table to `commands.Default()`.
 - `/stats [today|week|all]` (default week) reads `turn_stats` and sessions. Per model: calls, tokens, average tok/s, and p50/p95 of `model_ms`. Per intent: turns, average steps (mean `turn_stats` rows per session), and average wall time (mean `model_ms`; there is no separate wall-clock column). With memory off: `stats need the database (memory is not configured)`.
 - `/doctor` prints one line per check (`✓`, `!`, or `✗`) and a fix for every line that is not `✓`. Exit 1 only when a line is `✗`. Network probes use the welcome probe timeout. Embed dimensions are ok, the mismatch line, or `not configured`.
 - `/save [file]` writes the last answer as Markdown. `/pdf [file]` renders it through `docrender`, the same pipeline as `export_doc`. The default name is a slug of the session title. Overwrite needs `--force`. Paths go through the Guard. `konsolai new "<request>"` is one turn; `/save` then reads that answer from the session store, or from the local last-session file when the database is off.
@@ -124,6 +124,7 @@ Work lands on `dev`. Config keys are the single table in `internal/config/keys.g
 - The first mutating call rejected by the plan gate forces the next request to `propose_plan` (thinking follows `plan_step`) and does not spend the explore budget. Later gate rejects are unchanged. `run_shell` still needs an accepted plan.
 - `scripts/changelog.sh` groups commits after the latest `v*` tag. With no `v*` tag it uses `prod`, or else the root commit and the whole history. `CHANGELOG.md` is titled `## v0.2.0 (unreleased)`. The tag is not created.
 - Secret-shaped test literals are assembled at runtime in each package's `fixtures_test.go`.
+- `TestNoLocalMachine` in `internal/commands` and the `machine_name` filter in `scripts/changelog.sh` deny machine and personal names only: host, user, home paths, and local ports. Public model ids are not in that list.
 
 ## Known issues and backlog
 
@@ -133,7 +134,7 @@ Work lands on `dev`. Config keys are the single table in `internal/config/keys.g
 - CPU embeddings can make `/index` slow when an embed service is configured.
 - A configured reranker is often unreachable.
 - Symbol index: not built.
-- README screenshots are not in the tree: `welcome.png`, `slash-menu.png`, `theme.png`, `build.png`, `act-plan.png`, `pdf.png`.
+- README embeds four screenshots. `slash-menu`, `act-plan`, and `pdf` are not captured.
 - Tag `v0.2.0`. `version` in `cmd/konsolai` is still `"dev"` unless ldflags stamp it.
 
 ## Lessons
