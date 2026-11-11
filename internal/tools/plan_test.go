@@ -208,3 +208,62 @@ func TestProposePlanSchemaFilesOptional(t *testing.T) {
 		t.Fatalf("desc %q", schema.Properties.Files.Description)
 	}
 }
+
+func TestPlanExampleNeverInventsPaths(t *testing.T) {
+	inputs := []string{
+		`{"summary":"create the config","steps":["write the settings"]}`,
+		`{"summary":"edit_file the handler","steps":["use edit_file"]}`,
+		`{"summary":"add a.txt","steps":["write a.txt"]}`,
+		`{"summary":"update src/app/main.go","steps":["edit src/app/main.go"]}`,
+		`{"summary":"","steps":[]}`,
+		`{"steps":["write_file"]}`,
+		`write_file something`,
+		`create the readme`,
+		`{"summary":"modify the module","steps":["update code"],"commands":["go test ./..."]}`,
+		`{"summary":"x","steps":["y"],"extra":1}`,
+		`not json at all`,
+		``,
+	}
+	for _, in := range inputs {
+		var args proposePlanArgs
+		_ = json.Unmarshal([]byte(in), &args)
+		for _, a := range []proposePlanArgs{args, {}} {
+			ex, _ := planExampleFor(in, a)
+			var got planExample
+			if err := json.Unmarshal([]byte(ex), &got); err != nil {
+				t.Fatalf("input %q: example is not JSON: %v", in, err)
+			}
+			for _, f := range got.Files {
+				if !strings.Contains(in, f) {
+					t.Errorf("input %q: example invents file %q", in, f)
+				}
+			}
+			for _, p := range filePathRE.FindAllString(ex, -1) {
+				if !strings.Contains(in, p) {
+					t.Errorf("input %q: example names path %q absent from the input", in, p)
+				}
+			}
+		}
+	}
+}
+
+func FuzzPlanExampleNeverInventsPaths(f *testing.F) {
+	f.Add(`{"summary":"create the config","steps":["write the settings"]}`)
+	f.Add(`write_file something`)
+	f.Add(`{"summary":"add a.txt","steps":["write a.txt"],"commands":["go vet ./..."]}`)
+	f.Fuzz(func(t *testing.T, in string) {
+		var args proposePlanArgs
+		_ = json.Unmarshal([]byte(in), &args)
+		ex, _ := planExampleFor(in, args)
+		var got planExample
+		if err := json.Unmarshal([]byte(ex), &got); err != nil {
+			t.Fatalf("example is not JSON: %v", err)
+		}
+		text := planTextBlob(in, args)
+		for _, file := range got.Files {
+			if !strings.Contains(text, file) {
+				t.Fatalf("example invents file %q", file)
+			}
+		}
+	})
+}
