@@ -111,6 +111,7 @@ var (
 	ErrAborted         = errors.New("agent: aborted")
 	ErrMaxSteps        = errors.New("agent: max steps exceeded")
 	ErrNoAnswer        = errors.New("agent: no answer")
+	ErrRejected        = errors.New("agent: the same rejected call was repeated")
 	ErrContextOverflow = errors.New("konsolai: the conversation no longer fits the model's context; start a new session with `new`.")
 )
 
@@ -505,11 +506,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				_ = rec.Message(ctx, tm)
 				_ = rec.Action(ctx, ActionRecord{Tool: call.Function.Name, Args: args, Decision: "invalid", IsError: true, Output: tm.Content})
 				if prepRejects >= identicalRejectLimit(cfg) {
-					if cfg.Out != nil {
-						ui.BeforeOutput()
-						fmt.Fprintln(cfg.Out, err.Error())
-					}
-					return nil
+					return fmt.Errorf("%w: %s, %d times", ErrRejected, call.Function.Name, prepRejects)
 				}
 				continue
 			}
