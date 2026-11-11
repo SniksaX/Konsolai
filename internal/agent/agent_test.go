@@ -2607,17 +2607,17 @@ func TestIdenticalPlanRejectStops(t *testing.T) {
 	if errors.Is(err, ErrMaxSteps) {
 		t.Fatal("identical rejects ran to the step cap")
 	}
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, ErrRejected) {
+		t.Fatalf("err %v, want ErrRejected", err)
+	}
+	if !strings.Contains(err.Error(), "propose_plan") {
+		t.Fatalf("err %q does not name the tool", err)
 	}
 	if len(rep.reqs) != 2 {
 		t.Fatalf("model calls %d, want 2", len(rep.reqs))
 	}
-	s := out.String()
-	for _, want := range []string{"go build ./...", "go vet ./...", "go test ./...", "files may be omitted: yes"} {
-		if !strings.Contains(s, want) {
-			t.Fatalf("missing %q in %q", want, s)
-		}
+	if n := strings.Count(out.String(), "fields: summary (string)"); n != 2 {
+		t.Fatalf("reject text printed %d times, want once per reject and never as the answer: %q", n, out.String())
 	}
 }
 
