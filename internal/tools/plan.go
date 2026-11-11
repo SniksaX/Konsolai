@@ -245,6 +245,8 @@ func planShapeError(why, raw string, args proposePlanArgs) error {
 	omitText := "files may be omitted: no"
 	if omit {
 		omitText = "files may be omitted: yes"
+	} else if !strings.Contains(ex, `"files":`) {
+		omitText += " (the example has none because the plan names no path; add files with the real repo-relative paths)"
 	}
 	return fmt.Errorf("tools: propose_plan: %s\nfields: summary (string), steps (array of strings), commands (array of exact command lines), files (array of repo-relative paths)\n%s\nexample: %s", why, omitText, ex)
 }
@@ -285,9 +287,6 @@ func planExampleFor(raw string, args proposePlanArgs) (string, bool) {
 		files := nonempty(args.Files)
 		if len(files) == 0 {
 			files = guessFiles(text)
-		}
-		if len(files) == 0 {
-			files = []string{"a.txt"}
 		}
 		ex.Files = files
 	}
