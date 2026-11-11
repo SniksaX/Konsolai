@@ -219,6 +219,20 @@ EOF
 
 No request, stdin is a TTY, and stdout is not: the request is read from `/dev/tty`, same 64 KiB cap. Both TTYs and no request is the REPL, above.
 
+Exit codes of a one-shot run:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | The turn finished |
+| 1 | Error: the model was unreachable, returned no answer, or the conversation no longer fits its context |
+| 2 | Usage error |
+| 3 | Aborted: you quit at an approval prompt |
+| 4 | Max steps: the step budget ran out before the task finished |
+| 5 | Rejected: the model repeated the same rejected tool call and the turn was stopped; the task was not completed |
+| 130 | Interrupted (Ctrl-C) |
+
+A session is recorded as `finished` on 0, `aborted` on 3 and 130, and `failed` on every other code.
+
 ### Intents
 
 | Intent | Tools | Plan |
