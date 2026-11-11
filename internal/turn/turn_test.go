@@ -1,6 +1,7 @@
 package turn
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -436,5 +437,36 @@ func TestUnreachableModelPrintsFriendlyLine(t *testing.T) {
 	got := errb.String()
 	if !strings.Contains(got, "cannot reach the model server") || strings.Contains(got, "llm: list models") {
 		t.Fatalf("%q", got)
+	}
+}
+
+func TestRunTurnRepeatedRejectExit(t *testing.T) {
+	bad := llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{
+		ID: "1", Type: "function", Function: llm.FunctionCall{Name: "propose_plan", Arguments: "not a plan"},
+	}}}
+	client := fakeLLM(t, []llm.Message{bad, bad, bad, bad})
+	r := testRunner(t, client, autoConfirm{})
+	var errB bytes.Buffer
+	r.Err = &errB
+	res := r.RunTurn(context.Background(), Request{Text: "write a", Intent: "build", Yes: true, Cwd: t.TempDir(), New: true})
+	if res.ExitCode != 5 {
+		t.Fatalf("exit %d, want 5", res.ExitCode)
+	}
+	if !strings.Contains(errB.String(), "konsolai: stopped: ") || !strings.Contains(errB.String(), "propose_plan") {
+		t.Fatalf("stderr %q", errB.String())
+	}
+	if n := strings.Count(strings.TrimSpace(errB.String()), "\n"); n > 3 {
+		t.Fatalf("message is not short: %q", errB.String())
+	}
+}
+
+func TestSessionStatusCodes(t *testing.T) {
+	for code, want := range map[int]string{0: "finished", 1: "failed", 3: "aborted", 4: "failed", 5: "failed", 130: "aborted"} {
+		if got := SessionStatus(code); got != want {
+			t.Errorf("code %d: %q, want %q", code, got, want)
+		}
+	}
+	if !incompleteTurn(5) {
+		t.Error("a rejected turn must be continuable")
 	}
 }
