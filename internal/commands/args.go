@@ -551,8 +551,23 @@ func modelLevel(env *Env) []Choice {
 		{Value: "fast", Description: "fast chat role", Dynamic: func() []Choice { return modelNameChoices(env, true) }},
 		{Value: "add", Description: "add a named model", Next: addModelChoices()},
 		{Value: "remove", Description: "remove a model no role uses", Dynamic: func() []Choice { return removableChoices(env) }},
+		{Value: "endpoint", Description: "change a model's URL", Dynamic: func() []Choice { return endpointChoices(env) }},
 		{Value: "discover", Description: "suggest names from each server", Terminal: true},
 	}
+}
+
+// endpointChoices offers each configured model, then a free-text URL.
+func endpointChoices(env *Env) []Choice {
+	p := envProfile(env)
+	var out []Choice
+	for _, name := range p.ModelNames() {
+		out = append(out, Choice{
+			Value:       name,
+			Description: p.Models[name].Endpoint,
+			FreeText:    &FreeText{Placeholder: "https://host/v1", Validate: nonEmpty},
+		})
+	}
+	return out
 }
 
 func modelNameChoices(env *Env, fast bool) []Choice {
