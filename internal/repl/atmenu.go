@@ -18,19 +18,21 @@ import (
 
 const atScanCap = 2000
 
-// atMenu is the file menu opened by @ at a word boundary.
+// atMenu is the file menu opened by @ at a word boundary. A mention source can
+// supply its rows instead, when the active input mode has some.
 type atMenu struct {
-	cwd    func() string
-	open   bool
-	capped bool
-	head   string
-	tail   string
-	typed  string
-	hold   string
-	rows   []atEntry
-	sel    int
-	offset int
-	detail bool
+	cwd      func() string
+	mentions func(prefix string) []atEntry
+	open     bool
+	capped   bool
+	head     string
+	tail     string
+	typed    string
+	hold     string
+	rows     []atEntry
+	sel      int
+	offset   int
+	detail   bool
 }
 
 type atEntry struct {
@@ -54,6 +56,15 @@ func (m *atMenu) SetRoot(cwd func() string) {
 		return
 	}
 	m.cwd = cwd
+}
+
+// SetMentions installs a row source for the @ menu. Returning an empty list
+// leaves the file list in place.
+func (m *atMenu) SetMentions(src func(prefix string) []atEntry) {
+	if m == nil {
+		return
+	}
+	m.mentions = src
 }
 
 func (m *atMenu) root() string {
@@ -82,6 +93,16 @@ func (m *atMenu) Sync(line string, cursor int) {
 	}
 	m.hold = ""
 	m.head, m.tail, m.typed = head, tail, query
+	if m.mentions != nil {
+		if rows := m.mentions(query); len(rows) > 0 {
+			m.rows, m.capped = rows, false
+			m.sel = -1
+			m.detail = false
+			m.offset = 0
+			m.open = true
+			return
+		}
+	}
 	m.rows, m.capped = listAt(m.root(), query)
 	m.sel = -1
 	m.detail = false
