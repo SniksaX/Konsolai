@@ -111,7 +111,7 @@ func TestArgMenuModelThenFast(t *testing.T) {
 		t.Fatalf("enter %+v", r)
 	}
 	m.Sync(r.Line)
-	if strings.Join(rowValues(m), ",") != "main,fast,add,remove,discover" {
+	if strings.Join(rowValues(m), ",") != "main,fast,add,remove,endpoint,discover" {
 		t.Fatalf("roles %v", rowValues(m))
 	}
 	m.Down()
