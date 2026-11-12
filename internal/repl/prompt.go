@@ -111,10 +111,15 @@ func shortModel(model string) string {
 	return model
 }
 
-func inputPrompt(shell bool) string {
+// inputPrompt is the prompt for the next line: shell, an active input mode, or the
+// normal accent caret. The mode label is styled through the current palette.
+func inputPrompt(shell bool, mode string) string {
 	p := ui.Current()
 	if shell {
 		return p.Warn("$ ")
+	}
+	if mode != "" {
+		return p.Accent(mode + " › ")
 	}
 	return p.Accent("› ")
 }
@@ -122,6 +127,7 @@ func inputPrompt(shell bool) string {
 type footerInfo struct {
 	Cwd       string
 	Model     string
+	Mode      string
 	Routing   string
 	CtxPct    int
 	ShowCtx   bool
@@ -198,6 +204,9 @@ func formatFooter(f footerInfo) string {
 	modelWord := shortModel(f.Model)
 	if f.Shell {
 		modelWord = "shell"
+	}
+	if f.Mode != "" {
+		modelWord = f.Mode
 	}
 	model := theme.Style(theme.Muted, modelWord)
 	ctx := ""
