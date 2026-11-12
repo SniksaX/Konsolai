@@ -365,6 +365,13 @@ func Run(ctx context.Context, cfg Config) int {
 			continue
 		}
 		if strings.HasPrefix(trim, "/") {
+			if handled, err := claimLine(inputMode, line); handled {
+				if err != nil {
+					fmt.Fprintln(errw, "konsolai:", err)
+				}
+				fmt.Fprintln(out)
+				continue
+			}
 			code := dispatchLine(ctx, reg, env, line)
 			if code == -1 {
 				endSession(ctx, env, st)
@@ -417,6 +424,18 @@ func Run(ctx context.Context, cfg Config) int {
 		}
 		fmt.Fprintln(out)
 	}
+}
+
+// claimLine gives an active input mode a chance to take a slash line first.
+func claimLine(m commands.InputMode, line string) (bool, error) {
+	if m == nil {
+		return false, nil
+	}
+	c, ok := m.(commands.Claimer)
+	if !ok {
+		return false, nil
+	}
+	return c.Claim(line)
 }
 
 func dispatchLine(ctx context.Context, reg *commands.Registry, env *commands.Env, line string) int {
