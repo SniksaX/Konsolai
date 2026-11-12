@@ -17,6 +17,13 @@ type Claimer interface {
 	Claim(line string) (handled bool, err error)
 }
 
+// MentionProvider is optional on an InputMode. A mode that also implements it
+// supplies the rows of the @ menu; an empty list means "not mine", and the file
+// menu shows as usual.
+type MentionProvider interface {
+	Mentions(prefix string) []Choice
+}
+
 type namedMode struct {
 	name string
 	mode InputMode
