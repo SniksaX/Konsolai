@@ -10,6 +10,13 @@ type InputMode interface {
 	Active() bool
 }
 
+// Claimer is optional on an InputMode. A mode that also implements it is offered
+// each slash line before the registry dispatches it; handled=true swallows the
+// line, handled=false lets it dispatch as usual.
+type Claimer interface {
+	Claim(line string) (handled bool, err error)
+}
+
 type namedMode struct {
 	name string
 	mode InputMode
