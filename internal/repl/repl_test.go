@@ -302,11 +302,11 @@ func TestClearHeaderModes(t *testing.T) {
 }
 
 func TestInputPrompt(t *testing.T) {
-	if !strings.Contains(inputPrompt(false), "› ") {
-		t.Fatalf("ai %q", inputPrompt(false))
+	if !strings.Contains(inputPrompt(false, ""), "› ") {
+		t.Fatalf("ai %q", inputPrompt(false, ""))
 	}
-	if !strings.Contains(inputPrompt(true), "$ ") {
-		t.Fatalf("shell %q", inputPrompt(true))
+	if !strings.Contains(inputPrompt(true, ""), "$ ") {
+		t.Fatalf("shell %q", inputPrompt(true, ""))
 	}
 }
 
