@@ -92,3 +92,43 @@ func TestUnlistedLineStillReachesTheRegistry(t *testing.T) {
 		t.Fatal("a listed line must be owned")
 	}
 }
+
+func TestProviderRowsAreDrawn(t *testing.T) {
+	registerProvider(t, []commands.Choice{
+		{Value: "/history", Description: "list the sessions"},
+		{Value: "/vote", Description: "take a ballot"},
+	})
+	menu := newSlashMenu(commands.Default())
+	menu.Sync("/")
+	if got := len(menu.Items()); got != 2 {
+		t.Fatalf("rows with a bare slash: %d, want 2", got)
+	}
+	menu.Sync("/vo")
+	items := menu.Items()
+	if len(items) != 1 || items[0].Name != "vote" {
+		t.Fatalf("prefix filter: %+v", items)
+	}
+	if items[0].Summary != "take a ballot" {
+		t.Fatalf("description lost: %q", items[0].Summary)
+	}
+	menu.Sync("/zzz")
+	if got := len(menu.Items()); got != 0 {
+		t.Fatalf("a prefix that matches nothing: %d rows", got)
+	}
+}
+
+func TestRegistryRowsReturnWhenNoModeIsActive(t *testing.T) {
+	p := registerProvider(t, []commands.Choice{{Value: "/vote", Description: "take a ballot"}})
+	p.on = false
+	menu := newSlashMenu(commands.Default())
+	menu.Sync("/he")
+	items := menu.Items()
+	if len(items) == 0 {
+		t.Fatal("the registry rows are missing")
+	}
+	for _, it := range items {
+		if it.Name == "vote" {
+			t.Fatalf("a provider row leaked into the registry list: %+v", items)
+		}
+	}
+}
