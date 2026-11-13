@@ -24,6 +24,14 @@ type MentionProvider interface {
 	Mentions(prefix string) []Choice
 }
 
+// CommandProvider is optional on an InputMode. A mode that also implements it
+// supplies the rows of the / menu; an empty list means "not mine", and the
+// registry's commands show as usual. A typed line that is one of those values
+// belongs to the mode, so Enter submits it to Claim instead of the registry.
+type CommandProvider interface {
+	Commands() []Choice
+}
+
 type namedMode struct {
 	name string
 	mode InputMode
