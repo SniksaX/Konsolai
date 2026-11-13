@@ -544,9 +544,53 @@ func (m *slashMenu) completeSelected() menuResult {
 	return menuResult{Action: actionLine, Line: line}
 }
 
+// providerRows is the active mode's own / menu, when it offers one.
+func providerRows() []commands.Choice {
+	_, mode := commands.ActiveInputMode()
+	p, ok := mode.(commands.CommandProvider)
+	if !ok {
+		return nil
+	}
+	return p.Commands()
+}
+
+// providerHit reports whether the typed line is one the active mode lists. Line
+// 0 with no rows is "not mine", so the registry keeps the menu.
+func (m *slashMenu) providerHit() bool {
+	if m == nil {
+		return false
+	}
+	typed := strings.TrimSpace(m.typed)
+	if typed == "" {
+		return false
+	}
+	for _, c := range providerRows() {
+		if strings.EqualFold(strings.TrimSpace(c.Value), typed) {
+			return true
+		}
+	}
+	return false
+}
+
+// providerOwns reports whether a line belongs to the active mode's own list.
+func providerOwns(line string) bool {
+	line = strings.TrimSpace(line)
+	for _, c := range providerRows() {
+		if strings.EqualFold(strings.TrimSpace(c.Value), line) {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *slashMenu) Enter() menuResult {
 	if m == nil || !m.open {
 		return menuResult{Action: actionPass}
+	}
+	// A line the active mode lists is the mode's, not the registry's: submit it
+	// as typed so it reaches the mode, never the registry's argument prompt.
+	if m.providerHit() {
+		return menuResult{Action: actionSubmit}
 	}
 	if m.arg {
 		return m.enterArg()
