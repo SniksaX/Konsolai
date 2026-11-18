@@ -22,8 +22,6 @@ func (g *Guard) AllowRoots(roots []string) {
 	}
 }
 
-func (g *Guard) ExtraRoots() []string { return g.extra }
-
 func (g *Guard) allowedAbs(abs string) bool {
 	if containsPath(g.root, abs) {
 		return true
