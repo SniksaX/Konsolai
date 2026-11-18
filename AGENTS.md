@@ -82,6 +82,7 @@ Accessors are the only `<= 0` means default logic (`nonzero` and the ratio acces
 - Privileged commands are refused (`sudo`, `doas`, `su`, `pkexec`). The plan tells the user to run them, via `finish`.
 - `ResolveRead` allows any user-readable path except the sensitive denylist. Writes stay inside the project root.
 - `redact.String` and `redact.JSON` run before a message or action is persisted.
+- The shell child gets no `KONSOLAI_*` or secret-shaped environment, and captured shell output is redacted before the model sees it. A read-only shell path is checked against the sensitive denylist, globs included.
 - Prompt size starts as characters times `tokensPerChar`, then that ratio is updated from real `usage.prompt_tokens`. Elision starts above `elide_trigger` (0.60) and stops at `elide_target` (0.40).
 - `llm.Normalize` runs before each chat request: merge consecutive user messages, drop empty assistants, drop orphan tool results.
 - The fast client is preferred when reachable. If an answer stream fails on it, the turn retries on main. Fast is skipped when the prompt passes `context_guard_ratio`.
