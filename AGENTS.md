@@ -82,6 +82,7 @@ Accessors are the only `<= 0` means default logic (`nonzero` and the ratio acces
 - Privileged commands are refused (`sudo`, `doas`, `su`, `pkexec`). The plan tells the user to run them, via `finish`.
 - `ResolveRead` allows any user-readable path except the sensitive denylist. Writes stay inside the project root.
 - An approved plan grants the planned file and its immediate parent as extra write roots; nothing above the parent is granted.
+- Write roots named by the request are shown at the forced confirmation before a write outside the project root.
 - `redact.String` and `redact.JSON` run before a message or action is persisted.
 - The shell child gets no `KONSOLAI_*` or secret-shaped environment, and captured shell output is redacted before the model sees it. A read-only shell path is checked against the sensitive denylist, globs included.
 - Prompt size starts as characters times `tokensPerChar`, then that ratio is updated from real `usage.prompt_tokens`. Elision starts above `elide_trigger` (0.60) and stops at `elide_target` (0.40).
