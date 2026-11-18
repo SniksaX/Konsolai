@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -285,6 +287,67 @@ func TestFastUnreachableFallsBack(t *testing.T) {
 	}
 	if !strings.Contains(errB.String(), "stats: steps=1 rejects=0 outside_plan=0 think_tokens=") {
 		t.Fatalf("stats %q", errB.String())
+	}
+}
+
+func TestRunTurnMaxStepsExit(t *testing.T) {
+	cwd := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cwd, "a.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	replies := make([]llm.Message, 0, 15)
+	for i := 0; i < 15; i++ {
+		replies = append(replies, llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{
+			ID: fmt.Sprintf("%d", i), Type: "function",
+			Function: llm.FunctionCall{Name: "read_file", Arguments: `{"path":"a.txt"}`},
+		}}})
+	}
+	r := testRunner(t, fakeLLM(t, replies), autoConfirm{})
+	var errB bytes.Buffer
+	r.Err = &errB
+	res := r.RunTurn(context.Background(), Request{Text: "read a", Intent: "lookup", Yes: true, Cwd: cwd, New: true})
+	if res.ExitCode != 4 {
+		t.Fatalf("exit %d: %s", res.ExitCode, errB.String())
+	}
+	if !strings.Contains(errB.String(), "stopped after") {
+		t.Fatalf("stderr %q", errB.String())
+	}
+}
+
+func TestRunTurnInterruptExit(t *testing.T) {
+	started := make(chan struct{})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{"id": "test", "max_model_len": 8192}},
+		})
+	})
+	done := make(chan struct{})
+	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, req *http.Request) {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		select {
+		case <-req.Context().Done():
+		case <-done:
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(done) })
+
+	r := testRunner(t, llm.New(srv.URL+"/v1", "test"), autoConfirm{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		<-started
+		cancel()
+	}()
+	res := r.RunTurn(ctx, Request{Text: "hello", Intent: "answer", Yes: true, Cwd: t.TempDir(), New: true})
+	if res.ExitCode != 130 {
+		t.Fatalf("exit %d", res.ExitCode)
 	}
 }
 
