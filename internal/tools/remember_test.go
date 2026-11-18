@@ -53,3 +53,26 @@ func TestRememberPrepareAndRun(t *testing.T) {
 		t.Fatalf("empty fact: %v", err)
 	}
 }
+
+func TestRememberWithoutMemoryReportsError(t *testing.T) {
+	g, err := safety.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := NewRegistry(g, nil, nil, nil, nil)
+	tool, ok := reg.Get("remember")
+	if !ok {
+		t.Fatal("missing remember")
+	}
+	act, err := tool.Prepare(`{"fact":"I use pnpm"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := act.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(res.Output, "not configured") {
+		t.Fatalf("res=%+v", res)
+	}
+}
