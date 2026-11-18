@@ -16,6 +16,7 @@ import (
 
 	"github.com/SniksaX/Konsolai/internal/config"
 	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/redact"
 	"github.com/SniksaX/Konsolai/internal/safety"
 	"github.com/SniksaX/Konsolai/internal/ui"
 )
@@ -253,7 +254,8 @@ func (a *shellAction) Run(ctx context.Context) (Result, error) {
 	cmd := exec.CommandContext(ctx, "bash", "-o", "pipefail", "-c", a.cmd)
 	cmd.Dir = a.cwd
 	cmd.Stdin = nil
-	cmd.Env = append(os.Environ(),
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Env = append(scrubEnv(os.Environ()),
 		"CI=1",
 		"npm_config_yes=true",
 		"GIT_TERMINAL_PROMPT=0",
@@ -284,7 +286,7 @@ func (a *shellAction) Run(ctx context.Context) (Result, error) {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			sec := int(a.timeout.Seconds())
 			return Result{
-				Output:  fmt.Sprintf("timed out after %ds\nexit_code: %d\n%s", sec, exitCode(runErr), cap.String()),
+				Output:  fmt.Sprintf("timed out after %ds\nexit_code: %d\n%s", sec, exitCode(runErr), redact.String(cap.String())),
 				IsError: true,
 				Meta:    fmt.Sprintf("timed out %ds", sec),
 			}, nil
@@ -302,14 +304,14 @@ func (a *shellAction) Run(ctx context.Context) (Result, error) {
 	if code == 141 {
 		if cut, ok := pipelineCutBy(a.cmd); ok {
 			return Result{
-				Output:  fmt.Sprintf("exit_code: 141\n%s", cap.String()),
+				Output:  fmt.Sprintf("exit_code: 141\n%s", redact.String(cap.String())),
 				IsError: false,
 				Meta:    fmt.Sprintf("exit 141 (output cut by %s)", cut),
 			}, nil
 		}
 	}
 	return Result{
-		Output:  fmt.Sprintf("exit_code: %d\n%s", code, cap.String()),
+		Output:  fmt.Sprintf("exit_code: %d\n%s", code, redact.String(cap.String())),
 		IsError: code != 0,
 		Meta:    fmt.Sprintf("exit %d", code),
 	}, nil
@@ -427,4 +429,37 @@ func exitCode(err error) int {
 		return ee.ExitCode()
 	}
 	return -1
+}
+
+// scrubEnv copies the parent environment without the app's own variables and
+// the secret-shaped ones, so a shell command cannot print a token or the
+// database URL. PATH, HOME and the language settings stay.
+func scrubEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		name, _, ok := strings.Cut(kv, "=")
+		if !ok || scrubEnvName(name) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
+func scrubEnvName(name string) bool {
+	up := strings.ToUpper(name)
+	if strings.HasPrefix(up, "KONSOLAI_") {
+		return true
+	}
+	switch {
+	case strings.HasSuffix(up, "_TOKEN"), strings.HasSuffix(up, "_SECRET"),
+		strings.HasSuffix(up, "_PASSWORD"), strings.HasSuffix(up, "_PASSWD"),
+		strings.HasSuffix(up, "_KEY"), strings.HasSuffix(up, "_CREDENTIAL"),
+		strings.HasSuffix(up, "_CREDENTIALS"), strings.HasSuffix(up, "_DSN"),
+		strings.Contains(up, "API_KEY"), strings.Contains(up, "APIKEY"),
+		strings.Contains(up, "PRIVATE_KEY"), strings.Contains(up, "ACCESS_KEY"),
+		up == "DATABASE_URL", up == "PGPASSWORD":
+		return true
+	}
+	return false
 }
