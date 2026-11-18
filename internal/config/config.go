@@ -671,10 +671,6 @@ func (c Config) PasteChipChars() int {
 	return nonzero(c.UI.PasteChipChars, 1000)
 }
 
-func (c Config) OutputKeepBytes() int {
-	return nonzero(c.UI.OutputKeepKB, 256) * 1024
-}
-
 func (c Config) PaletteName() string {
 	if name, ok := ResolveTheme(c.UI.Theme); ok {
 		return name
@@ -838,10 +834,6 @@ func nonzero(n, fallback int) int {
 
 func DefaultPath() string {
 	return filepath.Join(configDir(), "config.yaml")
-}
-
-func JSONPath() string {
-	return filepath.Join(configDir(), "config.json")
 }
 
 func configDir() string {
