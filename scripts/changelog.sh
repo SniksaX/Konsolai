@@ -33,7 +33,7 @@ fi
 
 machine_name() {
 	# Pieces are split so this file does not match the denylist itself.
-	local pat='fat''boy|sir''aj|/ho''me/|Desk''top/|114''36|114''35|95''01|95''02|554''32|kp''ass|zene''tys|ly''ah|endea''vour|think''pad'
+	local pat='fat''boy|sir''aj|/ho''me/|Desk''top/|114''36|114''35|114''33|95''01|95''02|95''03|554''32|kp''ass|zene''tys|ly''ah|endea''vour|think''pad'
 	[[ "$1" =~ $pat ]]
 }
 
