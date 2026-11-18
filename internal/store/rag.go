@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/SniksaX/Konsolai/internal/redact"
 )
 
 type Chunk struct {
@@ -83,6 +85,7 @@ func (s *Store) InsertChunk(ctx context.Context, in ChunkIn) (bool, error) {
 	if in.Ref == nil {
 		in.Ref = json.RawMessage(`{}`)
 	}
+	in.Content = redact.String(in.Content)
 	hash := ContentHash(in.Content)
 	var id int64
 	err := s.pool.QueryRow(ctx, `
@@ -248,6 +251,7 @@ func (s *Store) PersistCodeFile(ctx context.Context, profile string, projectID i
 		if in.Ref == nil {
 			in.Ref = json.RawMessage(`{}`)
 		}
+		in.Content = redact.String(in.Content)
 		hash := ContentHash(in.Content)
 		var id int64
 		err := tx.QueryRow(ctx, `
