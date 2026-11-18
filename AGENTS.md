@@ -64,7 +64,7 @@ The REPL starts only when there is no request and both stdin and stdout are TTYs
 Interactive startup runs `banner.Startup` while `welcome.Gather` probes, then clears that splash and paints the welcome once.
 Welcome height is read from the underlying TTY: `termFile` unwraps `nlWriter`.
 `turn.Runner.RunTurn` classifies intent, then answer streams. Lookup, act, and build run the agent loop.
-The plan gate is always on for build. Act requires a plan only at high effort.
+The plan gate is on for build and for act at high effort by default; `agent.plan.*` can change that.
 
 ## Config
 
@@ -77,7 +77,7 @@ Accessors are the only `<= 0` means default logic (`nonzero` and the ratio acces
 
 - `intent.ActionFloor` plus `RaiseTo` only raise the intent (answer < lookup < act < build). How and why questions are exempt. Escalation runs once.
 - Thinking follows effort. Build and act use `agent.build_thinking` (default `plan_step`: think after an approved plan, or after a shell failure or two consecutive failures). Answer thinks only at high effort. Lookup thinks after two consecutive failures.
-- The plan gate is always on for build and only at high effort for act. Mutating shell lines must pass `safety.MatchPlan`. Identical rejected tool calls stop at `agent.identical_rejects` (default 2).
+- The plan gate is on for build and at high effort for act by default (`agent.plan.*` can change it). Mutating shell lines must pass `safety.MatchPlan`. Identical rejected tool calls stop at `agent.identical_rejects` (default 2).
 - Exit codes: 0 finished, 1 error, 2 usage, 3 aborted at a prompt, 4 max steps, 5 rejected (identical rejected calls reached the limit: `agent.ErrRejected`, one stderr line, session `failed`), 130 interrupted. `turn.SessionStatus` maps 0 to `finished`, 3 and 130 to `aborted`, the rest to `failed`. A stuck turn never exits 0.
 - Privileged commands are refused (`sudo`, `doas`, `su`, `pkexec`). The plan tells the user to run them, via `finish`.
 - `ResolveRead` allows any user-readable path except the sensitive denylist. Writes stay inside the project root.
@@ -85,6 +85,7 @@ Accessors are the only `<= 0` means default logic (`nonzero` and the ratio acces
 - Write roots named by the request are shown at the forced confirmation before a write outside the project root.
 - `redact.String` and `redact.JSON` run before a message or action is persisted.
 - The shell child gets no `KONSOLAI_*` or secret-shaped environment, and captured shell output is redacted before the model sees it. A read-only shell path is checked against the sensitive denylist, globs included.
+- `run_shell` is not a sandbox: interpreters and substitutions can reach anything the user can. The plan gate and the confirm prompt are the write barrier.
 - Prompt size starts as characters times `tokensPerChar`, then that ratio is updated from real `usage.prompt_tokens`. Elision starts above `elide_trigger` (0.60) and stops at `elide_target` (0.40).
 - `llm.Normalize` runs before each chat request: merge consecutive user messages, drop empty assistants, drop orphan tool results.
 - The fast client is preferred when reachable. If an answer stream fails on it, the turn retries on main. Fast is skipped when the prompt passes `context_guard_ratio`.
@@ -102,7 +103,7 @@ Accessors are the only `<= 0` means default logic (`nonzero` and the ratio acces
 - `internal/welcome/testdata/*.golden` (150) via `TestRenderGoldens`. `TestFrameBelow120MatchesSplit`. `TestWideSplitKeepsRecentBesideSession`.
 - PTY: `internal/repl/readline_pty_test.go` (placeholder not accepted, Ctrl-L, slash menu), `internal/repl/theme_pty_test.go` (Esc leaves the theme, Enter applies it in place), `cmd/konsolai/e2e_slash_pty_test.go`.
 - `turn_stats` tests need the test DB (`internal/store/stats_test.go`).
-- Plan: `internal/tools/plan_test.go` (command-only plans, `export_doc` for PDF). `internal/agent/agent_test.go` (`TestIdenticalPlanRejectStops`, `TestShellStillRequiresPlan`). Exit codes: `TestRunTurnRepeatedRejectExit`, `TestSessionStatusCodes` in `internal/turn/turn_test.go`.
+- Plan: `internal/tools/plan_test.go` (command-only plans, `export_doc` for PDF). `internal/agent/agent_test.go` (`TestIdenticalPlanRejectStops`, `TestShellStillRequiresPlan`). Exit codes: `TestRunTurnRepeatedRejectExit`, `TestRunTurnMaxStepsExit`, `TestRunTurnInterruptExit`, `TestSessionStatusCodes` in `internal/turn/turn_test.go`.
 - Config: `TestConfigKeysComplete` in `internal/config/keys_test.go`.
 
 ## Current status
