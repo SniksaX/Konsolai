@@ -73,7 +73,7 @@ func TestFindChromeMissing(t *testing.T) {
 	glob = func(string) ([]string, error) { return nil, nil }
 	t.Cleanup(restoreChromeHooks)
 	_, err := FindChrome()
-	if err == nil || err.Error() != "install chromium (sudo pacman -S chromium) or set KONSOLAI_CHROME" {
+	if err == nil || err.Error() != "install chromium or set KONSOLAI_CHROME" {
 		t.Fatalf("%v", err)
 	}
 }
