@@ -47,7 +47,9 @@ func MatchPlan(p Plan, cmd string) (bool, []SegHit) {
 	return all, hits
 }
 
-// AllowPlanFiles adds approved plan file paths (and parent dirs) as write roots.
+// AllowPlanFiles adds approved plan file paths (and their immediate parent) as
+// write roots. The parent covers creating the directory; nothing above it is
+// granted, so one approved file cannot unlock a whole home tree.
 func (g *Guard) AllowPlanFiles(files []string) {
 	if g == nil {
 		return
@@ -69,7 +71,7 @@ func (g *Guard) AllowPlanFiles(files []string) {
 		} else if filepath.IsAbs(f) {
 			abs = filepath.Clean(f)
 		} else {
-			continue
+			abs = filepath.Clean(filepath.Join(g.base, f))
 		}
 		for _, p := range planWriteRoots(abs, home) {
 			if seen[p] {
@@ -90,15 +92,5 @@ func planWriteRoots(abs, home string) []string {
 	if parent == abs || (home != "" && parent == home) || underDeniedHome(parent, home) {
 		return out
 	}
-	out = append(out, parent)
-	cur := filepath.Dir(parent)
-	for home != "" && cur != parent && cur != home && containsPath(home, cur) && !underDeniedHome(cur, home) {
-		out = append(out, cur)
-		next := filepath.Dir(cur)
-		if next == cur {
-			break
-		}
-		cur = next
-	}
-	return out
+	return append(out, parent)
 }
