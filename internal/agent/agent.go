@@ -161,6 +161,8 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	seenRead := make(map[string]struct{})
 	prepRejectKey := ""
 	prepRejects := 0
+	userRejectKey := ""
+	userRejects := 0
 	var readSpans []readSpan
 	planApproved := cfg.ResumePlan
 	planFiles := cfg.PlanFiles
@@ -628,10 +630,20 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 						msgs = append(msgs, tm)
 						_ = rec.Message(ctx, tm)
 						_ = rec.Action(ctx, ActionRecord{Tool: call.Function.Name, Args: args, Kind: kind, Decision: "rejected", RejectReason: reason, IsError: true, Output: tm.Content})
+						rejectKey := call.Function.Name + "\x00" + call.Function.Arguments
+						if rejectKey == userRejectKey {
+							userRejects++
+						} else {
+							userRejectKey, userRejects = rejectKey, 1
+						}
+						if userRejects >= identicalRejectLimit(cfg) {
+							return fmt.Errorf("%w: %s, rejected %d times", ErrRejected, call.Function.Name, userRejects)
+						}
 						continue
 					case ui.Quit:
 						return ErrAborted
 					case ui.Approve:
+						userRejectKey, userRejects = "", 0
 						decision = "approved"
 						if cfg.AutoApprove {
 							decision = "auto"
