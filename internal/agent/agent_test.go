@@ -2621,6 +2621,26 @@ func TestIdenticalPlanRejectStops(t *testing.T) {
 	}
 }
 
+func TestInPlanUsesRepoAndCwdBases(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !inPlanPath([]string{"sub/x.txt"}, "x.txt", root, sub) {
+		t.Fatal("cwd-relative write should match a repo-relative plan file")
+	}
+	if !inPlanPath([]string{"sub/x.txt"}, "sub/x.txt", root, root) {
+		t.Fatal("repo-relative write should match")
+	}
+	if inPlanPath([]string{"sub/x.txt"}, "y.txt", root, sub) {
+		t.Fatal("a different file must stay outside the plan")
+	}
+	if !inPlanPath([]string{filepath.Join(root, "sub", "x.txt")}, "x.txt", sub, sub) {
+		t.Fatal("absolute plan file should match")
+	}
+}
+
 func TestUserRejectedIdenticalPlanStops(t *testing.T) {
 	plan := `{"summary":"health","steps":["go build ./..."],"commands":["go build ./..."],"files":[]}`
 	replies := []llm.Message{
