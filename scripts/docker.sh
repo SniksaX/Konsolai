@@ -7,6 +7,21 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 
+# The image is built from tracked files only, so ignored and untracked paths
+# can never enter the build context.
+context_dir=""
+cleanup_context() {
+	if [[ -n "$context_dir" ]]; then
+		rm -rf "$context_dir"
+	fi
+}
+trap cleanup_context EXIT
+
+tracked_context() {
+	context_dir=$(mktemp -d)
+	git -C "$root" archive --format=tar HEAD | tar -x -C "$context_dir"
+}
+
 # Compose supplies a default for every variable, so no .env file is required.
 # Bash does not export UID. Compose reads these for the konsolai service user.
 export KONSOLAI_UID="$(id -u)"
@@ -64,10 +79,12 @@ build)
 	target=${1:-base}
 	case "$target" in
 	base)
-		docker build --target base -t konsolai:dev "$root"
+		tracked_context
+		docker build --target base -t konsolai:dev "$context_dir"
 		;;
 	full)
-		docker build --target full -t konsolai:full "$root"
+		tracked_context
+		docker build --target full -t konsolai:full "$context_dir"
 		;;
 	*)
 		usage
