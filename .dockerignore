@@ -8,3 +8,5 @@ docs/assets
 **/testdata
 **/testdata/**
 **/*_test.go
+.linkdin
+dist
