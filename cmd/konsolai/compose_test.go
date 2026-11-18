@@ -231,6 +231,9 @@ func moduleRoot(t *testing.T) string {
 
 func requireDocker(t *testing.T) {
 	t.Helper()
+	if os.Getenv("KONSOLAI_TEST_DOCKER") != "1" {
+		t.Skip("set KONSOLAI_TEST_DOCKER=1 to run the Docker tests")
+	}
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("needs docker")
 	}
