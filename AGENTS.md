@@ -15,7 +15,7 @@ After each phase: `gofmt -l .`, `go vet ./...`, `go test ./... -count=1` (with t
 Test DB: `scripts/test-db.sh up|down`. Never touch the developer's own database container; integration tests use `scripts/test-db.sh`. Compose uses its own volume and published port and never the developer's database.
 UI changes are verified on a real PTY (`/dev/ptmx`, `creack/pty`), not a pipe.
 Code: strict types; no `interface{}` or `any` unless unavoidable; wrap errors as `pkg: context: %w`; no debug logging; no new packages unless the architect specifies them; no new dependencies unless approved.
-Approved in `go.mod`: jackc/pgx/v5, alecthomas/chroma/v2, yuin/goldmark, reeflective/readline, rivo/uniseg, go.yaml.in/yaml/v3, golang.org/x/term, golang.org/x/sys, and test-only creack/pty. Go 1.27.1. Module `github.com/SniksaX/Konsolai`.
+Approved in `go.mod`: jackc/pgx/v5, alecthomas/chroma/v2, yuin/goldmark, reeflective/readline, rivo/uniseg, go.yaml.in/yaml/v3, golang.org/x/term, golang.org/x/sys, and creack/pty (shellmode and the PTY tests). Go 1.27.1. Module `github.com/SniksaX/Konsolai`.
 
 ## Reference setup (example)
 
@@ -47,7 +47,7 @@ Leaves (no `konsolai/internal` imports):
 - `banner`: static splash; `Startup` writes the wordmark once.
 - `store`: Postgres via pgxpool, raw SQL, `turn_stats`.
 - `intent`: four-way router, action floor, language detect.
-- `tools`: shell, files, search, plan, recall, `export_doc`, finish.
+- `tools`: shell, files, search, plan, recall, web fetch, remember, outline, `export_doc`, finish.
 - `agent`: tool loop and plan gate; never imports `memory` or `store`.
 - `memory`: store adapter; the first store failure disables it.
 - `rag`: chunk, index, embed, search.
