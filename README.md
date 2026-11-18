@@ -323,10 +323,10 @@ The `name` cell is `Command.DisplayNames`. The `args` cell lists `Arg.Name`; opt
 
 ## Docker
 
-The image contains no config and no secrets. Mount the project at `/work` and a config file at `/config/config.yaml`. The container is not a sandbox: a shell command can read the whole container, including `/config/config.yaml`, which is mounted writable so `/set` works.
+The image contains no config and no secrets. The image is built from tracked files only; untracked and ignored paths never enter the build context. Mount the project at `/work` and a config file at `/config/config.yaml`. The container is not a sandbox: a shell command can read the whole container, including `/config/config.yaml`, which is mounted writable so `/set` works.
 
 ```sh
-docker build --target base -t konsolai:dev .
+scripts/docker.sh build base
 docker run -it --rm \
   --user "$(id -u):$(id -g)" \
   -v "$PWD":/work \
