@@ -78,6 +78,7 @@ type Config struct {
 	PlanFiles         []string
 	PlanCmds          []string
 	PlanText          string
+	NamedRoots        []string
 	TokenCap          int
 	ThinkingMaxTokens int
 	PlanThink         string
@@ -608,7 +609,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					}
 					if forceAsk {
 						ui.BeforeOutput()
-						d, reason, err = cfg.Confirmer.ConfirmForced(summary, action.Preview())
+						d, reason, err = cfg.Confirmer.ConfirmForced(summary, namedPreview(action.Preview(), cfg.NamedRoots))
 					} else {
 						if outside && cfg.AutoApprove {
 							ui.BeforeOutput()
@@ -927,4 +928,17 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		}
 	}
 	return ErrMaxSteps
+}
+
+// namedPreview appends the write roots the request named, so the forced
+// confirmation shows everything the turn will allow.
+func namedPreview(preview string, roots []string) string {
+	if len(roots) == 0 {
+		return preview
+	}
+	line := "write roots named by the request: " + strings.Join(roots, ", ")
+	if strings.TrimSpace(preview) == "" {
+		return line
+	}
+	return strings.TrimRight(preview, "\n") + "\n" + line
 }
