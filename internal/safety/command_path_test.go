@@ -82,3 +82,28 @@ func TestCommandPathsSymlink(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 }
+
+func TestCommandPathsReadOnlySensitive(t *testing.T) {
+	g := mustGuard(t)
+	for _, cmd := range []string{
+		"cat ~/.ssh/id_rsa",
+		"head ~/.pgpass",
+		"wc -l ~/.config/konsolai/config.yaml",
+		"cat ~/.ssh/*",
+		"cat ~/.gnupg/private-keys-v1.d",
+	} {
+		if err := g.CheckCommandPaths(cmd, g.Base()); !errors.Is(err, ErrSensitiveFile) {
+			t.Errorf("%q: want ErrSensitiveFile, got %v", cmd, err)
+		}
+	}
+	for _, cmd := range []string{
+		"cat /etc/os-release",
+		"ls /tmp",
+		"grep -r id_rsa .",
+		"cat README.md",
+	} {
+		if err := g.CheckCommandPaths(cmd, g.Base()); err != nil {
+			t.Errorf("%q: %v", cmd, err)
+		}
+	}
+}
