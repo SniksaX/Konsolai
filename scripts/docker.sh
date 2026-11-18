@@ -23,14 +23,20 @@ EOF
 }
 
 image_name() {
-	case "${KONSOLAI_TARGET:-base}" in
-	full) printf '%s\n' konsolai:full ;;
-	base) printf '%s\n' konsolai:dev ;;
-	*)
-		echo "scripts/docker.sh: KONSOLAI_TARGET must be base or full" >&2
-		exit 2
-		;;
+	case "${KONSOLAI_TARGET:-}" in
+	full) printf '%s\n' konsolai:full; return ;;
+	base) printf '%s\n' konsolai:dev; return ;;
 	esac
+	# No explicit target: prefer the base image, fall back to the full one.
+	if docker image inspect konsolai:dev >/dev/null 2>&1; then
+		printf '%s\n' konsolai:dev
+		return
+	fi
+	if docker image inspect konsolai:full >/dev/null 2>&1; then
+		printf '%s\n' konsolai:full
+		return
+	fi
+	printf '%s\n' konsolai:dev
 }
 
 # -p fixes the project. A surrounding COMPOSE_PROJECT_NAME cannot retarget it.
