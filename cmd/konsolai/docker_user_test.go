@@ -13,12 +13,7 @@ import (
 )
 
 func TestDockerArbitraryUser(t *testing.T) {
-	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("needs docker")
-	}
-	if !dockerDaemon(t) {
-		t.Skip("docker daemon is not available")
-	}
+	requireDocker(t)
 	lockCompose(t)
 	root := moduleRoot(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
