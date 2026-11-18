@@ -455,8 +455,8 @@ func TestRunTurnRepeatedRejectExit(t *testing.T) {
 	if !strings.Contains(errB.String(), "konsolai: stopped: ") || !strings.Contains(errB.String(), "propose_plan") {
 		t.Fatalf("stderr %q", errB.String())
 	}
-	if n := strings.Count(strings.TrimSpace(errB.String()), "\n"); n > 3 {
-		t.Fatalf("message is not short: %q", errB.String())
+	if n := strings.Count(strings.TrimSpace(errB.String()), "\n"); n != 0 {
+		t.Fatalf("message is not one line: %q", errB.String())
 	}
 }
 
