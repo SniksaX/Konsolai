@@ -2,8 +2,7 @@
 # Debian Chromium so PDF and Mermaid export can run inside the container.
 # The image ships no config and no secrets. Mount the config at /config.
 
-ARG BUILDPLATFORM=linux/amd64
-FROM --platform=$BUILDPLATFORM golang:1.27.1-bookworm@sha256:8d48e12ec56735e9358640898b9d9b9fcca110612ed8a5567438c0a1baa24e66 AS build
+FROM golang:1.27.1-bookworm@sha256:8d48e12ec56735e9358640898b9d9b9fcca110612ed8a5567438c0a1baa24e66 AS build
 
 ARG VERSION=docker
 ARG TARGETARCH
