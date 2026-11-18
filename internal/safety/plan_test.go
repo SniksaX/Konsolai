@@ -169,6 +169,30 @@ func TestAllowPlanFilesLocalBin(t *testing.T) {
 	}
 }
 
+func TestAllowPlanFilesGrantsOnlyTheFileAndParent(t *testing.T) {
+	root := t.TempDir()
+	g, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	target := filepath.Join(outside, "a", "b", "file.txt")
+	if _, err := g.ResolvePath(target); err == nil {
+		t.Fatal("before plan: want escape")
+	}
+	g.AllowPlanFiles([]string{target})
+	if _, err := g.ResolvePath(target); err != nil {
+		t.Fatalf("planned file: %v", err)
+	}
+	// The immediate parent is granted for mkdir; an ancestor is not.
+	if _, err := g.ResolvePath(filepath.Join(outside, "a", "b", "sibling.txt")); err != nil {
+		t.Fatalf("parent sibling: %v", err)
+	}
+	if _, err := g.ResolvePath(filepath.Join(outside, "a", "other.txt")); err == nil {
+		t.Fatal("an ancestor must not be granted")
+	}
+}
+
 func TestPlanCommandForbiddenSudo(t *testing.T) {
 	if err := PlanCommandForbidden("sudo pacman -S foo"); err == nil || err.Error() != PrivilegedPlanMsg {
 		t.Fatalf("sudo: %v", err)
