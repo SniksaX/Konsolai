@@ -134,7 +134,7 @@ Work lands on `dev`. Config keys are the single table in `internal/config/keys.g
 ## Known issues and backlog
 
 - Task X animations: not done. The banner is static (`banner.Startup` writes the wordmark once). Do not implement animations unless a task says so.
-- `Run`'s shared locals: `confirm.go` was not created. The confirm flow, plan-gate loop, and explore-budget counter live inside `agent.Run` and share locals (`planApproved`, `planFiles`, `planCmds`, `planText`, `explore`, `prepRejectKey`, `prepRejects`, `userRejectKey`, `userRejects`, `seenFail`, `approvedAll`, `shellFail`, `consecFail`, `planRejected`, `postPlanReads`, `docsExportNoted`, `docsExportWait`, `forceMutating`, `forceExport`, `forcePropose`, `sawGateReject`). This needs a state-struct refactor. Do not split `Run` by changing control flow.
+- `agent.Run` keeps its control flow; the shared flags, counters and slices live in `runState`. Do not split `Run` by changing control flow.
 - Placeholder color is fixed by readline: `github.com/reeflective/readline@v1.3.0/internal/display/refresh.go` lines 277 and 282 paint `color.Dim` plus Fg 242. The public API is only `SetInlineSuggestion(string)`. Do not fork the library.
 - CPU embeddings can make `/index` slow when an embed service is configured.
 - A configured reranker is often unreachable.
