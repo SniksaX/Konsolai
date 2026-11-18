@@ -50,15 +50,18 @@ fi
 
 while IFS= read -r subject; do
 	[[ -z "$subject" ]] && continue
-	case "$subject" in
-	Test* | Cover* | Assert* | Prove*) continue ;;
-	esac
 	if machine_name "$subject"; then
 		continue
 	fi
 	if [[ ! "$subject" =~ ^\[([A-Z]+)\| ]]; then
 		continue
 	fi
+	# Test-only commits carry the same [TYPE|SIZE] prefix, so skip on the
+	# title after it, not on the whole subject.
+	title="${subject#*] }"
+	case "$title" in
+	Test* | Cover* | Assert* | Prove*) continue ;;
+	esac
 	case "${BASH_REMATCH[1]}" in
 	ADD) added+=("$subject") ;;
 	UPDATE | REFACTOR | MOVE) changed+=("$subject") ;;
