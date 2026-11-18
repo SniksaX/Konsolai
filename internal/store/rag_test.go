@@ -166,3 +166,21 @@ func TestPersistCodeFileAfterChunks(t *testing.T) {
 		t.Fatalf("ok.go should not be orphan: %v", orphans)
 	}
 }
+
+func TestChunkContentRedacted(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	secret := skKey()
+	if ok, err := s.InsertChunk(ctx, ChunkIn{
+		Profile: "home", Source: "turn", Content: "token " + secret, Embedding: unitVec(1),
+	}); err != nil || !ok {
+		t.Fatalf("insert %v %v", ok, err)
+	}
+	var content string
+	if err := s.pool.QueryRow(ctx, `SELECT content FROM memory_chunks WHERE profile = 'home'`).Scan(&content); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(content, secret) {
+		t.Fatalf("chunk kept the secret: %q", content)
+	}
+}
