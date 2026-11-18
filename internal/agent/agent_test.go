@@ -1307,8 +1307,13 @@ func TestTraceCountsOutsideAndRejects(t *testing.T) {
 }
 
 func TestPlanAuthorizesLocalBinWrite(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	rel := "~/.local/bin/konsolai-agent-plan-auth-test"
-	abs := filepath.Join(os.Getenv("HOME"), ".local", "bin", "konsolai-agent-plan-auth-test")
+	abs := filepath.Join(home, ".local", "bin", "konsolai-agent-plan-auth-test")
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	defer os.Remove(abs)
 	_, rep, err := setupCfg(t, []llm.Message{
 		assistant(call("1", "propose_plan", `{"summary":"bin","steps":["write"],"files":["`+rel+`"]}`)),
