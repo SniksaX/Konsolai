@@ -28,10 +28,6 @@ type Palette struct {
 	Scheme    string
 }
 
-func ApplyTheme(scheme string, plain bool) {
-	theme.Apply(theme.Config{Palette: scheme, Appearance: theme.Auto, Plain: plain, CodeHighlight: true})
-}
-
 func ApplyUI(palette, appearance string, plain, codeHighlight bool) {
 	ApplyUIOpts(palette, appearance, plain, codeHighlight, true)
 }
