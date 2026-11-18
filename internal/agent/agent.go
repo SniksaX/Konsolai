@@ -545,7 +545,11 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			inPlanHit := false
 			if kind == tools.Mutating && cfg.RequirePlan && planApproved {
 				if p, ok := filePathOf(action); ok {
-					if inPlan(planFiles, p) {
+					planRoot, planBase := "", ""
+					if cfg.Guard != nil {
+						planRoot, planBase = cfg.Guard.Root(), cfg.Guard.Base()
+					}
+					if inPlanPath(planFiles, p, planRoot, planBase) {
 						inPlanHit = true
 					} else {
 						outside = true
