@@ -2621,6 +2621,27 @@ func TestIdenticalPlanRejectStops(t *testing.T) {
 	}
 }
 
+func TestUserRejectedIdenticalPlanStops(t *testing.T) {
+	plan := `{"summary":"health","steps":["go build ./..."],"commands":["go build ./..."],"files":[]}`
+	replies := []llm.Message{
+		assistant(call("p0", "propose_plan", plan)),
+		assistant(call("p1", "propose_plan", plan)),
+		assistant(call("fin", "finish", `{"summary":"should not run"}`)),
+	}
+	_, rep, err := setupCfg(t, replies, stubConfirm{d: ui.Reject, reason: "no"}, Config{
+		RequirePlan: true, MaxSteps: 6,
+	})
+	if !errors.Is(err, ErrRejected) {
+		t.Fatalf("err %v, want ErrRejected", err)
+	}
+	if !strings.Contains(err.Error(), "propose_plan") {
+		t.Fatalf("err %q does not name the tool", err)
+	}
+	if len(rep.reqs) != 2 {
+		t.Fatalf("model calls %d, want 2", len(rep.reqs))
+	}
+}
+
 func TestShellStillRequiresPlan(t *testing.T) {
 	_, rep, err := setupCfg(t, []llm.Message{
 		assistant(call("1", "run_shell", `{"cmd":"go build ./..."}`)),
