@@ -1,6 +1,0 @@
-
-  > konsolai
-
-  v0.1.0   main-model   ~/projects/demo
-  / for commands   ! for shell   @ for files
-
