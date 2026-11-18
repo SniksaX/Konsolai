@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode"
 )
@@ -32,8 +33,48 @@ func (g *Guard) CheckCommandPaths(cmd, dir string) error {
 				}
 			}
 		}
+		// A quoted -c script hides its redirects from the word scan.
+		if shellInterpreters[SegmentBinary(seg)] {
+			for _, p := range scriptRedirectTargets(seg) {
+				if _, err := g.resolve(p, dir); err != nil {
+					return err
+				}
+			}
+		}
 	}
 	return nil
+}
+
+// shellInterpreters run a quoted script, so their redirects are invisible to
+// strings.Fields and are checked separately.
+var shellInterpreters = map[string]bool{
+	"bash": true, "sh": true, "dash": true, "zsh": true,
+	"python": true, "python3": true, "perl": true, "ruby": true,
+	"node": true, "php": true, "eval": true,
+}
+
+var redirectRe = regexp.MustCompile(`[0-9]*>>?\s*("[^"]*"|'[^']*'|[^\s;|&<>]+)`)
+
+// scriptRedirectTargets lists the literal files a quoted shell script redirects
+// to; the plain redirectTargets skips quoted text on purpose.
+func scriptRedirectTargets(seg string) []string {
+	var out []string
+	for _, m := range redirectRe.FindAllStringSubmatch(seg, -1) {
+		t := unquoteWord(strings.TrimSpace(m[1]))
+		// A redirect at the end of a quoted script keeps the closing quote.
+		t = strings.Trim(t, `"'`)
+		if t == "" || strings.HasPrefix(t, "&") || t == "-" {
+			continue
+		}
+		if strings.ContainsAny(t, "$`*?[") || strings.Contains(t, "://") {
+			continue
+		}
+		if benignPath(t) {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
 }
 
 // checkReadSegment denies a read-only segment whose statically visible path
