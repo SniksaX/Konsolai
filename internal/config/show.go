@@ -27,11 +27,6 @@ func (c Config) ShowYAML() (string, error) {
 	return renderShow(c), nil
 }
 
-// RenderResolved is the commented config document for c.
-func RenderResolved(c Config) string {
-	return renderCurrentYAML(c)
-}
-
 func WriteInit(path string, force bool) error {
 	return writeConfigFile(path, InitYAML(), force)
 }
