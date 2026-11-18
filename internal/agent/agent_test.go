@@ -2621,6 +2621,42 @@ func TestIdenticalPlanRejectStops(t *testing.T) {
 	}
 }
 
+type captureConfirm struct {
+	d      ui.Decision
+	forced string
+}
+
+func (c *captureConfirm) Confirm(_, _ string) (ui.Decision, string, error) {
+	return c.d, "", nil
+}
+
+func (c *captureConfirm) ConfirmForced(_, preview string) (ui.Decision, string, error) {
+	c.forced = preview
+	return c.d, "", nil
+}
+
+func TestForcedConfirmShowsNamedRoots(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.AllowRoots([]string{outside})
+	target := filepath.Join(outside, "note.txt")
+	conf := &captureConfirm{d: ui.Reject}
+	_, _, _ = setupCfg(t, []llm.Message{
+		assistant(call("1", "write_file", `{"path":"`+target+`","content":"x"}`)),
+	}, conf, Config{
+		Guard: g, Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		RequirePlan: true, ResumePlan: true, PlanFiles: []string{"planned.txt"},
+		NamedRoots: []string{outside}, MaxSteps: 2,
+	})
+	if !strings.Contains(conf.forced, outside) {
+		t.Fatalf("forced preview %q", conf.forced)
+	}
+}
+
 func TestInPlanUsesRepoAndCwdBases(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "sub")
