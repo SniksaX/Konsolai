@@ -202,6 +202,8 @@ func inPlanCmd(cmds []string, cmd string) bool {
 	return ok
 }
 
+// inPlan matches a planned file against a written one under the old relative
+// comparison. It stays until every caller uses inPlanPath.
 func inPlan(files []string, path string) bool {
 	path = strings.TrimPrefix(filepath.ToSlash(path), "./")
 	for _, f := range files {
@@ -210,6 +212,28 @@ func inPlan(files []string, path string) bool {
 		}
 	}
 	return false
+}
+
+// inPlanPath matches a planned file against one the action writes. Plan files
+// are repo-relative and action paths are relative to the guard base (the cwd),
+// so both are compared as absolute paths. Empty bases keep the plain
+// comparison.
+func inPlanPath(files []string, path, root, base string) bool {
+	abs := planAbs(path, base)
+	for _, f := range files {
+		if planAbs(f, root) == abs {
+			return true
+		}
+	}
+	return false
+}
+
+func planAbs(p, base string) string {
+	p = strings.TrimSpace(p)
+	if filepath.IsAbs(p) {
+		return filepath.Clean(p)
+	}
+	return filepath.Clean(filepath.Join(base, filepath.FromSlash(p)))
 }
 
 func identicalRejectLimit(cfg Config) int {
