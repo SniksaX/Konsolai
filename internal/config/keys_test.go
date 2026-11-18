@@ -163,9 +163,6 @@ func TestEveryEnvOverrides(t *testing.T) {
 		if err := k.setFromString(&probe, samples[k.Env]); err != nil {
 			t.Fatal(err)
 		}
-		if k.format(probe) != k.format(c) && k.Path != "language.default" {
-			// language.default is not an env key
-		}
 		if k.present(c, false) != k.present(probe, false) {
 			t.Errorf("%s env %s got %s want %s", k.Env, k.Path, k.present(c, false), k.present(probe, false))
 		}
