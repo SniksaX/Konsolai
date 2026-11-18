@@ -261,7 +261,7 @@ func NewFactStore(g *Guard, profile string, projectID *int64, sessionID string) 
 func (f *FactStore) Add(ctx context.Context, fact, scope string) error {
 	s := f.g.live()
 	if s == nil {
-		return nil
+		return fmt.Errorf("memory: not configured")
 	}
 	var err error
 	switch scope {
