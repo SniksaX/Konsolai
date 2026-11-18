@@ -21,6 +21,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Require the tag on prod
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin +refs/heads/prod:refs/remotes/origin/prod
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/prod
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -35,6 +43,15 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o dist/konsolai-linux-amd64 ./cmd/konsolai
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o dist/konsolai-linux-arm64 ./cmd/konsolai
 
+      - name: Write checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum konsolai-linux-amd64 konsolai-linux-arm64 > SHA256SUMS
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -45,15 +62,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Classify the tag
+        id: latest
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            echo "extra=" >> "$GITHUB_OUTPUT"
+          else
+            echo "extra=ghcr.io/sniksax/konsolai:latest" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Push base image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           target: base
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ghcr.io/sniksax/konsolai:${{ github.ref_name }}
-            ghcr.io/sniksax/konsolai:latest
+            ${{ steps.latest.outputs.extra }}
           build-args: |
             VERSION=${{ github.ref_name }}
 
@@ -62,6 +90,7 @@ jobs:
         with:
           context: .
           target: full
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ghcr.io/sniksax/konsolai:${{ github.ref_name }}-full
           build-args: |
@@ -70,6 +99,8 @@ jobs:
       - name: Attach binaries
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
+          generate_release_notes: true
           files: |
             dist/konsolai-linux-amd64
             dist/konsolai-linux-arm64
+            dist/SHA256SUMS
