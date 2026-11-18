@@ -7,4 +7,5 @@ tagargs=()
 if [[ -n "${TAGS:-}" ]]; then
 	tagargs=(-tags "$TAGS")
 fi
+mkdir -p ~/.local/bin
 go build -trimpath "${tagargs[@]}" -ldflags "-s -w -X main.version=${ver}" -o ~/.local/bin/konsolai ./cmd/konsolai
