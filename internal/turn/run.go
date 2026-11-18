@@ -406,6 +406,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			Stats:             &agent.Stats{},
 			OnShell:           r.RememberShell,
 			Guard:             sg,
+			NamedRoots:        extras,
 		}
 		if files, cmds, text, ok := agent.RestoreApprovedPlan(history); ok && strings.Contains(req.Text, continueNote) {
 			cfg.ResumePlan = true
