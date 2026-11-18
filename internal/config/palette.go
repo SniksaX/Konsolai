@@ -53,12 +53,6 @@ func SetTheme(path, name string) error {
 	return writeUIScalar(path, "theme", canon)
 }
 
-// SetPalette writes the resolved theme name to defaults.ui.theme.
-// Kept so callers that still say "palette" persist the new key.
-func SetPalette(path, name string) error {
-	return SetTheme(path, name)
-}
-
 func writeUIScalar(path, key, value string) error {
 	if path == "" {
 		path = DefaultPath()
