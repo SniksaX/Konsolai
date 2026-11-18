@@ -338,7 +338,7 @@ docker run -it --rm \
 
 `scripts/docker.sh build base` is that build. `scripts/docker.sh build full` is the PDF image: Debian Chromium at `KONSOLAI_CHROME=/usr/bin/chromium`. Headless Chromium uses `--no-sandbox`, so `/pdf` and `export_doc` can render diagrams. After a full build, `scripts/docker.sh run` picks `konsolai:full` when the base image is missing, or set `KONSOLAI_TARGET=full` explicitly.
 
-`docker compose up -d` starts only the database. Every Compose variable has a default, so there is no env file to create. The database is a local development database on its own volume and a non-default published port (`KONSOLAI_DB_PORT`, default `55434`). The password defaults to `konsolai` (`KONSOLAI_DB_PASSWORD`). Override either value from the shell. It does not use the developer's database. `scripts/docker.sh` exports the host uid and gid and does not read an env file. `scripts/docker.sh db down` stops that Compose project only.
+`docker compose up -d` starts only the database. Every Compose variable has a default, so there is no env file to create. The database is a local development database on its own volume and a non-default published port (`KONSOLAI_DB_PORT`, default `55434`). The password defaults to `konsolai` (`KONSOLAI_DB_PASSWORD`). Override either value from the shell. The password is part of the database URL, so URL-encode characters such as `@`, `:`, `/`, `?` and `#`. It does not use the developer's database. `scripts/docker.sh` exports the host uid and gid and does not read an env file. `scripts/docker.sh db down` stops that Compose project only.
 
 ```sh
 docker compose up -d
