@@ -20,3 +20,9 @@ if ! printf '%s\n' "$msg" | grep -Eq '^\[(ADD|UPDATE|FIX|DELETE|MOVE|REFACTOR)\|
 	echo "expected: [TYPE|SIZE] Title in imperative mood" >&2
 	exit 1
 fi
+
+title=${msg#*] }
+if [[ ${#title} -gt 72 ]]; then
+	echo "commit title is ${#title} characters; the limit is 72" >&2
+	exit 1
+fi
