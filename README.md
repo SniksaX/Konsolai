@@ -3,17 +3,15 @@
 </h1>
 
 <p align="center">
-  <a href="https://github.com/SniksaX/Konsolai/actions/workflows/ci.yml"><img src="https://github.com/SniksaX/Konsolai/actions/workflows/ci.yml/badge.svg?branch=dev" alt="ci"></a>
-  <a href="https://github.com/SniksaX/Konsolai/actions/workflows/release.yml"><img src="https://github.com/SniksaX/Konsolai/actions/workflows/release.yml/badge.svg" alt="release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/SniksaX/Konsolai" alt="license"></a>
-  <img src="https://img.shields.io/github/go-mod/go-version/SniksaX/Konsolai" alt="go version">
-  <img src="https://img.shields.io/github/last-commit/SniksaX/Konsolai/dev" alt="last commit on dev">
-  <img src="https://img.shields.io/badge/models-OpenAI--compatible-blue" alt="models: OpenAI-compatible">
+  Local coding agent for your terminal.<br>
+  Plan-first builds, explicit approvals, any OpenAI-compatible model server.
 </p>
 
 <p align="center">
-  Local coding agent for your terminal.<br>
-  Plan-first builds, explicit approvals, any OpenAI-compatible model server.
+  <a href="https://github.com/SniksaX/Konsolai/releases"><img alt="version" src="https://img.shields.io/github/v/release/SniksaX/Konsolai?label=version&color=blue"></a>
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/github/license/SniksaX/Konsolai?color=green"></a>
+  <img alt="go" src="https://img.shields.io/github/go-mod/go-version/SniksaX/Konsolai?color=00ADD8">
+  <img alt="models" src="https://img.shields.io/badge/models-OpenAI--compatible-orange">
 </p>
 
 ## Quick start
