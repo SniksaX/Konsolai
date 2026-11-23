@@ -2,11 +2,18 @@
 set -euo pipefail
 
 name=konsolai-pg-test
+# Same digest as compose.yaml and the CI service, so the test schema does not drift.
+image='pgvector/pgvector:pg17-trixie@sha256:7a7e9f22015b67edb4bef5c59daeebcd7e74bfa570df6ce60ae01237c8648a84'
 export KONSOLAI_TEST_DATABASE_URL="${KONSOLAI_TEST_DATABASE_URL:-postgres://postgres:ktest@localhost:55433/konsolai_test?sslmode=disable}"
 
 usage() {
 	echo "usage: scripts/test-db.sh up|down" >&2
 	exit 2
+}
+
+# The tests read the URL from their own shell, so print it once the database is ready.
+hint() {
+	echo "export KONSOLAI_TEST_DATABASE_URL=\"${KONSOLAI_TEST_DATABASE_URL}\"" >&2
 }
 
 # Never touch the developer's own database container. Integration tests use this script.
@@ -21,6 +28,7 @@ fi
 
 if docker inspect "$name" >/dev/null 2>&1; then
 	if [[ "$(docker inspect -f '{{.State.Running}}' "$name")" == "true" ]]; then
+		hint
 		exit 0
 	fi
 	docker rm -f "$name" >/dev/null 2>&1 || true
@@ -30,10 +38,11 @@ docker run -d --rm --name "$name" --network host \
 	-e POSTGRES_PASSWORD=ktest \
 	-e POSTGRES_DB=konsolai_test \
 	-e PGPORT=55433 \
-	pgvector/pgvector:pg17-trixie >/dev/null
+	"$image" >/dev/null
 
 for _ in $(seq 1 40); do
 	if docker exec "$name" pg_isready -h 127.0.0.1 -p 55433 -U postgres >/dev/null 2>&1; then
+		hint
 		exit 0
 	fi
 	sleep 0.25

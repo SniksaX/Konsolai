@@ -406,6 +406,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			Stats:             &agent.Stats{},
 			OnShell:           r.RememberShell,
 			Guard:             sg,
+			NamedRoots:        extras,
 		}
 		if files, cmds, text, ok := agent.RestoreApprovedPlan(history); ok && strings.Contains(req.Text, continueNote) {
 			cfg.ResumePlan = true
@@ -480,6 +481,10 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		if errors.Is(err, agent.ErrMaxSteps) {
 			fmt.Fprintf(r.errw(), "konsolai: stopped after %d steps without finishing\n", cfg.MaxSteps)
 			return 4, "", tok, true
+		}
+		if errors.Is(err, agent.ErrRejected) {
+			fmt.Fprintf(r.errw(), "konsolai: stopped: %s; the task was not completed\n", strings.TrimPrefix(err.Error(), "agent: "))
+			return 5, "", tok, true
 		}
 		if errors.Is(err, agent.ErrNoAnswer) {
 			fmt.Fprintln(r.errw(), "konsolai: the model returned no answer")

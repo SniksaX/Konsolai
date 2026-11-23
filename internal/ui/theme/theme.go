@@ -337,13 +337,6 @@ func Italic(text string) string {
 	return wrap("3", text)
 }
 
-func Underline(text string) string {
-	if text == "" || !snap().enabled {
-		return text
-	}
-	return wrap("4", text)
-}
-
 func PaintRGB(c RGB, text string) string {
 	if text == "" || !snap().enabled {
 		return text
@@ -370,22 +363,10 @@ func AccentCode() string {
 	return fgCode(s, roleColor(s.palette, s.appear, Accent))
 }
 
-func HeadingCode() string {
-	s := snap()
-	if !s.enabled {
-		return ""
-	}
-	return fgCode(s, roleColor(s.palette, s.appear, Heading))
-}
-
 func MutedSeq() string {
 	s := snap()
 	if !s.enabled {
 		return ""
 	}
 	return "\x1b[" + fgCode(s, roleColor(s.palette, s.appear, Muted)) + "m"
-}
-
-func DescStyle() string {
-	return MutedSeq()
 }

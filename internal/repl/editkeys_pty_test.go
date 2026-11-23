@@ -194,27 +194,35 @@ func exerciseEditing(t *testing.T, v *ptyView, menu bool) {
 			return ok && text == prefix+s
 		})
 	}
-	send := func(why, keys, want string, cur int) {
+	send := func(why, keys, want string, cur int) *screen {
 		t.Helper()
 		v.write(keys)
-		v.see(why, func(sc *screen) bool {
+		// Assert on the frame that matched. Re-shooting here can catch a
+		// later partial redraw whose cursor is still at the prompt column.
+		sc := v.see(why, func(sc *screen) bool {
 			text, got, ok := inputState(sc)
 			if !ok || strings.ContainsAny(text, "[;~") || text != want {
 				return false
 			}
 			return cur < 0 || got == cur
 		})
-		text, got, ok := inputState(v.shot())
+		text, got, ok := inputState(sc)
 		if !ok || strings.ContainsAny(text, "[;~") || text != want || (cur >= 0 && got != cur) {
-			failScreen(t, why+" line "+showLine(text)+" cur "+ntoa(got)+" want "+showLine(want)+" cur "+ntoa(cur), v.shot(), v.raw())
+			failScreen(t, why+" line "+showLine(text)+" cur "+ntoa(got)+" want "+showLine(want)+" cur "+ntoa(cur), sc, v.raw())
 		}
+		return sc
 	}
 	moved := func(why, keys, want string, minCur int) {
 		t.Helper()
-		send(why, keys, want, -1)
-		_, got, ok := inputState(v.shot())
+		v.write(keys)
+		// Wait for the cursor to actually move, then assert on that frame.
+		sc := v.see(why, func(sc *screen) bool {
+			text, got, ok := inputState(sc)
+			return ok && !strings.ContainsAny(text, "[;~") && text == want && got >= minCur
+		})
+		_, got, ok := inputState(sc)
 		if !ok || got < minCur {
-			failScreen(t, why+" cursor "+ntoa(got), v.shot(), v.raw())
+			failScreen(t, why+" cursor "+ntoa(got), sc, v.raw())
 		}
 	}
 

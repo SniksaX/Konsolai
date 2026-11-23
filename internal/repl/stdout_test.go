@@ -34,10 +34,16 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	os.Stdout = w
+	// Drain while the tests run: a pipe with no reader blocks after 64 KiB.
+	var buf bytes.Buffer
+	drained := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&buf, r)
+		close(drained)
+	}()
 	code := m.Run()
 	_ = w.Close()
-	var buf bytes.Buffer
-	_, _ = io.Copy(&buf, r)
+	<-drained
 	_ = r.Close()
 	os.Stdout = real
 	if bytes.Contains(buf.Bytes(), []byte{0x1b}) {

@@ -82,3 +82,48 @@ func TestCommandPathsSymlink(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 }
+
+func TestCommandPathsScriptRedirect(t *testing.T) {
+	g := mustGuard(t)
+	if err := g.CheckCommandPaths("bash -c 'echo x > /etc/passwd'", g.Base()); err == nil {
+		t.Fatal("a redirect outside the root must be denied")
+	}
+	if err := g.CheckCommandPaths("sh -c 'printf x > ~/escape'", g.Base()); err == nil {
+		t.Fatal("a tilde redirect outside the root must be denied")
+	}
+	for _, cmd := range []string{
+		"bash -c 'echo x > out.txt'",
+		"bash -c 'echo x > /dev/null'",
+		"bash -c 'echo x 2>&1'",
+		"python3 -c 'print(1)'",
+	} {
+		if err := g.CheckCommandPaths(cmd, g.Base()); err != nil {
+			t.Errorf("%q: %v", cmd, err)
+		}
+	}
+}
+
+func TestCommandPathsReadOnlySensitive(t *testing.T) {
+	g := mustGuard(t)
+	for _, cmd := range []string{
+		"cat ~/.ssh/id_rsa",
+		"head ~/.pgpass",
+		"wc -l ~/.config/konsolai/config.yaml",
+		"cat ~/.ssh/*",
+		"cat ~/.gnupg/private-keys-v1.d",
+	} {
+		if err := g.CheckCommandPaths(cmd, g.Base()); !errors.Is(err, ErrSensitiveFile) {
+			t.Errorf("%q: want ErrSensitiveFile, got %v", cmd, err)
+		}
+	}
+	for _, cmd := range []string{
+		"cat /etc/os-release",
+		"ls /tmp",
+		"grep -r id_rsa .",
+		"cat README.md",
+	} {
+		if err := g.CheckCommandPaths(cmd, g.Base()); err != nil {
+			t.Errorf("%q: %v", cmd, err)
+		}
+	}
+}

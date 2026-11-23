@@ -13,20 +13,16 @@ import (
 )
 
 func TestDockerArbitraryUser(t *testing.T) {
-	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("needs docker")
-	}
-	if !dockerDaemon(t) {
-		t.Skip("docker daemon is not available")
-	}
+	requireDocker(t)
 	lockCompose(t)
 	root := moduleRoot(t)
+	ctxDir := trackedContext(t, root)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
-	if out, err := dockerCombined(ctx, "build", "--target", "base", "-t", "konsolai:dev", root); err != nil {
+	if out, err := dockerCombined(ctx, "build", "--target", "base", "-t", "konsolai:dev", ctxDir); err != nil {
 		t.Fatalf("build base: %v\n%s", err, out)
 	}
-	if out, err := dockerCombined(ctx, "build", "--target", "full", "-t", "konsolai:full", root); err != nil {
+	if out, err := dockerCombined(ctx, "build", "--target", "full", "-t", "konsolai:full", ctxDir); err != nil {
 		t.Fatalf("build full: %v\n%s", err, out)
 	}
 

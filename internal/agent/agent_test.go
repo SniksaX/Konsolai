@@ -1307,8 +1307,13 @@ func TestTraceCountsOutsideAndRejects(t *testing.T) {
 }
 
 func TestPlanAuthorizesLocalBinWrite(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	rel := "~/.local/bin/konsolai-agent-plan-auth-test"
-	abs := filepath.Join(os.Getenv("HOME"), ".local", "bin", "konsolai-agent-plan-auth-test")
+	abs := filepath.Join(home, ".local", "bin", "konsolai-agent-plan-auth-test")
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	defer os.Remove(abs)
 	_, rep, err := setupCfg(t, []llm.Message{
 		assistant(call("1", "propose_plan", `{"summary":"bin","steps":["write"],"files":["`+rel+`"]}`)),
@@ -2607,17 +2612,94 @@ func TestIdenticalPlanRejectStops(t *testing.T) {
 	if errors.Is(err, ErrMaxSteps) {
 		t.Fatal("identical rejects ran to the step cap")
 	}
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, ErrRejected) {
+		t.Fatalf("err %v, want ErrRejected", err)
+	}
+	if !strings.Contains(err.Error(), "propose_plan") {
+		t.Fatalf("err %q does not name the tool", err)
 	}
 	if len(rep.reqs) != 2 {
 		t.Fatalf("model calls %d, want 2", len(rep.reqs))
 	}
-	s := out.String()
-	for _, want := range []string{"go build ./...", "go vet ./...", "go test ./...", "files may be omitted: yes"} {
-		if !strings.Contains(s, want) {
-			t.Fatalf("missing %q in %q", want, s)
-		}
+	if n := strings.Count(out.String(), "fields: summary (string)"); n != 2 {
+		t.Fatalf("reject text printed %d times, want once per reject and never as the answer: %q", n, out.String())
+	}
+}
+
+type captureConfirm struct {
+	d      ui.Decision
+	forced string
+}
+
+func (c *captureConfirm) Confirm(_, _ string) (ui.Decision, string, error) {
+	return c.d, "", nil
+}
+
+func (c *captureConfirm) ConfirmForced(_, preview string) (ui.Decision, string, error) {
+	c.forced = preview
+	return c.d, "", nil
+}
+
+func TestForcedConfirmShowsNamedRoots(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	g, err := safety.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.AllowRoots([]string{outside})
+	target := filepath.Join(outside, "note.txt")
+	conf := &captureConfirm{d: ui.Reject}
+	_, _, _ = setupCfg(t, []llm.Message{
+		assistant(call("1", "write_file", `{"path":"`+target+`","content":"x"}`)),
+	}, conf, Config{
+		Guard: g, Tools: tools.NewRegistry(g, io.Discard, nil, nil, nil),
+		RequirePlan: true, ResumePlan: true, PlanFiles: []string{"planned.txt"},
+		NamedRoots: []string{outside}, MaxSteps: 2,
+	})
+	if !strings.Contains(conf.forced, outside) {
+		t.Fatalf("forced preview %q", conf.forced)
+	}
+}
+
+func TestInPlanUsesRepoAndCwdBases(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !inPlanPath([]string{"sub/x.txt"}, "x.txt", root, sub) {
+		t.Fatal("cwd-relative write should match a repo-relative plan file")
+	}
+	if !inPlanPath([]string{"sub/x.txt"}, "sub/x.txt", root, root) {
+		t.Fatal("repo-relative write should match")
+	}
+	if inPlanPath([]string{"sub/x.txt"}, "y.txt", root, sub) {
+		t.Fatal("a different file must stay outside the plan")
+	}
+	if !inPlanPath([]string{filepath.Join(root, "sub", "x.txt")}, "x.txt", sub, sub) {
+		t.Fatal("absolute plan file should match")
+	}
+}
+
+func TestUserRejectedIdenticalPlanStops(t *testing.T) {
+	plan := `{"summary":"health","steps":["go build ./..."],"commands":["go build ./..."],"files":[]}`
+	replies := []llm.Message{
+		assistant(call("p0", "propose_plan", plan)),
+		assistant(call("p1", "propose_plan", plan)),
+		assistant(call("fin", "finish", `{"summary":"should not run"}`)),
+	}
+	_, rep, err := setupCfg(t, replies, stubConfirm{d: ui.Reject, reason: "no"}, Config{
+		RequirePlan: true, MaxSteps: 6,
+	})
+	if !errors.Is(err, ErrRejected) {
+		t.Fatalf("err %v, want ErrRejected", err)
+	}
+	if !strings.Contains(err.Error(), "propose_plan") {
+		t.Fatalf("err %q does not name the tool", err)
+	}
+	if len(rep.reqs) != 2 {
+		t.Fatalf("model calls %d, want 2", len(rep.reqs))
 	}
 }
 

@@ -15,7 +15,7 @@ After each phase: `gofmt -l .`, `go vet ./...`, `go test ./... -count=1` (with t
 Test DB: `scripts/test-db.sh up|down`. Never touch the developer's own database container; integration tests use `scripts/test-db.sh`. Compose uses its own volume and published port and never the developer's database.
 UI changes are verified on a real PTY (`/dev/ptmx`, `creack/pty`), not a pipe.
 Code: strict types; no `interface{}` or `any` unless unavoidable; wrap errors as `pkg: context: %w`; no debug logging; no new packages unless the architect specifies them; no new dependencies unless approved.
-Approved in `go.mod`: jackc/pgx/v5, alecthomas/chroma/v2, yuin/goldmark, reeflective/readline, rivo/uniseg, go.yaml.in/yaml/v3, golang.org/x/term, golang.org/x/sys, and test-only creack/pty. Go 1.27.1. Module `github.com/SniksaX/Konsolai`.
+Approved in `go.mod`: jackc/pgx/v5, alecthomas/chroma/v2, yuin/goldmark, reeflective/readline, rivo/uniseg, go.yaml.in/yaml/v3, golang.org/x/term, golang.org/x/sys, and creack/pty (shellmode and the PTY tests). Go 1.27.1. Module `github.com/SniksaX/Konsolai`.
 
 ## Reference setup (example)
 
@@ -47,7 +47,7 @@ Leaves (no `konsolai/internal` imports):
 - `banner`: static splash; `Startup` writes the wordmark once.
 - `store`: Postgres via pgxpool, raw SQL, `turn_stats`.
 - `intent`: four-way router, action floor, language detect.
-- `tools`: shell, files, search, plan, recall, `export_doc`, finish.
+- `tools`: shell, files, search, plan, recall, web fetch, remember, outline, `export_doc`, finish.
 - `agent`: tool loop and plan gate; never imports `memory` or `store`.
 - `memory`: store adapter; the first store failure disables it.
 - `rag`: chunk, index, embed, search.
@@ -64,7 +64,7 @@ The REPL starts only when there is no request and both stdin and stdout are TTYs
 Interactive startup runs `banner.Startup` while `welcome.Gather` probes, then clears that splash and paints the welcome once.
 Welcome height is read from the underlying TTY: `termFile` unwraps `nlWriter`.
 `turn.Runner.RunTurn` classifies intent, then answer streams. Lookup, act, and build run the agent loop.
-The plan gate is always on for build. Act requires a plan only at high effort.
+The plan gate is on for build and for act at high effort by default; `agent.plan.*` can change that.
 
 ## Config
 
@@ -77,10 +77,15 @@ Accessors are the only `<= 0` means default logic (`nonzero` and the ratio acces
 
 - `intent.ActionFloor` plus `RaiseTo` only raise the intent (answer < lookup < act < build). How and why questions are exempt. Escalation runs once.
 - Thinking follows effort. Build and act use `agent.build_thinking` (default `plan_step`: think after an approved plan, or after a shell failure or two consecutive failures). Answer thinks only at high effort. Lookup thinks after two consecutive failures.
-- The plan gate is always on for build and only at high effort for act. Mutating shell lines must pass `safety.MatchPlan`. Identical rejected tool calls stop at `agent.identical_rejects` (default 2).
+- The plan gate is on for build and at high effort for act by default (`agent.plan.*` can change it). Mutating shell lines must pass `safety.MatchPlan`. Identical rejected tool calls stop at `agent.identical_rejects` (default 2).
+- Exit codes: 0 finished, 1 error, 2 usage, 3 aborted at a prompt, 4 max steps, 5 rejected (identical rejected calls reached the limit: `agent.ErrRejected`, one stderr line, session `failed`), 130 interrupted. `turn.SessionStatus` maps 0 to `finished`, 3 and 130 to `aborted`, the rest to `failed`. A stuck turn never exits 0.
 - Privileged commands are refused (`sudo`, `doas`, `su`, `pkexec`). The plan tells the user to run them, via `finish`.
 - `ResolveRead` allows any user-readable path except the sensitive denylist. Writes stay inside the project root.
+- An approved plan grants the planned file and its immediate parent as extra write roots; nothing above the parent is granted.
+- Write roots named by the request are shown at the forced confirmation before a write outside the project root.
 - `redact.String` and `redact.JSON` run before a message or action is persisted.
+- The shell child gets no `KONSOLAI_*` or secret-shaped environment, and captured shell output is redacted before the model sees it. A read-only shell path is checked against the sensitive denylist, globs included.
+- `run_shell` is not a sandbox: substitutions can reach anything the user can. Literal redirects inside an interpreter command are checked against the write roots; the plan gate and the confirm prompt are the write barrier.
 - Prompt size starts as characters times `tokensPerChar`, then that ratio is updated from real `usage.prompt_tokens`. Elision starts above `elide_trigger` (0.60) and stops at `elide_target` (0.40).
 - `llm.Normalize` runs before each chat request: merge consecutive user messages, drop empty assistants, drop orphan tool results.
 - The fast client is preferred when reachable. If an answer stream fails on it, the turn retries on main. Fast is skipped when the prompt passes `context_guard_ratio`.
@@ -98,7 +103,7 @@ Accessors are the only `<= 0` means default logic (`nonzero` and the ratio acces
 - `internal/welcome/testdata/*.golden` (150) via `TestRenderGoldens`. `TestFrameBelow120MatchesSplit`. `TestWideSplitKeepsRecentBesideSession`.
 - PTY: `internal/repl/readline_pty_test.go` (placeholder not accepted, Ctrl-L, slash menu), `internal/repl/theme_pty_test.go` (Esc leaves the theme, Enter applies it in place), `cmd/konsolai/e2e_slash_pty_test.go`.
 - `turn_stats` tests need the test DB (`internal/store/stats_test.go`).
-- Plan: `internal/tools/plan_test.go` (command-only plans, `export_doc` for PDF). `internal/agent/agent_test.go` (`TestIdenticalPlanRejectStops`, `TestShellStillRequiresPlan`).
+- Plan: `internal/tools/plan_test.go` (command-only plans, `export_doc` for PDF). `internal/agent/agent_test.go` (`TestIdenticalPlanRejectStops`, `TestShellStillRequiresPlan`). Exit codes: `TestRunTurnRepeatedRejectExit`, `TestRunTurnMaxStepsExit`, `TestRunTurnInterruptExit`, `TestSessionStatusCodes` in `internal/turn/turn_test.go`.
 - Config: `TestConfigKeysComplete` in `internal/config/keys_test.go`.
 
 ## Current status
@@ -109,32 +114,33 @@ Work lands on `dev`. Config keys are the single table in `internal/config/keys.g
 - `turn_stats`: best-effort token and timing rows. Welcome rates use `ModelRate`.
 - `/theme`: picker. Esc does not change the theme or clear the screen. Enter applies the palette in place and does not redraw the welcome.
 - Frame side text removed; theme applies in place. `/set default <name>` restores one key. `/set default all` asks y/n first (`--yes` skips), reports how many keys differ and that models, roles, and endpoints reset, backs up the real file as `config.yaml.bak-<timestamp>` (mode 0600, five kept), then writes the factory document from `InitYAML()`. Decline leaves the file. The symlink stays.
-- Docker: `Dockerfile` targets `base` and `full` (Debian Chromium via `KONSOLAI_CHROME`). The `konsolai` service runs as the host uid (`KONSOLAI_UID` / `KONSOLAI_GID`). `compose.yaml` project `konsolai` starts only the database on `docker compose up -d`. Every variable has a default (password `konsolai`, port `55434`) and there is no env file. `KONSOLAI_DATABASE_URL` in the compose file points at host `db` and overrides the mounted file. The user's `config.yaml` keeps models and roles. Own volume and port, never the developer's database. `scripts/docker.sh` builds, runs the database, and runs the CLI. Inside the container the model server is `http://host.docker.internal:<port>/v1`. The optional embed service defaults to `BAAI/bge-m3` (1024-wide). `BAAI/bge-base-en-v1.5` is a commented 768-wide alternative; it was the previous default because the machine-name guard rejects that id.
+- Docker: `Dockerfile` targets `base` and `full` (Debian Chromium via `KONSOLAI_CHROME`). The `konsolai` service runs as the host uid (`KONSOLAI_UID` / `KONSOLAI_GID`). `compose.yaml` project `konsolai` starts only the database on `docker compose up -d`. Every variable has a default (password `konsolai`, port `55434`) and there is no env file. `KONSOLAI_DATABASE_URL` in the compose file points at host `db` and overrides the mounted file. The user's `config.yaml` keeps models and roles. Own volume and port, never the developer's database. `scripts/docker.sh` builds, runs the database, and runs the CLI. Inside the container the model server is `http://host.docker.internal:<port>/v1`. The optional embed service defaults to `BAAI/bge-m3` (1024-wide). `BAAI/bge-base-en-v1.5` is a commented 768-wide alternative.
 - CI: `.github/workflows/ci.yml` on push and pull request to `dev` and `prod` runs gofmt, vet, and `go test` against pgvector, and builds the base image with no push. Tests that need external binaries skip when they are missing; CI installs poppler-utils and sets `KONSOLAI_CHROME` when Chrome is already on the runner. `.github/workflows/release.yml` runs that test job before it publishes on `v*` tags: `ghcr.io/sniksax/konsolai:<tag>`, `:latest`, and `:<tag>-full`, plus linux amd64 and arm64 binaries. The token is `GITHUB_TOKEN`.
 - Placeholder: inline suggestion only. Enter does not submit it.
 - Footer context meter: last prompt tokens against the window (`ctx_warn_pct`, `ctx_hot_pct`, `ctx_cells`).
 - `propose_plan`: a command-only plan may omit `files` when the plan does not write or edit files.
 - Config keys are one table in `internal/config/keys.go`. Named models and `roles` replace `llm`/`fast` endpoints. `/set` is the configuration command. `TestConfigKeysComplete` walks every scalar leaf.
 - File splits: agent helpers, safety plan rules and segments, welcome paint helpers.
-- README at the repo root. Header image `docs/assets/konsolai-header.svg`. No screenshots in the tree. `TestReadmeSlashTable` locks the slash-command table to `commands.Default()`.
+- README at the repo root. Header image `docs/assets/konsolai-header.svg`. Screenshots live in `docs/assets/screens/`: `welcome.png`, `build.png`, `commands.png`, `themes.png`, and README embeds those four. `TestReadmeSlashTable` locks the slash-command table to `commands.Default()`.
 - `/stats [today|week|all]` (default week) reads `turn_stats` and sessions. Per model: calls, tokens, average tok/s, and p50/p95 of `model_ms`. Per intent: turns, average steps (mean `turn_stats` rows per session), and average wall time (mean `model_ms`; there is no separate wall-clock column). With memory off: `stats need the database (memory is not configured)`.
 - `/doctor` prints one line per check (`✓`, `!`, or `✗`) and a fix for every line that is not `✓`. Exit 1 only when a line is `✗`. Network probes use the welcome probe timeout. Embed dimensions are ok, the mismatch line, or `not configured`.
 - `/save [file]` writes the last answer as Markdown. `/pdf [file]` renders it through `docrender`, the same pipeline as `export_doc`. The default name is a slug of the session title. Overwrite needs `--force`. Paths go through the Guard. `konsolai new "<request>"` is one turn; `/save` then reads that answer from the session store, or from the local last-session file when the database is off.
 - `/explain` runs an answer turn at high effort for the latest failed shell-mode command and does not re-run it. With no capture, a readable `$HISTFILE` is explained after `no captured output; explaining the command only`. The help text documents `PROMPT_COMMAND="history -a"`.
 - The first mutating call rejected by the plan gate forces the next request to `propose_plan` (thinking follows `plan_step`) and does not spend the explore budget. Later gate rejects are unchanged. `run_shell` still needs an accepted plan.
-- `scripts/changelog.sh` groups commits after the latest `v*` tag. With no `v*` tag it uses `prod`, or else the root commit and the whole history. `CHANGELOG.md` is titled `## v0.2.0 (unreleased)`. The tag is not created.
+- `scripts/changelog.sh` groups commits after the latest `v*` tag. With no `v*` tag it uses `prod`, or else the root commit and the whole history. `CHANGELOG.md` is titled `## Unreleased`. The next tag is not created.
 - Secret-shaped test literals are assembled at runtime in each package's `fixtures_test.go`.
+- `TestNoLocalMachine` in `internal/commands` and the `machine_name` filter in `scripts/changelog.sh` deny machine and personal names only: host, user, home paths, and local ports. Public model ids are not in that list.
 
 ## Known issues and backlog
 
 - Task X animations: not done. The banner is static (`banner.Startup` writes the wordmark once). Do not implement animations unless a task says so.
-- `Run`'s shared locals: `confirm.go` was not created. The confirm flow, plan-gate loop, and explore-budget counter live inside `agent.Run` and share locals (`planApproved`, `planFiles`, `planCmds`, `planText`, `explore`, `prepRejectKey`, `prepRejects`, `seenFail`, `approvedAll`, `shellFail`, `consecFail`, `planRejected`, `postPlanReads`, `docsExportNoted`, `docsExportWait`, `forceMutating`, `forceExport`, `forcePropose`, `sawGateReject`). This needs a state-struct refactor. Do not split `Run` by changing control flow.
+- `agent.Run` keeps its control flow; the shared flags, counters and slices live in `runState`. Do not split `Run` by changing control flow.
 - Placeholder color is fixed by readline: `github.com/reeflective/readline@v1.3.0/internal/display/refresh.go` lines 277 and 282 paint `color.Dim` plus Fg 242. The public API is only `SetInlineSuggestion(string)`. Do not fork the library.
 - CPU embeddings can make `/index` slow when an embed service is configured.
 - A configured reranker is often unreachable.
 - Symbol index: not built.
-- README screenshots are not in the tree: `welcome.png`, `slash-menu.png`, `theme.png`, `build.png`, `act-plan.png`, `pdf.png`.
-- Tag `v0.2.0`. `version` in `cmd/konsolai` is still `"dev"` unless ldflags stamp it.
+- README embeds four screenshots. `slash-menu`, `act-plan`, and `pdf` are not captured.
+- Latest tag `v0.2.2`; `dev` is past it and no newer tag exists. `version` in `cmd/konsolai` is still `"dev"` unless ldflags stamp it.
 
 ## Lessons
 

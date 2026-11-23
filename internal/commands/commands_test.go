@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -643,5 +644,41 @@ func TestHelpAlignsSummaries(t *testing.T) {
 	runHelp(context.Background(), env, nil)
 	if !strings.Contains(out.String(), "? on a row shows details") {
 		t.Fatalf("repl tip missing:\n%s", out.String())
+	}
+}
+
+func TestConfigShowGolden(t *testing.T) {
+	env, out, errb := testEnv(t)
+	env.Profile = config.Builtin()
+	env.Profile.Name = "home"
+	env.Profile.Models = map[string]config.Model{
+		"big":   {Endpoint: "http://user:hunter2@gpu.example:8000/v1", Model: "/models/big-q4.gguf", ThinkingKwargs: true, Context: 131072},
+		"small": {Endpoint: "http://gpu.example:8001/v1", Model: "small"},
+	}
+	env.Profile.Roles.Main = "big"
+	env.Profile.Roles.Fast = "small"
+	if code := runConfig(context.Background(), env, []string{"show"}); code != 0 {
+		t.Fatalf("show %d %s", code, errb.String())
+	}
+	got := out.String()
+	if strings.Contains(got, "hunter2") {
+		t.Fatalf("leaked the endpoint password:\n%s", got)
+	}
+	mi, ri := strings.Index(got, "\nmodels:\n"), strings.Index(got, "\nroles:\n")
+	if mi < 0 || ri < 0 || mi > ri {
+		t.Fatalf("models must be printed before roles (models at %d, roles at %d):\n%s", mi, ri, got)
+	}
+	path := filepath.Join("testdata", "config_show.golden")
+	if os.Getenv("UPDATE_GOLDEN") == "1" {
+		if err := os.WriteFile(path, []byte(got), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != string(want) {
+		t.Fatalf("golden mismatch:\n%s", got)
 	}
 }

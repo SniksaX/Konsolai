@@ -136,8 +136,8 @@ func TestWebCacheAndFactsBestEffort(t *testing.T) {
 	if !g.Disabled() {
 		t.Fatal("want disabled")
 	}
-	if err := fs.Add(context.Background(), "z", "user"); err != nil {
-		t.Fatal(err)
+	if err := fs.Add(context.Background(), "z", "user"); err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("disabled fact store: %v", err)
 	}
 }
 

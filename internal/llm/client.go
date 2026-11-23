@@ -160,8 +160,6 @@ func (c *Client) SetRetry(n int, wait time.Duration) {
 	}
 }
 
-func (c *Client) BaseURL() string { return c.baseURL }
-
 func (c *Client) ModelID() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -189,7 +189,7 @@ func TestComposeDatabaseRoundTrip(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
-	build := exec.CommandContext(ctx, "docker", "build", "--target", "base", "-t", "konsolai:dev", root)
+	build := exec.CommandContext(ctx, "docker", "build", "--target", "base", "-t", "konsolai:dev", trackedContext(t, root))
 	build.Dir = root
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, scrub(string(out), pass))
@@ -220,6 +220,24 @@ func TestComposeDatabaseRoundTrip(t *testing.T) {
 
 var schemaVersion = regexp.MustCompile(`schema [1-9][0-9]*`)
 
+// trackedContext materializes HEAD's tracked files in a temp dir, so an
+// ignored or untracked path can never enter a local Docker build context.
+func trackedContext(t *testing.T, root string) string {
+	t.Helper()
+	for _, bin := range []string{"git", "tar", "bash"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("needs %s", bin)
+		}
+	}
+	dir := t.TempDir()
+	cmd := exec.Command("bash", "-o", "pipefail", "-c", `git archive --format=tar HEAD | tar -x -C "$1"`, "bash", dir)
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("tracked context: %v\n%s", err, out)
+	}
+	return dir
+}
+
 func moduleRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
@@ -231,6 +249,9 @@ func moduleRoot(t *testing.T) string {
 
 func requireDocker(t *testing.T) {
 	t.Helper()
+	if os.Getenv("KONSOLAI_TEST_DOCKER") != "1" {
+		t.Skip("set KONSOLAI_TEST_DOCKER=1 to run the Docker tests")
+	}
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("needs docker")
 	}

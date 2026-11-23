@@ -77,6 +77,21 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 		}
 		return wd
 	})}
+	r.at.SetMentions(func(prefix string) []atEntry {
+		_, mode := commands.ActiveInputMode()
+		if mode == nil {
+			return nil
+		}
+		p, ok := mode.(commands.MentionProvider)
+		if !ok {
+			return nil
+		}
+		var out []atEntry
+		for _, c := range p.Mentions(prefix) {
+			out = append(out, atEntry{rel: c.Value, meta: c.Description})
+		}
+		return out
+	})
 	sh.History.Add("repl", &gatedHistory{inner: loadFileHistory(HistoryPath()), active: &r.shellOn, want: false})
 	sh.History.Add("shell", &gatedHistory{inner: loadFileHistory(ShellHistoryPath()), active: &r.shellOn, want: true})
 	r.framed = term.IsTerminal(int(os.Stdout.Fd())) && term.IsTerminal(int(os.Stdin.Fd()))

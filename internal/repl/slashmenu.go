@@ -199,7 +199,11 @@ func (m *slashMenu) refilter() {
 		m.items = nil
 		return
 	}
-	m.items = filterSlashCommands(m.reg, m.typed)
+	if items := providerCommands(m.typed); items != nil {
+		m.items = items
+	} else {
+		m.items = filterSlashCommands(m.reg, m.typed)
+	}
 	if m.sel >= len(m.items) {
 		m.sel = -1
 		m.detail = false
@@ -544,9 +548,85 @@ func (m *slashMenu) completeSelected() menuResult {
 	return menuResult{Action: actionLine, Line: line}
 }
 
+// providerRows is the active mode's own / menu, when it offers one.
+func providerRows() []commands.Choice {
+	_, mode := commands.ActiveInputMode()
+	p, ok := mode.(commands.CommandProvider)
+	if !ok {
+		return nil
+	}
+	return p.Commands()
+}
+
+// providerHit reports whether the typed line is one the active mode lists. Line
+// 0 with no rows is "not mine", so the registry keeps the menu.
+func (m *slashMenu) providerHit() bool {
+	if m == nil {
+		return false
+	}
+	typed := strings.TrimSpace(m.typed)
+	if typed == "" {
+		return false
+	}
+	for _, c := range providerRows() {
+		if strings.EqualFold(strings.TrimSpace(c.Value), typed) {
+			return true
+		}
+	}
+	return false
+}
+
+// providerOwns reports whether a line belongs to the active mode's own list.
+func providerOwns(line string) bool {
+	line = strings.TrimSpace(line)
+	for _, c := range providerRows() {
+		if strings.EqualFold(strings.TrimSpace(c.Value), line) {
+			return true
+		}
+	}
+	return false
+}
+
+// providerCommands converts the active mode's rows into the row type the menu
+// already draws, filtered by the typed prefix. Nil means "no mode offers rows",
+// so the registry's commands show as before.
+func providerCommands(typed string) []commands.Command {
+	rows := providerRows()
+	if len(rows) == 0 {
+		return nil
+	}
+	prefix := strings.ToLower(strings.TrimSpace(typed))
+	var out []commands.Command
+	for _, c := range rows {
+		v := strings.TrimSpace(c.Value)
+		if v == "" {
+			continue
+		}
+		if prefix != "" && prefix != "/" && !strings.HasPrefix(strings.ToLower(v), prefix) {
+			continue
+		}
+		out = append(out, commands.Command{
+			Name:     strings.TrimPrefix(v, "/"),
+			Summary:  c.Description,
+			ReplOnly: true,
+		})
+	}
+	return out
+}
+
 func (m *slashMenu) Enter() menuResult {
 	if m == nil || !m.open {
 		return menuResult{Action: actionPass}
+	}
+	// A line the active mode lists is the mode's, not the registry's: submit it
+	// as typed so it reaches the mode, never the registry's argument prompt.
+	if m.providerHit() {
+		return menuResult{Action: actionSubmit}
+	}
+	// A selected provider row is the mode's too: submit its value, never run a
+	// registry command that is not there.
+	if m.sel >= 0 && m.sel < len(m.items) && providerOwns("/"+m.items[m.sel].Name) {
+		return menuResult{Action: actionLineSubmit, Line: "/" + m.items[m.sel].Name}
 	}
 	if m.arg {
 		return m.enterArg()

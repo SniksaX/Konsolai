@@ -194,6 +194,9 @@ func Run(ctx context.Context, cfg Config) int {
 	if s, ok := rd.(interface{ SetMenuEnv(*commands.Env) }); ok {
 		s.SetMenuEnv(env)
 	}
+	commands.SetEditorLineReader(func(ctx context.Context, prompt string) (string, error) {
+		return rd.ReadLine(ctx, prompt)
+	})
 	if s, ok := rd.(interface{ SetEscTimeout(func() time.Duration) }); ok && env != nil {
 		s.SetEscTimeout(func() time.Duration { return env.Profile.EscTimeout() })
 	}
@@ -295,7 +298,8 @@ func Run(ctx context.Context, cfg Config) int {
 		st.mu.Lock()
 		shell := st.shell
 		st.mu.Unlock()
-		prompt := inputPrompt(shell)
+		modeName, inputMode := commands.ActiveInputMode()
+		prompt := inputPrompt(shell, modeName)
 		ui.HoldPrompt(true)
 		line, err := rd.ReadLine(ctx, prompt)
 		ui.HoldPrompt(false)
@@ -361,10 +365,24 @@ func Run(ctx context.Context, cfg Config) int {
 			continue
 		}
 		if strings.HasPrefix(trim, "/") {
+			if handled, err := claimLine(inputMode, line); handled {
+				if err != nil {
+					fmt.Fprintln(errw, "konsolai:", err)
+				}
+				fmt.Fprintln(out)
+				continue
+			}
 			code := dispatchLine(ctx, reg, env, line)
 			if code == -1 {
 				endSession(ctx, env, st)
 				return 0
+			}
+			fmt.Fprintln(out)
+			continue
+		}
+		if inputMode != nil {
+			if err := inputMode.Handle(ctx, env, line); err != nil {
+				fmt.Fprintln(errw, "konsolai:", err)
 			}
 			fmt.Fprintln(out)
 			continue
@@ -406,6 +424,18 @@ func Run(ctx context.Context, cfg Config) int {
 		}
 		fmt.Fprintln(out)
 	}
+}
+
+// claimLine gives an active input mode a chance to take a slash line first.
+func claimLine(m commands.InputMode, line string) (bool, error) {
+	if m == nil {
+		return false, nil
+	}
+	c, ok := m.(commands.Claimer)
+	if !ok {
+		return false, nil
+	}
+	return c.Claim(line)
 }
 
 func dispatchLine(ctx context.Context, reg *commands.Registry, env *commands.Env, line string) int {
@@ -492,6 +522,9 @@ func sessionFooter(st *session, cfg Config) string {
 	info := footerInfo{
 		Cwd: cwd, Model: model, Routing: routing,
 		CtxPct: ctxPct, ShowCtx: showCtx, Down: down, Shell: shell,
+	}
+	if name, mode := commands.ActiveInputMode(); mode != nil {
+		info.Mode = name
 	}
 	if cfg.Env != nil {
 		p := cfg.Env.Profile

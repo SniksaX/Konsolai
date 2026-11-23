@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	chromeFix = "install chromium (sudo pacman -S chromium) or set KONSOLAI_CHROME"
+	chromeFix = "install chromium or set KONSOLAI_CHROME"
 )
 
 var doctorChromeBins = []string{

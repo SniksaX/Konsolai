@@ -45,7 +45,7 @@ func FindChrome() (string, error) {
 	if found != "" {
 		return found, nil
 	}
-	return "", errors.New("install chromium (sudo pacman -S chromium) or set KONSOLAI_CHROME")
+	return "", errors.New("install chromium or set KONSOLAI_CHROME")
 }
 
 func headlessArgs(profile string) []string {

@@ -193,8 +193,17 @@ func TestSetModelTree(t *testing.T) {
 	if !ok {
 		t.Fatal("no model")
 	}
-	if strings.Join(choiceValues(model.Children()), ",") != "main,fast,add,remove,discover" {
+	if strings.Join(choiceValues(model.Children()), ",") != "main,fast,add,remove,endpoint,discover" {
 		t.Fatalf("model level %v", choiceValues(model.Children()))
+	}
+	endpoint, _ := findChoice(model.Children(), "endpoint")
+	if vals := choiceValues(endpoint.Children()); len(vals) == 0 || !strings.Contains(strings.Join(vals, ","), "extra") {
+		t.Fatalf("endpoint names %v", vals)
+	}
+	for _, c := range endpoint.Children() {
+		if c.FreeText == nil {
+			t.Fatalf("endpoint %q needs free text", c.Value)
+		}
 	}
 	fast, _ := findChoice(model.Children(), "fast")
 	vals := choiceValues(fast.Children())

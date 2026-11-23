@@ -569,3 +569,81 @@ func TestSessionCompactFields(t *testing.T) {
 		t.Fatalf("%+v err=%v", got, err)
 	}
 }
+
+func TestRedactsPersistedSecrets(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	secret := skKey()
+	id, err := s.CreateSession(ctx, NewSession{
+		Profile: "home", CWD: "/tmp/redact", Mode: "build", Model: "m",
+		Title: "token " + secret,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var title string
+	if err := s.pool.QueryRow(ctx, `SELECT title FROM sessions WHERE id = $1::uuid`, id).Scan(&title); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(title, secret) {
+		t.Fatalf("title kept the secret: %q", title)
+	}
+
+	seq, err := s.NextSeq(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordAction(ctx, ActionIn{
+		SessionID: id, Seq: seq, Tool: "run_shell", Kind: "mutating", Decision: "rejected",
+		RejectReason: "no: " + secret, Meta: "meta " + secret, Output: "ok",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var reason, meta string
+	if err := s.pool.QueryRow(ctx, `SELECT reject_reason, meta FROM actions WHERE session_id = $1::uuid AND seq = $2`, id, seq).Scan(&reason, &meta); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(reason, secret) || strings.Contains(meta, secret) {
+		t.Fatalf("action kept the secret: %q %q", reason, meta)
+	}
+
+	if _, err := s.AddUserFact(ctx, "home", "my token is "+secret, "explicit"); err != nil {
+		t.Fatal(err)
+	}
+	var fact string
+	if err := s.pool.QueryRow(ctx, `SELECT fact FROM user_facts WHERE profile = 'home'`).Scan(&fact); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(fact, secret) {
+		t.Fatalf("fact kept the secret: %q", fact)
+	}
+
+	seq, err = s.NextSeq(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := "API_KEY=" + abuseHex() + "\n"
+	if err := s.RecordFileChange(ctx, FileChangeIn{
+		SessionID: id, Seq: seq, Path: "notes.txt", ExistedBefore: true,
+		Before: []byte(raw), AfterHash: "after", Diff: "+x",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.UndoCandidates(ctx, nil, "/tmp/redact")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, r := range rows {
+		if r.Path != "notes.txt" {
+			continue
+		}
+		found = true
+		if r.UndoBlocked != "redacted content" || r.BeforeContent != nil {
+			t.Fatalf("file change %+v", r)
+		}
+	}
+	if !found {
+		t.Fatal("file change row missing")
+	}
+}

@@ -327,7 +327,7 @@ func (s *Store) CreateSession(ctx context.Context, ns NewSession) (string, error
 		INSERT INTO sessions (profile, project_id, cwd, mode, model, title, status)
 		VALUES ($1, $2, $3, $4, $5, $6, 'active')
 		RETURNING id::text`,
-		ns.Profile, ns.ProjectID, ns.CWD, ns.Mode, ns.Model, ns.Title).Scan(&id)
+		ns.Profile, ns.ProjectID, ns.CWD, ns.Mode, ns.Model, redact.String(ns.Title)).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("store: create session: %w", err)
 	}
@@ -463,12 +463,14 @@ func (s *Store) RecordAction(ctx context.Context, a ActionIn) error {
 	full = clipString(redact.String(full), maxFullOutput)
 	var reason *string
 	if a.RejectReason != "" {
-		reason = &a.RejectReason
+		r := redact.String(a.RejectReason)
+		reason = &r
 	}
+	meta := redact.String(a.Meta)
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO actions (session_id, seq, tool, args, kind, decision, reject_reason, is_error, meta, duration_ms, output, full_output)
 		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-		a.SessionID, a.Seq, a.Tool, args, a.Kind, a.Decision, reason, a.IsError, a.Meta, int(a.Duration/time.Millisecond), out, full)
+		a.SessionID, a.Seq, a.Tool, args, a.Kind, a.Decision, reason, a.IsError, meta, int(a.Duration/time.Millisecond), out, full)
 	if err != nil {
 		return fmt.Errorf("store: record action: %w", err)
 	}
@@ -490,6 +492,11 @@ func (s *Store) RecordFileChange(ctx context.Context, c FileChangeIn) error {
 		reason := "too large"
 		blocked = &reason
 	case c.ExistedBefore:
+		if masked := redact.String(string(c.Before)); masked != string(c.Before) {
+			reason := "redacted content"
+			blocked = &reason
+			break
+		}
 		before = c.Before
 		h := sha256Hex(c.Before)
 		beforeHash = &h
@@ -587,7 +594,7 @@ func (s *Store) AddUserFact(ctx context.Context, profile, fact, source string) (
 		INSERT INTO user_facts (profile, fact, source)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (profile, fact) DO UPDATE SET source = EXCLUDED.source
-		RETURNING id`, profile, fact, source).Scan(&id)
+		RETURNING id`, profile, redact.String(fact), source).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("store: add user fact: %w", err)
 	}
@@ -602,7 +609,7 @@ func (s *Store) AddProjectFact(ctx context.Context, projectID int64, fact string
 		INSERT INTO project_facts (project_id, fact, source_session)
 		VALUES ($1, $2, $3::uuid)
 		ON CONFLICT (project_id, fact) DO UPDATE SET fact = EXCLUDED.fact
-		RETURNING id`, projectID, fact, sourceSession).Scan(&id)
+		RETURNING id`, projectID, redact.String(fact), sourceSession).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("store: add project fact: %w", err)
 	}
@@ -693,6 +700,8 @@ func (s *Store) PutWebCache(ctx context.Context, url, title, text string, ttl ti
 	if secs < 1 {
 		secs = 1
 	}
+	title = redact.String(title)
+	text = redact.String(text)
 	sum := sha256Hex([]byte(text))
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO web_cache (url, title, text, content_hash, fetched_at, expires_at)

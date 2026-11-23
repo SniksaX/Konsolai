@@ -359,3 +359,40 @@ func TestShellExit141BareIsError(t *testing.T) {
 		t.Fatalf("%+v", res)
 	}
 }
+
+func TestShellScrubsSecretEnv(t *testing.T) {
+	t.Setenv("KONSOLAI_TEST_SECRET_TOKEN", "runtime-value")
+	t.Setenv("DEMO_API_KEY", "runtime-key")
+	act, err := shellToolFor(t).Prepare(`{"cmd":"printf '%s|%s' \"$KONSOLAI_TEST_SECRET_TOKEN\" \"$DEMO_API_KEY\""}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := act.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Output, "runtime-value") || strings.Contains(res.Output, "runtime-key") {
+		t.Fatalf("secret env reached the shell: %q", res.Output)
+	}
+	if !strings.Contains(res.Output, "exit_code: 0") {
+		t.Fatalf("output %q", res.Output)
+	}
+}
+
+func TestShellMasksSecretOutput(t *testing.T) {
+	hex := abuseHex()
+	act, err := shellToolFor(t).Prepare(`{"cmd":"echo API_KEY=` + hex + `"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := act.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Output, hex) {
+		t.Fatalf("secret output reached the model: %q", res.Output)
+	}
+	if !strings.Contains(res.Output, "[REDACTED:kv]") {
+		t.Fatalf("output not masked: %q", res.Output)
+	}
+}

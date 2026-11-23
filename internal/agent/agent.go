@@ -78,6 +78,7 @@ type Config struct {
 	PlanFiles         []string
 	PlanCmds          []string
 	PlanText          string
+	NamedRoots        []string
 	TokenCap          int
 	ThinkingMaxTokens int
 	PlanThink         string
@@ -111,6 +112,7 @@ var (
 	ErrAborted         = errors.New("agent: aborted")
 	ErrMaxSteps        = errors.New("agent: max steps exceeded")
 	ErrNoAnswer        = errors.New("agent: no answer")
+	ErrRejected        = errors.New("agent: the same rejected call was repeated")
 	ErrContextOverflow = errors.New("konsolai: the conversation no longer fits the model's context; start a new session with `new`.")
 )
 
@@ -130,6 +132,46 @@ const (
 	docsExportNoteAt  = 2
 	docsExportForceAt = 3
 )
+
+// runState holds the flags, counters and slices that the steps of one Run
+// share. Run keeps the control flow; the struct only gives the state a name.
+type runState struct {
+	seenFail          map[string]struct{}
+	seenRead          map[string]struct{}
+	prepRejectKey     string
+	prepRejects       int
+	userRejectKey     string
+	userRejects       int
+	readSpans         []readSpan
+	planApproved      bool
+	planFiles         []string
+	planCmds          []string
+	planText          string
+	explore           int
+	noteSent          bool
+	forcePropose      bool
+	sawGateReject     bool
+	readonlyAfterNote int
+	sourceReads       int
+	toolsGone         bool
+	goneNoteAdded     bool
+	wroteFile         bool
+	verified          []VerifiedCall
+	exportedDoc       bool
+	docsNudged        bool
+	docsWriteNoted    bool
+	docsExportNoted   bool
+	docsExportWait    int
+	postPlanReads     int
+	forceMutating     bool
+	forceExport       bool
+	shellFail         bool
+	planRejected      bool
+	approvedAll       bool
+	printedBlock      bool
+	consecFail        int
+	skipSummary       bool
+}
 
 func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	prompt := cfg.Prompt
@@ -156,42 +198,17 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	userIdx := len(msgs) - 1
 	_ = rec.Message(ctx, userMsg)
 	specs := cfg.Tools.Specs()
-	seenFail := make(map[string]struct{})
-	seenRead := make(map[string]struct{})
-	prepRejectKey := ""
-	prepRejects := 0
-	var readSpans []readSpan
-	planApproved := cfg.ResumePlan
-	planFiles := cfg.PlanFiles
-	planCmds := cfg.PlanCmds
-	planText := cfg.PlanText
-	if planApproved && cfg.Guard != nil {
-		cfg.Guard.AllowPlanFiles(planFiles)
+	state := &runState{
+		seenFail:     make(map[string]struct{}),
+		seenRead:     make(map[string]struct{}),
+		planApproved: cfg.ResumePlan,
+		planFiles:    cfg.PlanFiles,
+		planCmds:     cfg.PlanCmds,
+		planText:     cfg.PlanText,
 	}
-	explore := 0
-	noteSent := false
-	forcePropose := false
-	sawGateReject := false
-	readonlyAfterNote := 0
-	sourceReads := 0
-	toolsGone := false
-	goneNoteAdded := false
-	wroteFile := false
-	var verified []VerifiedCall
-	exportedDoc := false
-	docsNudged := false
-	docsWriteNoted := false
-	docsExportNoted := false
-	docsExportWait := 0
-	postPlanReads := 0
-	forceMutating := false
-	forceExport := false
-	shellFail := false
-	planRejected := false
-	approvedAll := false
-	printedBlock := false
-	consecFail := 0
-	skipSummary := false
+	if state.planApproved && cfg.Guard != nil {
+		cfg.Guard.AllowPlanFiles(state.planFiles)
+	}
 	var st Stats
 	st.RouterTime = cfg.RouterTime
 	defer func() {
@@ -201,7 +218,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		if cfg.Trace && cfg.Err != nil {
 			fmt.Fprintln(cfg.Err, FormatStatsLine(st))
 		}
-		if skipSummary || cfg.HideStats {
+		if state.skipSummary || cfg.HideStats {
 			return
 		}
 		if cfg.Intent != "" || cfg.Err != nil {
@@ -213,25 +230,25 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		}
 	}()
 
-	for step := 0; step < analysisLimit(cfg, sourceReads); step++ {
-		think := cfg.ThinkingPolicy.enabled(planApproved, shellFail, consecFail)
-		if cfg.ThinkingPolicy == ThinkPlanStep && planRejected && !planApproved {
+	for step := 0; step < analysisLimit(cfg, state.sourceReads); step++ {
+		think := cfg.ThinkingPolicy.enabled(state.planApproved, state.shellFail, state.consecFail)
+		if cfg.ThinkingPolicy == ThinkPlanStep && state.planRejected && !state.planApproved {
 			think = true
 		}
 		opts := llm.ChatOptions{Thinking: think, Temperature: temp, TopP: cfg.TopP}
-		shellFail = false
-		forcingPlan := toolsGone && cfg.RequirePlan && !planApproved
+		state.shellFail = false
+		forcingPlan := state.toolsGone && cfg.RequirePlan && !state.planApproved
 		if forcingPlan && cfg.ThinkingPolicy == ThinkPlanStep {
 			think = true
 			opts.Thinking = true
 		}
 		label := "working"
-		if cfg.RequirePlan && !planApproved {
+		if cfg.RequirePlan && !state.planApproved {
 			label = "planning"
 		} else if think {
 			label = "thinking"
 		}
-		if toolsGone && !goneNoteAdded {
+		if state.toolsGone && !state.goneNoteAdded {
 			note := ToolsGoneNote
 			if forcingPlan {
 				note = ForcedPlanNote
@@ -239,25 +256,25 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			gone := llm.Message{Role: llm.RoleUser, Content: note}
 			msgs = append(msgs, gone)
 			_ = rec.Message(ctx, gone)
-			goneNoteAdded = true
+			state.goneNoteAdded = true
 		}
 		stepSpecs := specs
-		if toolsGone {
+		if state.toolsGone {
 			if forcingPlan {
 				stepSpecs = planOnlySpecs(specs)
 				opts.ToolChoice = "propose_plan"
 			} else if !cfg.RequirePlan {
 				stepSpecs = nil
 			}
-		} else if forceExport && planApproved && !exportedDoc {
+		} else if state.forceExport && state.planApproved && !state.exportedDoc {
 			stepSpecs = exportOnlySpecs(specs)
 			opts.ToolChoice = "export_doc"
-		} else if forceMutating && planApproved {
+		} else if state.forceMutating && state.planApproved {
 			stepSpecs = mutatingSpecs(specs)
 			opts.ToolChoice = "required"
 		}
-		if forcePropose && cfg.RequirePlan && !planApproved && !toolsGone {
-			forcePropose = false
+		if state.forcePropose && cfg.RequirePlan && !state.planApproved && !state.toolsGone {
+			state.forcePropose = false
 			stepSpecs = planOnlySpecs(specs)
 			if len(stepSpecs) == 0 {
 				stepSpecs = specs
@@ -268,10 +285,10 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				opts.Thinking = true
 				label = "thinking"
 			}
-		} else if forcePropose {
-			forcePropose = false
+		} else if state.forcePropose {
+			state.forcePropose = false
 		}
-		_, maxTok, elide, err := cfg.prepCall(msgs, stepSpecs, &readSpans, seenRead)
+		_, maxTok, elide, err := cfg.prepCall(msgs, stepSpecs, &state.readSpans, state.seenRead)
 		if err != nil {
 			return err
 		}
@@ -314,7 +331,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		if err != nil {
 			return err
 		}
-		if cfg.ThinkingPolicy == ThinkPlanStep && !think && !planApproved && hasProposePlan(msg) && (!proposePlanValid(cfg.Tools, msg) || planThinkAlways(cfg.PlanThink)) {
+		if cfg.ThinkingPolicy == ThinkPlanStep && !think && !state.planApproved && hasProposePlan(msg) && (!proposePlanValid(cfg.Tools, msg) || planThinkAlways(cfg.PlanThink)) {
 			if cfg.Trace {
 				st.Steps++
 				st.noteModel(modelElapsed)
@@ -344,7 +361,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				stepSpecs = specs
 			}
 			label = "thinking"
-			_, maxTok, elide, err = cfg.prepCall(msgs, stepSpecs, &readSpans, seenRead)
+			_, maxTok, elide, err = cfg.prepCall(msgs, stepSpecs, &state.readSpans, state.seenRead)
 			if err != nil {
 				return err
 			}
@@ -406,7 +423,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		narration := trimLeadingBlanks(msg.Content)
 		if strings.TrimSpace(narration) != "" && len(msg.ToolCalls) > 0 && !hasFinishCall(msg) {
 			ui.BeforeOutput()
-			if printedBlock {
+			if state.printedBlock {
 				fmt.Fprintln(cfg.Out)
 			}
 			text := ui.CollapseBlankLines(narration)
@@ -414,7 +431,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			if !strings.HasSuffix(text, "\n") {
 				fmt.Fprintln(cfg.Out)
 			}
-			printedBlock = true
+			state.printedBlock = true
 		}
 		if len(msg.ToolCalls) > 0 {
 			msg.Content = truncateNarration(msg.Content)
@@ -423,10 +440,10 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		_ = rec.Message(ctx, msg)
 
 		if len(msg.ToolCalls) == 0 {
-			if cfg.Task == "docs" && planApproved && !wroteFile && !exportedDoc && !docsNudged {
-				docsNudged = true
+			if cfg.Task == "docs" && state.planApproved && !state.wroteFile && !state.exportedDoc && !state.docsNudged {
+				state.docsNudged = true
 				note := DocsFileNote
-				if wantsDocExport(task, planFiles) {
+				if wantsDocExport(task, state.planFiles) {
 					note = DocsExportNote
 				}
 				nudge := llm.Message{Role: llm.RoleUser, Content: note}
@@ -438,17 +455,17 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			if strings.TrimSpace(text) == "" {
 				return ErrNoAnswer
 			}
-			if printedBlock {
+			if state.printedBlock {
 				fmt.Fprintln(cfg.Out)
 			}
 			writeAnswer(cfg.Out, text, cfg.Plain)
-			for _, claim := range UnverifiedClaims(text, verified) {
+			for _, claim := range UnverifiedClaims(text, state.verified) {
 				fmt.Fprintln(cfg.Out, ui.Current().Warn("· not verified: "+claim))
 			}
 			return nil
 		}
 
-		noteWasSent := noteSent
+		noteWasSent := state.noteSent
 		stepReadOnly := 0
 		stepOther := 0
 		lastReadOnly := -1
@@ -460,8 +477,8 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			tool, ok := cfg.Tools.Get(call.Function.Name)
 			args := json.RawMessage(call.Function.Arguments)
 			if !ok {
-				prepRejectKey = ""
-				prepRejects = 0
+				state.prepRejectKey = ""
+				state.prepRejects = 0
 				reason := "unknown tool " + call.Function.Name
 				printReject(cfg.Out, call.Function.Name, call.Function.Arguments, reason)
 				st.Rejects++
@@ -478,23 +495,23 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			action, err := tool.Prepare(call.Function.Arguments)
 			if err != nil {
 				if errors.Is(err, tools.ErrLookupMutating) {
-					skipSummary = true
+					state.skipSummary = true
 					return err
 				}
 				printReject(cfg.Out, call.Function.Name, call.Function.Arguments, err.Error())
 				st.Rejects++
 				content := "error: " + err.Error()
 				failKey := call.Function.Name + "\x00" + call.Function.Arguments
-				if failKey == prepRejectKey {
-					prepRejects++
+				if failKey == state.prepRejectKey {
+					state.prepRejects++
 				} else {
-					prepRejectKey = failKey
-					prepRejects = 1
+					state.prepRejectKey = failKey
+					state.prepRejects = 1
 				}
-				if _, dup := seenFail[failKey]; dup {
+				if _, dup := state.seenFail[failKey]; dup {
 					content += "\n\nnote: this exact call already failed with identical output. Do not retry it; inspect files or change approach."
 				} else {
-					seenFail[failKey] = struct{}{}
+					state.seenFail[failKey] = struct{}{}
 				}
 				tm := llm.Message{
 					Role:       llm.RoleTool,
@@ -504,19 +521,15 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				msgs = append(msgs, tm)
 				_ = rec.Message(ctx, tm)
 				_ = rec.Action(ctx, ActionRecord{Tool: call.Function.Name, Args: args, Decision: "invalid", IsError: true, Output: tm.Content})
-				if prepRejects >= identicalRejectLimit(cfg) {
-					if cfg.Out != nil {
-						ui.BeforeOutput()
-						fmt.Fprintln(cfg.Out, err.Error())
-					}
-					return nil
+				if state.prepRejects >= identicalRejectLimit(cfg) {
+					return fmt.Errorf("%w: %s, %d times", ErrRejected, call.Function.Name, state.prepRejects)
 				}
 				continue
 			}
-			prepRejectKey = ""
-			prepRejects = 0
+			state.prepRejectKey = ""
+			state.prepRejects = 0
 			kind := action.Kind()
-			if kind == tools.Mutating && cfg.RequirePlan && !planApproved {
+			if kind == tools.Mutating && cfg.RequirePlan && !state.planApproved {
 				reason := "call propose_plan first"
 				printReject(cfg.Out, call.Function.Name, call.Function.Arguments, reason)
 				st.Rejects++
@@ -528,10 +541,10 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				msgs = append(msgs, tm)
 				_ = rec.Message(ctx, tm)
 				_ = rec.Action(ctx, ActionRecord{Tool: call.Function.Name, Args: args, Kind: kind, Decision: "gate_blocked", IsError: true, Output: tm.Content})
-				// A gate reject is not an explore step. Only the first one forces propose_plan.
-				if !sawGateReject {
-					sawGateReject = true
-					forcePropose = true
+				// A gate reject is not an state.explore step. Only the first one forces propose_plan.
+				if !state.sawGateReject {
+					state.sawGateReject = true
+					state.forcePropose = true
 				}
 				continue
 			}
@@ -544,15 +557,19 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			summary := action.Summary()
 			outside := false
 			inPlanHit := false
-			if kind == tools.Mutating && cfg.RequirePlan && planApproved {
+			if kind == tools.Mutating && cfg.RequirePlan && state.planApproved {
 				if p, ok := filePathOf(action); ok {
-					if inPlan(planFiles, p) {
+					planRoot, planBase := "", ""
+					if cfg.Guard != nil {
+						planRoot, planBase = cfg.Guard.Root(), cfg.Guard.Base()
+					}
+					if inPlanPath(state.planFiles, p, planRoot, planBase) {
 						inPlanHit = true
 					} else {
 						outside = true
 					}
 				} else if c, ok := commandOf(action); ok {
-					okHit, hits := safety.MatchPlan(safety.Plan{Files: planFiles, Commands: planCmds, Text: planText}, c)
+					okHit, hits := safety.MatchPlan(safety.Plan{Files: state.planFiles, Commands: state.planCmds, Text: state.planText}, c)
 					if cfg.Trace {
 						for _, h := range hits {
 							mark := "✗"
@@ -590,7 +607,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			}
 			if !inPlanHit && kind != tools.ReadOnly && kind != tools.Final {
 				_, isCmd := commandOf(action)
-				if outside && approvedAll && isCmd && !cfg.AutoApprove {
+				if outside && state.approvedAll && isCmd && !cfg.AutoApprove {
 					summary += " " + ui.Current().Muted("(outside plan, approved by a)")
 					decision = "approved_all"
 				} else {
@@ -605,7 +622,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					}
 					if forceAsk {
 						ui.BeforeOutput()
-						d, reason, err = cfg.Confirmer.ConfirmForced(summary, action.Preview())
+						d, reason, err = cfg.Confirmer.ConfirmForced(summary, namedPreview(action.Preview(), cfg.NamedRoots))
 					} else {
 						if outside && cfg.AutoApprove {
 							ui.BeforeOutput()
@@ -621,7 +638,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					case ui.Reject:
 						st.Rejects++
 						if kind == tools.Plan {
-							planRejected = true
+							state.planRejected = true
 						}
 						tm := llm.Message{
 							Role:       llm.RoleTool,
@@ -631,38 +648,48 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 						msgs = append(msgs, tm)
 						_ = rec.Message(ctx, tm)
 						_ = rec.Action(ctx, ActionRecord{Tool: call.Function.Name, Args: args, Kind: kind, Decision: "rejected", RejectReason: reason, IsError: true, Output: tm.Content})
+						rejectKey := call.Function.Name + "\x00" + call.Function.Arguments
+						if rejectKey == state.userRejectKey {
+							state.userRejects++
+						} else {
+							state.userRejectKey, state.userRejects = rejectKey, 1
+						}
+						if state.userRejects >= identicalRejectLimit(cfg) {
+							return fmt.Errorf("%w: %s, rejected %d times", ErrRejected, call.Function.Name, state.userRejects)
+						}
 						continue
 					case ui.Quit:
 						return ErrAborted
 					case ui.Approve:
+						state.userRejectKey, state.userRejects = "", 0
 						decision = "approved"
 						if cfg.AutoApprove {
 							decision = "auto"
 						}
 						if kind == tools.Plan {
-							planApproved = true
-							planRejected = false
-							planFiles = planFilesOf(action)
-							planCmds = planCmdsOf(action)
-							planText = planTextOf(action)
+							state.planApproved = true
+							state.planRejected = false
+							state.planFiles = planFilesOf(action)
+							state.planCmds = planCmdsOf(action)
+							state.planText = planTextOf(action)
 							if cfg.Guard != nil {
-								cfg.Guard.AllowPlanFiles(planFiles)
+								cfg.Guard.AllowPlanFiles(state.planFiles)
 							}
 						}
 					case ui.ApproveAll:
 						decision = "approved_all"
-						approvedAll = true
+						state.approvedAll = true
 						if cfg.AutoApprove {
 							decision = "auto"
 						}
 						if kind == tools.Plan {
-							planApproved = true
-							planRejected = false
-							planFiles = planFilesOf(action)
-							planCmds = planCmdsOf(action)
-							planText = planTextOf(action)
+							state.planApproved = true
+							state.planRejected = false
+							state.planFiles = planFilesOf(action)
+							state.planCmds = planCmdsOf(action)
+							state.planText = planTextOf(action)
 							if cfg.Guard != nil {
-								cfg.Guard.AllowPlanFiles(planFiles)
+								cfg.Guard.AllowPlanFiles(state.planFiles)
 							}
 						}
 					}
@@ -670,7 +697,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			}
 			finish := action.Kind() == tools.Final
 			if call.Function.Name == "read_file" {
-				if skipped, tm := skipCoveredRead(action, call, readSpans, msgs, cfg.Out); skipped {
+				if skipped, tm := skipCoveredRead(action, call, state.readSpans, msgs, cfg.Out); skipped {
 					msgs = append(msgs, tm)
 					_ = rec.Message(ctx, tm)
 					lastReadOnly = len(msgs) - 1
@@ -679,14 +706,14 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			}
 			if kind == tools.ReadOnly && call.Function.Name != "read_file" {
 				key := call.Function.Name + "\x00" + canonicalJSON(call.Function.Arguments)
-				if _, dup := seenRead[key]; dup {
+				if _, dup := state.seenRead[key]; dup {
 					if !finish {
 						if hadLiveOut {
 							fmt.Fprintln(cfg.Out)
 						}
 						ui.BeforeOutput()
 						fmt.Fprintln(cfg.Out, ui.CallIndent+ui.FormatToolSummary(summary+" (duplicate, skipped)"))
-						printedBlock = true
+						state.printedBlock = true
 					}
 					tm := llm.Message{
 						Role: llm.RoleTool, Content: "note: you already made this exact call; its result is above.",
@@ -697,7 +724,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					lastReadOnly = len(msgs) - 1
 					continue
 				}
-				seenRead[key] = struct{}{}
+				state.seenRead[key] = struct{}{}
 			}
 			if !finish {
 				if hadLiveOut {
@@ -705,7 +732,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				}
 				ui.BeforeOutput()
 				fmt.Fprintln(cfg.Out, ui.CallIndent+ui.FormatToolSummary(summary))
-				printedBlock = true
+				state.printedBlock = true
 			}
 			start := time.Now()
 			result, err := action.Run(ctx)
@@ -731,14 +758,14 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				_ = rec.FileChange(ctx, *result.Change)
 			}
 			if !result.IsError {
-				verified = append(verified, VerifiedCall{
+				state.verified = append(state.verified, VerifiedCall{
 					Tool: call.Function.Name, Args: call.Function.Arguments, Out: result.Output,
 				})
 				switch call.Function.Name {
 				case "write_file":
-					wroteFile = true
+					state.wroteFile = true
 				case "export_doc":
-					exportedDoc = true
+					state.exportedDoc = true
 				case "read_file":
 					if p, ok := action.(interface{ ResolvedPath() string }); ok {
 						if hash, err := fileSHA256(p.ResolvedPath()); err == nil {
@@ -750,7 +777,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 								}
 							}
 							if start > 0 && end >= start {
-								readSpans = append(readSpans, readSpan{
+								state.readSpans = append(state.readSpans, readSpan{
 									abs: p.ResolvedPath(), hash: hash,
 									start: start, end: end, step: st.Steps, toolID: call.ID,
 								})
@@ -764,11 +791,11 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				if strings.TrimSpace(text) == "" {
 					return ErrNoAnswer
 				}
-				if printedBlock {
+				if state.printedBlock {
 					fmt.Fprintln(cfg.Out)
 				}
 				writeAnswer(cfg.Out, text, cfg.Plain)
-				for _, claim := range UnverifiedClaims(text, verified) {
+				for _, claim := range UnverifiedClaims(text, state.verified) {
 					fmt.Fprintln(cfg.Out, ui.Current().Warn("· not verified: "+claim))
 				}
 				return nil
@@ -782,19 +809,19 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			hadLiveOut = toolPrintedOutput(call.Function.Name, result)
 			content := result.Output
 			if cfg.Task == "analysis" && analysisSourceRead(call.Function.Name, call.Function.Arguments) && !result.IsError {
-				sourceReads++
+				state.sourceReads++
 			}
 			if result.IsError {
-				consecFail++
+				state.consecFail++
 				sum := sha256.Sum256([]byte(result.Output))
 				key := call.Function.Name + call.Function.Arguments + string(sum[:])
-				if _, dup := seenFail[key]; dup {
+				if _, dup := state.seenFail[key]; dup {
 					content += "\n\nnote: this exact call already failed with identical output. Do not retry it; inspect files or change approach."
 				} else {
-					seenFail[key] = struct{}{}
+					state.seenFail[key] = struct{}{}
 				}
 			} else {
-				consecFail = 0
+				state.consecFail = 0
 			}
 			tm := llm.Message{
 				Role:       llm.RoleTool,
@@ -807,71 +834,71 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				lastReadOnly = len(msgs) - 1
 			}
 			if call.Function.Name == "run_shell" && result.IsError {
-				shellFail = true
+				state.shellFail = true
 			}
 		}
-		if planApproved && (cfg.RequirePlan || cfg.Intent == "act" || cfg.Intent == "build") {
+		if state.planApproved && (cfg.RequirePlan || cfg.Intent == "act" || cfg.Intent == "build") {
 			if stepReadOnly > 0 && stepOther == 0 {
-				postPlanReads++
-				if cfg.Task == "docs" && !wroteFile && postPlanReads == postPlanDocsAt && !docsWriteNoted {
-					docsWriteNoted = true
-					nudge := llm.Message{Role: llm.RoleUser, Content: docsPlannedWriteNote(planFiles)}
+				state.postPlanReads++
+				if cfg.Task == "docs" && !state.wroteFile && state.postPlanReads == postPlanDocsAt && !state.docsWriteNoted {
+					state.docsWriteNoted = true
+					nudge := llm.Message{Role: llm.RoleUser, Content: docsPlannedWriteNote(state.planFiles)}
 					msgs = append(msgs, nudge)
 					_ = rec.Message(ctx, nudge)
 				}
-				if postPlanReads == postPlanNoteAt {
+				if state.postPlanReads == postPlanNoteAt {
 					nudge := llm.Message{Role: llm.RoleUser, Content: PostPlanNote}
 					msgs = append(msgs, nudge)
 					_ = rec.Message(ctx, nudge)
 				}
-				if postPlanReads >= postPlanForceAt {
-					forceMutating = true
+				if state.postPlanReads >= postPlanForceAt {
+					state.forceMutating = true
 				}
 			} else if stepOther > 0 {
-				postPlanReads = 0
-				forceMutating = false
+				state.postPlanReads = 0
+				state.forceMutating = false
 			}
 		}
-		if cfg.Task == "docs" && wroteFile && !exportedDoc {
-			docsExportWait++
-			if docsExportWait == docsExportNoteAt && !docsExportNoted {
-				docsExportNoted = true
+		if cfg.Task == "docs" && state.wroteFile && !state.exportedDoc {
+			state.docsExportWait++
+			if state.docsExportWait == docsExportNoteAt && !state.docsExportNoted {
+				state.docsExportNoted = true
 				nudge := llm.Message{Role: llm.RoleUser, Content: DocsExportNote}
 				msgs = append(msgs, nudge)
 				_ = rec.Message(ctx, nudge)
 			}
-			if docsExportWait >= docsExportForceAt {
-				forceExport = true
+			if state.docsExportWait >= docsExportForceAt {
+				state.forceExport = true
 			}
-		} else if exportedDoc {
-			docsExportWait = 0
-			forceExport = false
+		} else if state.exportedDoc {
+			state.docsExportWait = 0
+			state.forceExport = false
 		}
-		prePlanEvery := !planApproved && (cfg.RequirePlan || cfg.Intent == "act" || cfg.Intent == "build")
+		prePlanEvery := !state.planApproved && (cfg.RequirePlan || cfg.Intent == "act" || cfg.Intent == "build")
 		if prePlanEvery && (stepReadOnly > 0 || stepOther > 0) {
-			explore++
-			if cfg.ExploreBudget > 0 && explore >= cfg.ExploreBudget && cfg.ExploreNote != "" && lastReadOnly >= 0 {
-				msgs[lastReadOnly].Content += "\n\n" + exploreNote(cfg, sourceReads)
-				noteSent = true
+			state.explore++
+			if cfg.ExploreBudget > 0 && state.explore >= cfg.ExploreBudget && cfg.ExploreNote != "" && lastReadOnly >= 0 {
+				msgs[lastReadOnly].Content += "\n\n" + exploreNote(cfg, state.sourceReads)
+				state.noteSent = true
 			}
 			if noteWasSent {
-				readonlyAfterNote++
-				if readonlyAfterNote >= hardStopAfter(cfg, sourceReads) {
-					toolsGone = true
+				state.readonlyAfterNote++
+				if state.readonlyAfterNote >= hardStopAfter(cfg, state.sourceReads) {
+					state.toolsGone = true
 				}
 			}
 		} else if stepOther > 0 {
-			explore = 0
-		} else if stepReadOnly > 0 && (!cfg.RequirePlan || !planApproved) {
-			explore++
-			if cfg.ExploreBudget > 0 && explore >= cfg.ExploreBudget && cfg.ExploreNote != "" && lastReadOnly >= 0 {
-				msgs[lastReadOnly].Content += "\n\n" + exploreNote(cfg, sourceReads)
-				noteSent = true
+			state.explore = 0
+		} else if stepReadOnly > 0 && (!cfg.RequirePlan || !state.planApproved) {
+			state.explore++
+			if cfg.ExploreBudget > 0 && state.explore >= cfg.ExploreBudget && cfg.ExploreNote != "" && lastReadOnly >= 0 {
+				msgs[lastReadOnly].Content += "\n\n" + exploreNote(cfg, state.sourceReads)
+				state.noteSent = true
 			}
 			if noteWasSent {
-				readonlyAfterNote++
-				if readonlyAfterNote >= hardStopAfter(cfg, sourceReads) {
-					toolsGone = true
+				state.readonlyAfterNote++
+				if state.readonlyAfterNote >= hardStopAfter(cfg, state.sourceReads) {
+					state.toolsGone = true
 				}
 			}
 		}
@@ -907,11 +934,24 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		}
 		text := trimLeadingBlanks(msg.Content)
 		if strings.TrimSpace(text) != "" {
-			if printedBlock {
+			if state.printedBlock {
 				fmt.Fprintln(cfg.Out)
 			}
 			writeAnswer(cfg.Out, text, cfg.Plain)
 		}
 	}
 	return ErrMaxSteps
+}
+
+// namedPreview appends the write roots the request named, so the forced
+// confirmation shows everything the turn will allow.
+func namedPreview(preview string, roots []string) string {
+	if len(roots) == 0 {
+		return preview
+	}
+	line := "write roots named by the request: " + strings.Join(roots, ", ")
+	if strings.TrimSpace(preview) == "" {
+		return line
+	}
+	return strings.TrimRight(preview, "\n") + "\n" + line
 }

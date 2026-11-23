@@ -18,7 +18,7 @@ func isContinue(s string) bool {
 }
 
 func incompleteTurn(code int) bool {
-	return code == 1 || code == 3 || code == 4
+	return code == 1 || code == 3 || code == 4 || code == 5
 }
 
 func (r *Runner) continueDecision(text string) (intent.Decision, bool) {

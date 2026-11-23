@@ -363,7 +363,7 @@ func migrateBuildThinking(n *yaml.Node) {
 	}
 }
 
-func writeModels(b *strings.Builder, c Config, indent int) {
+func writeModels(b *strings.Builder, c Config, indent int, mask bool) {
 	pad := strings.Repeat("  ", indent)
 	fmt.Fprintf(b, "%smodels:\n", pad)
 	names := c.ModelNames()
@@ -376,13 +376,36 @@ func writeModels(b *strings.Builder, c Config, indent int) {
 		if c.Models == nil && name == builtinModel {
 			m = Model{Endpoint: "http://localhost:8000/v1"}
 		}
+		endpoint := m.Endpoint
+		if mask {
+			endpoint = maskEndpoint(endpoint)
+		}
 		fmt.Fprintf(b, "%s  %s:\n", pad, name)
-		fmt.Fprintf(b, "%s    endpoint: %s   # OpenAI-compatible API base\n", pad, yamlScalar(m.Endpoint))
+		fmt.Fprintf(b, "%s    endpoint: %s   # OpenAI-compatible API base\n", pad, yamlScalar(endpoint))
 		fmt.Fprintf(b, "%s    model: %s   # empty uses the server default\n", pad, yamlScalar(m.Model))
 		fmt.Fprintf(b, "%s    thinking_kwargs: %s   # send chat_template_kwargs.enable_thinking\n", pad, strconv.FormatBool(m.ThinkingKwargs))
 		fmt.Fprintf(b, "%s    context: %d   # 0 uses the server context window\n", pad, m.Context)
 		fmt.Fprintf(b, "%s    notes: %s   # optional note\n", pad, yamlScalar(m.Notes))
 	}
+}
+
+// maskEndpoint hides the password of a URL that carries one, without re-encoding
+// the rest of the line.
+func maskEndpoint(raw string) string {
+	if !urlHasPassword(raw) {
+		return raw
+	}
+	s := strings.TrimSpace(raw)
+	scheme := strings.Index(s, "://")
+	at := strings.LastIndex(s, "@")
+	if scheme < 0 || at < scheme {
+		return "***"
+	}
+	userinfo := s[scheme+3 : at]
+	if colon := strings.IndexByte(userinfo, ':'); colon >= 0 {
+		userinfo = userinfo[:colon]
+	}
+	return s[:scheme+3] + userinfo + ":***" + s[at:]
 }
 
 func urlHasPassword(raw string) bool {

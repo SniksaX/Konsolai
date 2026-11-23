@@ -7,6 +7,21 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 
+# The image is built from tracked files only, so ignored and untracked paths
+# can never enter the build context.
+context_dir=""
+cleanup_context() {
+	if [[ -n "$context_dir" ]]; then
+		rm -rf "$context_dir"
+	fi
+}
+trap cleanup_context EXIT
+
+tracked_context() {
+	context_dir=$(mktemp -d)
+	git -C "$root" archive --format=tar HEAD | tar -x -C "$context_dir"
+}
+
 # Compose supplies a default for every variable, so no .env file is required.
 # Bash does not export UID. Compose reads these for the konsolai service user.
 export KONSOLAI_UID="$(id -u)"
@@ -23,14 +38,20 @@ EOF
 }
 
 image_name() {
-	case "${KONSOLAI_TARGET:-base}" in
-	full) printf '%s\n' konsolai:full ;;
-	base) printf '%s\n' konsolai:dev ;;
-	*)
-		echo "scripts/docker.sh: KONSOLAI_TARGET must be base or full" >&2
-		exit 2
-		;;
+	case "${KONSOLAI_TARGET:-}" in
+	full) printf '%s\n' konsolai:full; return ;;
+	base) printf '%s\n' konsolai:dev; return ;;
 	esac
+	# No explicit target: prefer the base image, fall back to the full one.
+	if docker image inspect konsolai:dev >/dev/null 2>&1; then
+		printf '%s\n' konsolai:dev
+		return
+	fi
+	if docker image inspect konsolai:full >/dev/null 2>&1; then
+		printf '%s\n' konsolai:full
+		return
+	fi
+	printf '%s\n' konsolai:dev
 }
 
 # -p fixes the project. A surrounding COMPOSE_PROJECT_NAME cannot retarget it.
@@ -58,10 +79,12 @@ build)
 	target=${1:-base}
 	case "$target" in
 	base)
-		docker build --target base -t konsolai:dev "$root"
+		tracked_context
+		docker build --target base -t konsolai:dev "$context_dir"
 		;;
 	full)
-		docker build --target full -t konsolai:full "$root"
+		tracked_context
+		docker build --target full -t konsolai:full "$context_dir"
 		;;
 	*)
 		usage

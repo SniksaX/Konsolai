@@ -111,6 +111,15 @@ type Registry struct {
 	cmds []Command
 }
 
+// extra commands registered by build-tagged files; empty by default.
+var extra []Command
+
+// RegisterExtra adds a command, with its argument tree, to the registry that
+// Default builds. Call it from an init in a build-tagged file.
+func RegisterExtra(cmd Command) {
+	extra = append(extra, cmd)
+}
+
 func New(cmds ...Command) *Registry {
 	return &Registry{cmds: cmds}
 }
@@ -267,7 +276,7 @@ func helpArgs(c Command) string {
 }
 
 func Default() *Registry {
-	return New(
+	cmds := []Command{
 		Command{Name: "help", Usage: "help", Summary: "Show this list of commands", Example: "/help", Run: runHelp},
 		Command{Name: "copy", Usage: "copy answer|all|code|cmd [n]", Summary: "Copy the last answer, pair, code block or command",
 			Args: []Arg{{Name: "what", Help: "answer, all, code or cmd", Required: true}, {Name: "n", Help: "how many (max 5)"}},
@@ -331,7 +340,8 @@ func Default() *Registry {
 			Args: []Arg{{Name: "file", Help: "output path"}}, Tree: fileTree, Example: "/pdf", Run: runPDF},
 		Command{Name: "explain", Usage: "explain", Summary: "Explain the last failed shell command (set PROMPT_COMMAND=\"history -a\")",
 			Example: "/explain", Run: runExplain},
-	)
+	}
+	return New(append(cmds, extra...)...)
 }
 
 func NoteUseSlash(w io.Writer, name string) {

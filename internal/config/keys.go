@@ -921,7 +921,8 @@ func renderCurrentYAML(c Config) string {
 func renderShow(c Config) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "profile: %s\n", c.Name)
-	writeKeys(&b, c, true, 0) // secrets masked
+	writeModels(&b, c, 0, true) // secrets masked
+	writeKeys(&b, c, true, 0)   // secrets masked
 	return b.String()
 }
 
@@ -930,7 +931,7 @@ func renderDoc(c Config, profile string, mask bool) string {
 	b.WriteString(initHeader)
 	fmt.Fprintf(&b, "default_profile: %s   # used when --profile and KONSOLAI_PROFILE are empty\n\n", yamlScalar(profile))
 	b.WriteString("defaults:\n")
-	writeModels(&b, c, 1)
+	writeModels(&b, c, 1, mask)
 	writeKeys(&b, c, mask, 1)
 	b.WriteString("\nprofiles:\n")
 	fmt.Fprintf(&b, "  %s: {}\n", yamlScalar(profile))

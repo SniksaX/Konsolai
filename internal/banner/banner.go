@@ -59,25 +59,9 @@ func Startup(w io.Writer, info Info, wordmark, tty bool, pal ui.Palette, width i
 	return Render(w, info, pal, width, wordmark)
 }
 
-// RenderTTY sizes the splash from the file's terminal and the active theme.
-func RenderTTY(f *os.File, info Info) error {
-	if f == nil {
-		return nil
-	}
-	width := 80
-	if w, _, err := term.GetSize(int(f.Fd())); err == nil && w > 0 {
-		width = w
-	}
-	return Render(f, info, ui.Current(), width, true)
-}
-
 func IsTTY(w io.Writer) bool {
 	f, ok := w.(*os.File)
 	return ok && term.IsTerminal(int(f.Fd()))
-}
-
-func Width(w io.Writer) int {
-	return theme.TermWidth()
 }
 
 // Render writes the wordmark (optional) and the info card.

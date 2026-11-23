@@ -33,7 +33,7 @@ fi
 
 machine_name() {
 	# Pieces are split so this file does not match the denylist itself.
-	local pat='fat''boy|sir''aj|/ho''me/|Desk''top/|qw''en|minist''ral|bge-''m3|114''36|114''35|95''01|95''02|554''32|kp''ass|zene''tys|ly''ah|endea''vour|think''pad'
+	local pat='fat''boy|sir''aj|/ho''me/|Desk''top/|114''36|114''35|114''33|95''01|95''02|95''03|554''32|kp''ass|zene''tys|ly''ah|endea''vour|think''pad'
 	[[ "$1" =~ $pat ]]
 }
 
@@ -50,15 +50,18 @@ fi
 
 while IFS= read -r subject; do
 	[[ -z "$subject" ]] && continue
-	case "$subject" in
-	Test* | Cover* | Assert* | Prove*) continue ;;
-	esac
 	if machine_name "$subject"; then
 		continue
 	fi
 	if [[ ! "$subject" =~ ^\[([A-Z]+)\| ]]; then
 		continue
 	fi
+	# Test-only commits carry the same [TYPE|SIZE] prefix, so skip on the
+	# title after it, not on the whole subject.
+	title="${subject#*] }"
+	case "$title" in
+	Test* | Cover* | Assert* | Prove*) continue ;;
+	esac
 	case "${BASH_REMATCH[1]}" in
 	ADD) added+=("$subject") ;;
 	UPDATE | REFACTOR | MOVE) changed+=("$subject") ;;

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"io"
 	"path/filepath"
 	"strings"
@@ -46,9 +47,12 @@ type FactStore interface {
 	Add(ctx context.Context, fact, scope string) error
 }
 
+// ErrNoFactStore says the process has no memory to store a fact in.
+var ErrNoFactStore = errors.New("tools: memory is not configured")
+
 type NopFactStore struct{}
 
-func (NopFactStore) Add(context.Context, string, string) error { return nil }
+func (NopFactStore) Add(context.Context, string, string) error { return ErrNoFactStore }
 
 func (k ActionKind) String() string {
 	switch k {
