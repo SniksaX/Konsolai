@@ -459,6 +459,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			cfg.ExploreNote = agent.ExploreNoteLookup
 		}
 		cfg.Temperature = r.Profile.TemperatureFor(string(dec.Intent))
+		cfg.ToolChoiceMode = r.Profile.ChatToolChoiceFor(r.Profile.Roles.Main)
 		cfg.TopP = r.Profile.LLM.TopP
 		cfg.TokenCap = r.Profile.TokenCap(string(dec.Intent))
 		cfg.ElideTrigger = r.Profile.ElideTrigger()
@@ -505,6 +506,10 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		}
 		if errors.Is(err, agent.ErrNoAnswer) {
 			fmt.Fprintln(r.errw(), "konsolai: the model returned no answer")
+			return 1, "", tok, true
+		}
+		if errors.Is(err, agent.ErrNoPlan) {
+			fmt.Fprintln(r.errw(), "konsolai: the model did not call propose_plan after the nudge; the task was not started")
 			return 1, "", tok, true
 		}
 		if errors.Is(err, agent.ErrContextOverflow) {
