@@ -635,9 +635,14 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 				title = ui.PanelTitle(1)
 			}
 			panel := ui.AnswerPanel(title, out, width, r.Profile.JSONMaxLines())
-			if rows := strings.Count(panel, "\n"); height >= rows+3 {
+			rows := strings.Count(panel, "\n")
+			if height >= rows+3 {
+				// The panel fits: replace the streamed text in place.
 				fmt.Fprint(r.out(), theme.CursorUp(streamRows.Rows())+theme.ClearBelow)
 				fmt.Fprint(r.out(), panel)
+			} else {
+				// A rewind would scare off the scrollback: draw after the stream.
+				fmt.Fprint(r.out(), "\n"+panel)
 			}
 		}
 	}
