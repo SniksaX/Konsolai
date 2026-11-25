@@ -223,6 +223,7 @@ func FriendlyTable() string {
 		{"temperature", "<x> [intent]", "llm.temperature.answer, llm.temperature.lookup, llm.temperature.act, llm.temperature.build"},
 		{"top_p", "<x>", "llm.top_p"},
 		{"tool_choice", "named | required | auto", "llm.tool_choice_mode"},
+		{"reasoning", "default | none | minimal | low | medium | high", "llm.reasoning_effort"},
 		{"approve", "ask | in_plan | all_safe", "agent.approve"},
 		{"plan", "act_low|act_high|build on|off", "agent.plan.act_low, agent.plan.act_high, agent.plan.build"},
 		{"trace", "on | off", "ui.trace"},
