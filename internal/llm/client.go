@@ -58,8 +58,11 @@ type FunctionCall struct {
 }
 
 var (
-	ErrTruncated   = errors.New("model output was cut off (max tokens)")
-	ErrIdleTimeout = errors.New("llm: idle timeout")
+	ErrTruncated = errors.New("model output was cut off (max tokens)")
+	// ErrReasoningTruncated means the reasoning tokens used the whole output
+	// budget before any answer text was written.
+	ErrReasoningTruncated = errors.New("llm: the model used its whole output budget on reasoning before writing an answer")
+	ErrIdleTimeout        = errors.New("llm: idle timeout")
 )
 
 const (
@@ -110,6 +113,8 @@ type Client struct {
 	probeTimeout       time.Duration
 	remoteProbeTimeout time.Duration
 	thinkingMode       string
+	reasoningEffort    string
+	lastReasoningNote  string
 }
 
 func New(baseURL, model string) *Client {
@@ -178,6 +183,37 @@ func (c *Client) SetThinkingMode(mode string) {
 	default:
 		c.thinkingMode = ""
 	}
+}
+
+// SetReasoningEffort sets the top-level reasoning_effort value: none,
+// minimal, low, medium or high. Empty or "default" omits the field.
+func (c *Client) SetReasoningEffort(v string) {
+	if c == nil {
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "none", "minimal", "low", "medium", "high":
+		c.reasoningEffort = strings.ToLower(strings.TrimSpace(v))
+	default:
+		c.reasoningEffort = ""
+	}
+}
+
+// ReasoningEffort is the configured value, or "" when the field is omitted.
+func (c *Client) ReasoningEffort() string {
+	if c == nil {
+		return ""
+	}
+	return c.reasoningEffort
+}
+
+// LastReasoningFallback reports the value a provider made the client adopt
+// after a reasoning_effort rejection, for the trace.
+func (c *Client) LastReasoningFallback() string {
+	if c == nil {
+		return ""
+	}
+	return c.lastReasoningNote
 }
 
 // SetAPIKey installs a call-time bearer-key resolver. It is read before each
@@ -676,6 +712,7 @@ type chatRequest struct {
 	MaxTokens          int                 `json:"max_tokens,omitempty"`
 	ChatTemplateKwargs *chatTemplateKwargs `json:"chat_template_kwargs,omitempty"`
 	Thinking           *thinkingToggle     `json:"thinking,omitempty"`
+	ReasoningEffort    string              `json:"reasoning_effort,omitempty"`
 	Tools              []ToolSpec          `json:"tools,omitempty"`
 	ToolChoice         json.RawMessage     `json:"tool_choice,omitempty"`
 	ResponseFormat     *responseFormat     `json:"response_format,omitempty"`
@@ -823,6 +860,9 @@ func (c *Client) chatPayload(r chatRequest) map[string]any {
 	if r.Thinking != nil {
 		m["thinking"] = r.Thinking
 	}
+	if r.ReasoningEffort != "" {
+		m["reasoning_effort"] = r.ReasoningEffort
+	}
 	if len(r.Tools) > 0 {
 		m["tools"] = r.Tools
 	}
@@ -850,6 +890,10 @@ func (c *Client) complete(ctx context.Context, msgs []Message, tools []ToolSpec,
 	// A forced tool_choice always keeps one slot for the single auto retry:
 	// providers that reject tool_choice in thinking mode cost a 400 first.
 	if strings.TrimSpace(opts.ToolChoice) != "" && strings.ToLower(opts.ToolChoice) != "auto" {
+		extra++
+	}
+	if len(tools) > 0 {
+		// One slot for the reasoning_effort retry with tools.
 		extra++
 	}
 	var msg Message
@@ -880,6 +924,17 @@ func (c *Client) complete(ctx context.Context, msgs []Message, tools []ToolSpec,
 			forcedToolChoiceOff.Store(toolChoiceKey(c.baseURL, c.ModelID()), struct{}{})
 			continue
 		}
+		if err != nil {
+			if v, ok := reasoningEffortRejection(err); ok && len(tools) > 0 {
+				if _, done := reasoningFallback.Load(toolChoiceKey(c.baseURL, c.ModelID())); !done {
+					// Function tools with reasoning_effort are rejected: retry once
+					// with the value the provider named and keep it for the model.
+					reasoningFallback.Store(toolChoiceKey(c.baseURL, c.ModelID()), v)
+					c.lastReasoningNote = v
+					continue
+				}
+			}
+		}
 		if c.onUsage != nil && (usage.PromptTokens > 0 || usage.CompletionTokens > 0) {
 			c.onUsage(usage)
 		}
@@ -898,6 +953,38 @@ var forcedToolChoiceOff sync.Map
 
 func toolChoiceKey(baseURL, model string) string {
 	return strings.TrimRight(baseURL, "/") + "\x00" + model
+}
+
+// reasoningFallback is process-wide: a provider that rejects tools with
+// reasoning_effort makes this endpoint/model keep the value it named (none).
+var reasoningFallback sync.Map
+
+func (c *Client) effectiveReasoningEffort(model string, hasTools bool) string {
+	if hasTools {
+		if v, ok := reasoningFallback.Load(toolChoiceKey(c.baseURL, model)); ok {
+			return v.(string)
+		}
+	}
+	return c.reasoningEffort
+}
+
+// reasoningEffortRejection parses the provider 400 that names the value to
+// use. Only HTTP 400 is handled: 401, 403 and 429 are never retried.
+func reasoningEffortRejection(err error) (string, bool) {
+	var he *HTTPError
+	if !errors.As(err, &he) || he.Status != http.StatusBadRequest {
+		return "", false
+	}
+	body := strings.ToLower(he.Body)
+	if !strings.Contains(body, "reasoning_effort") {
+		return "", false
+	}
+	for _, v := range []string{"none", "minimal", "low", "medium", "high"} {
+		if strings.Contains(body, "'"+v+"'") || strings.Contains(body, "\""+v+"\"") || strings.Contains(body, " "+v+" ") || strings.HasSuffix(body, v) {
+			return v, true
+		}
+	}
+	return "none", true
 }
 
 // toolChoicePayload encodes the tool_choice field. "auto" (and a downgraded
@@ -993,6 +1080,7 @@ func (c *Client) completeAttempt(ctx context.Context, msgs []Message, tools []To
 	if c.thinkingMode != "" {
 		reqBody.Thinking = &thinkingToggle{Type: c.thinkingMode}
 	}
+	reqBody.ReasoningEffort = c.effectiveReasoningEffort(model, len(tools) > 0)
 	choice := toolChoicePayload(opts.ToolChoice, c.forcedToolChoiceOff(c.ModelID()))
 	if len(tools) > 0 && choice != nil {
 		reqBody.ToolChoice = choice
@@ -1068,7 +1156,7 @@ func (c *Client) completeAttempt(ctx context.Context, msgs []Message, tools []To
 		msg, usage, err := decodeJSONCompletion(br, opts, c.TokensPerChar())
 		return msg, usage, err, gotBytes
 	}
-	msg, usage, err := readSSE(ctx, reqCtx, br, opts, onDelta, c.TokensPerChar())
+	msg, usage, err := readSSE(ctx, reqCtx, br, opts, onDelta, c.TokensPerChar(), reqBody.ReasoningEffort != "")
 	return msg, usage, err, gotBytes
 }
 
@@ -1126,7 +1214,7 @@ func reasoningContentChars(data []byte) int {
 	return len(body.Choices[0].Message.ReasoningContent) + len(body.Choices[0].Message.Reasoning)
 }
 
-func readSSE(parent, reqCtx context.Context, r io.Reader, opts ChatOptions, onDelta func(string) error, ratio float64) (Message, Usage, error) {
+func readSSE(parent, reqCtx context.Context, r io.Reader, opts ChatOptions, onDelta func(string) error, ratio float64, reasoningModel bool) (Message, Usage, error) {
 	acc := newAccum()
 	prog := newProgress(opts.OnProgress)
 	defer prog.flush()
@@ -1190,6 +1278,11 @@ func readSSE(parent, reqCtx context.Context, r io.Reader, opts ChatOptions, onDe
 	}
 	if err != nil {
 		return msg, acc.usage, err
+	}
+	if acc.finish == "length" && strings.TrimSpace(msg.Content) == "" && len(msg.ToolCalls) == 0 &&
+		(reasoningModel || acc.usage.ReasoningTokens > 0) {
+		// The reasoning tokens ate the whole max_completion_tokens budget.
+		return msg, acc.usage, ErrReasoningTruncated
 	}
 	if acc.finish == "length" && !opts.Thinking {
 		return msg, acc.usage, ErrTruncated
