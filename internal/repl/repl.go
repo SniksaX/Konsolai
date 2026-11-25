@@ -530,6 +530,7 @@ func sessionFooter(st *session, cfg Config) string {
 	}
 	if cfg.Env != nil {
 		p := cfg.Env.Profile
+		info.Remote = p.ModelRemote(p.Roles.Main)
 		info.GitQuery = p.GitQueryTimeout()
 		info.CtxWarn = p.CtxWarnPct()
 		info.CtxHot = p.CtxHotPct()
