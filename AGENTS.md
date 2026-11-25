@@ -140,9 +140,14 @@ Work lands on `dev`. Config keys are the single table in `internal/config/keys.g
 - A configured reranker is often unreachable.
 - Symbol index: not built.
 - Remote models: the y/n gate decision and the token total are per process. `privacy.session_token_cap` counts only the usage a remote call reports, so a request that fails before reporting adds nothing. Remote classification resolves each endpoint host once and caches it; an unresolvable host counts as remote.
-- The welcome drops the `remote` marker when the models box has no room for it. The footer follows the main model and hides the marker in shell mode, with a mode word, and when the footer drops the model word (under 60 columns or when the row does not fit). `/set model` and `/status` always show it.
+- A probe only reports what the endpoint answered: 401/403 is `auth failed`, its deadline is `slow`, another non-2xx is `http N`, and only a failed connection is `unreachable`. Only a failed chat call may say the server cannot be reached. An empty id needs exactly one served model and a configured id must be served, so a resolution failure stops the turn before any chat call.
+- The welcome probes a remote model with its short gather budget (`ui.probe_timeout_ms`), not `llm.remote_probe_timeout_ms`, so a remote row can read `slow` while `/status` reads `ok`. It also drops the `remote` marker when the models box has no room for it.
+- The footer names the model that served the last call (resolved id and role) and hides the `remote` word in shell mode, with a mode word, and when the footer drops the model word (under 60 columns or when the row does not fit). `/set model` and `/status` always mark a remote endpoint.
+- `router.answer_main_above_tokens` (default 200) compares the full answer-prompt estimate on the fast client (system context, history and question), not the question text, so a long history sends a short question to main. Greetings bypass it and `0` disables the token gate.
+- The identity floor matches EN and FR phrases only; other identity or setup questions reach the model, which is told to answer from the model facts and to say "I don't know" when a fact is missing.
+- `welcome.Probe` keeps a `models` branch that nothing calls; welcome model probes go through `llm.Client`, and only embed and rerank still use `welcome.Probe`.
 - Remote cost needs `price_in` or `price_out` on a remote model (no price fetch) and shows on the end-of-turn `ui.stats` line and the trace `stats:` line; a local model and an unpriced remote model show none. Fast pricing is unit-tested, but no full fast answer exercises the cost line.
-- The provider presets come from published docs and are not exercised against live accounts; the `anthropic` OpenAI-compatible auth header stays unverified.
+- The provider presets come from published docs and are not exercised against live accounts; `anthropic`'s OpenAI-compatible auth header stays unverified, and `deepseek` sends no temperature by default.
 - Embeddings stay loopback or private; a remote embed service is rejected, so RAG cannot use a cloud provider.
 - README embeds four screenshots. `slash-menu`, `act-plan`, and `pdf` are not captured.
 - Latest tag `v0.2.2`; `dev` is past it and no newer tag exists. `version` in `cmd/konsolai` is still `"dev"` unless ldflags stamp it.
