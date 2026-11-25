@@ -85,6 +85,15 @@ type Config struct {
 	ElideTrigger      float64
 	ElideTarget       float64
 	IdenticalRejects  int
+	Pricing           Pricing
+}
+
+// Pricing is the serving model's location and its prices per million tokens.
+// A local model or two unset prices keep the turn's cost line off.
+type Pricing struct {
+	Remote   bool
+	PriceIn  float64
+	PriceOut float64
 }
 
 type Stats struct {
@@ -99,6 +108,7 @@ type Stats struct {
 	Rejects          int
 	OutsidePlan      int
 	MaxStep          time.Duration
+	Pricing          Pricing
 }
 
 func (s *Stats) noteModel(d time.Duration) {
@@ -209,7 +219,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	if state.planApproved && cfg.Guard != nil {
 		cfg.Guard.AllowPlanFiles(state.planFiles)
 	}
-	var st Stats
+	st := Stats{Pricing: cfg.Pricing}
 	st.RouterTime = cfg.RouterTime
 	defer func() {
 		if cfg.Stats != nil {
