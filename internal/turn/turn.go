@@ -71,6 +71,7 @@ type Runner struct {
 	answerCut        bool
 	escalated        bool
 	RebindNext       bool
+	remoteYes        bool
 	statMu           sync.Mutex
 	statOn           bool
 	statIntent       string
@@ -134,6 +135,7 @@ func (r *Runner) client() *llm.Client {
 		c.SetRetry(r.Profile.LLM.Retries, time.Duration(r.Profile.LLM.RetryWaitMS)*time.Millisecond)
 		r.Client = c
 	}
+	applyRemotePolicy(r.Client, r.Profile, "main", r.Profile.Roles.Main, r.remoteYes)
 	r.attachStats(r.Client)
 	return r.Client
 }
@@ -159,6 +161,7 @@ func (r *Runner) fastClient() *llm.Client {
 	}
 	c.SetRetry(r.Profile.LLM.Retries, time.Duration(r.Profile.LLM.RetryWaitMS)*time.Millisecond)
 	r.FastClient = c
+	applyRemotePolicy(c, r.Profile, "fast", r.Profile.Roles.Fast, r.remoteYes)
 	r.attachStats(c)
 	return c
 }
@@ -354,4 +357,17 @@ func (r *Runner) ShellOutput(n int) (string, bool) {
 		return "", false
 	}
 	return r.shellOut[len(r.shellOut)-1-n], true
+}
+
+// applyRemotePolicy gates a remote client and feeds its usage into the cap.
+func applyRemotePolicy(c *llm.Client, prof config.Profile, role, name string, yes bool) {
+	if c == nil {
+		return
+	}
+	m, ok := prof.Models[name]
+	if !ok || !m.Remote() {
+		return
+	}
+	c.SetPolicy(prof.RemoteCallPolicy(role, name, yes))
+	c.SetUsageHook(func(u llm.Usage) { config.NoteRemoteUsage(u.PromptTokens + u.CompletionTokens) })
 }
