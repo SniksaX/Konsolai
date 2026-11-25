@@ -512,17 +512,33 @@ func sessionFooter(st *session, cfg Config) string {
 	cwd, down, ctxPct, showCtx, shell := st.cwd, st.down, st.ctxPct, st.showCtx, st.shell
 	st.mu.Unlock()
 	routing := "main"
-	if cfg.Runner != nil && cfg.Runner.RouterSource != "" {
-		routing = cfg.Runner.RouterSource
-	} else if cfg.Env != nil && cfg.Env.Profile.FastEndpoint() != "" {
-		routing = "fast"
-	}
 	model := cfg.Model
-	if model == "" && cfg.Env != nil {
-		model = cfg.Env.Profile.MainModelID()
+	remote := false
+	if cfg.Runner != nil && cfg.Runner.Serving.Valid() {
+		// The footer names the model that actually served the last call: the
+		// resolved id with the role on the right, so a fast answer can never
+		// look like a main one.
+		serving := cfg.Runner.Serving
+		model = serving.Display()
+		if serving.Role != "" {
+			routing = serving.Role
+		}
+		remote = serving.Remote
+	} else {
+		if cfg.Runner != nil && cfg.Runner.RouterSource != "" {
+			routing = cfg.Runner.RouterSource
+		} else if cfg.Env != nil && cfg.Env.Profile.FastEndpoint() != "" {
+			routing = "fast"
+		}
+		if model == "" && cfg.Env != nil {
+			model = cfg.Env.Profile.MainModelID()
+		}
+		if cfg.Env != nil {
+			remote = cfg.Env.Profile.ModelRemote(cfg.Env.Profile.Roles.Main)
+		}
 	}
 	info := footerInfo{
-		Cwd: cwd, Model: model, Routing: routing,
+		Cwd: cwd, Model: model, Routing: routing, Remote: remote,
 		CtxPct: ctxPct, ShowCtx: showCtx, Down: down, Shell: shell,
 	}
 	if name, mode := commands.ActiveInputMode(); mode != nil {
@@ -530,7 +546,6 @@ func sessionFooter(st *session, cfg Config) string {
 	}
 	if cfg.Env != nil {
 		p := cfg.Env.Profile
-		info.Remote = p.ModelRemote(p.Roles.Main)
 		info.GitQuery = p.GitQueryTimeout()
 		info.CtxWarn = p.CtxWarnPct()
 		info.CtxHot = p.CtxHotPct()
