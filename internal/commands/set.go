@@ -18,6 +18,7 @@ import (
 	"github.com/SniksaX/Konsolai/internal/ui"
 	"github.com/SniksaX/Konsolai/internal/ui/theme"
 	"github.com/SniksaX/Konsolai/internal/welcome"
+	"golang.org/x/term"
 )
 
 func runModels(ctx context.Context, env *Env, args []string) int {
@@ -114,6 +115,8 @@ func runSet(ctx context.Context, env *Env, args []string) int {
 		return setOne(env, "ui.appearance", rest[1:], session)
 	case "welcome":
 		return setOne(env, "ui.welcome", rest[1:], session)
+	case "key":
+		return setKey(env, rest[1:])
 	}
 	k, cands, ok := config.MatchKey(rest[0])
 	if !ok {
@@ -587,8 +590,12 @@ func setModel(ctx context.Context, env *Env, args []string, session bool) int {
 		}
 		return setRole(env, "roles.fast", args[1], session)
 	case "add":
+		if len(args) == 4 && args[2] == "--provider" {
+			return addModelProvider(env, args[1], args[3], session)
+		}
 		if len(args) < 3 {
 			fmt.Fprintln(env.errw(), "usage: /set model add <name> <endpoint> [id]")
+			fmt.Fprintf(env.errw(), "       /set model add <name> --provider %s\n", strings.Join(config.ProviderNames(), "|"))
 			return 2
 		}
 		return addModel(env, args[1], args[2], joinOpt(args, 3), session)
@@ -611,6 +618,81 @@ func setModel(ctx context.Context, env *Env, args []string, session bool) int {
 		fmt.Fprintln(env.errw(), "usage: /set model [main|fast|add|remove|endpoint|discover]")
 		return 2
 	}
+}
+
+// setKey reads one API key with hidden input and stores it in the secrets file.
+// The key never enters config.yaml and is never printed back.
+func setKey(env *Env, args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(env.errw(), "usage: /set key <model> (the key is read with hidden input)")
+		return 2
+	}
+	name := args[0]
+	if _, ok := env.Profile.Models[name]; !ok {
+		fmt.Fprintf(env.errw(), "config: model %q is not configured; valid names: %s\n", name, strings.Join(env.Profile.ModelNames(), ", "))
+		return 2
+	}
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Fprintln(env.errw(), "/set key needs a terminal; the key is read with hidden input")
+		return 2
+	}
+	fmt.Fprintf(env.out(), "API key for %s: ", name)
+	raw, err := term.ReadPassword(int(os.Stdin.Fd()))
+	fmt.Fprintln(env.out())
+	if err != nil {
+		fmt.Fprintf(env.errw(), "config: read key: %v\n", err)
+		return 1
+	}
+	key := strings.TrimSpace(string(raw))
+	if key == "" {
+		fmt.Fprintln(env.errw(), "config: the key is empty")
+		return 2
+	}
+	if err := config.WriteSecret(name, key); err != nil {
+		fmt.Fprintln(env.errw(), err)
+		return 1
+	}
+	path, _ := config.SecretPath()
+	fmt.Fprintf(env.out(), "stored in %s (mode 0600)\n", path)
+	return 0
+}
+
+// addModelProvider adds a model from a provider preset and prints what it set.
+func addModelProvider(env *Env, name, provider string, session bool) int {
+	if strings.TrimSpace(name) == "" {
+		fmt.Fprintln(env.errw(), "usage: /set model add <name> --provider <provider>")
+		return 2
+	}
+	p, ok := config.Provider(provider)
+	if !ok {
+		fmt.Fprintf(env.errw(), "unknown provider %q; choose one of: %s\n", provider, strings.Join(config.ProviderNames(), ", "))
+		return 2
+	}
+	c := env.Profile
+	if c.Models == nil {
+		c.Models = map[string]config.Model{}
+	}
+	m := c.Models[name]
+	config.ApplyProvider(&m, p)
+	c.Models[name] = m
+	if err := config.Validate(c); err != nil {
+		fmt.Fprintln(env.errw(), err)
+		return 2
+	}
+	env.Profile = c
+	if env.Runner != nil {
+		env.Runner.Profile = c
+		env.Runner.RebindNext = true
+	}
+	if !session {
+		if err := config.UpsertModel(configPath(env), name, m, false); err != nil {
+			fmt.Fprintln(env.errw(), err)
+			return 1
+		}
+	}
+	fmt.Fprintf(env.out(), "%s: %s, ctx %d, key from %s\n", name, p.Endpoint, p.Context, p.APIKeyEnv)
+	fmt.Fprintf(env.out(), "from the next turn; store the key with /set key %s\n", name)
+	return 0
 }
 
 // setModelEndpoint changes one model's URL, writing through the YAML node writer
@@ -874,6 +956,9 @@ func formatModelTable(ctx context.Context, env *Env) string {
 		env.noteServer(m.Endpoint, body)
 		id, idServer, nctx, ctxServer := modelIdentity(env, m)
 		host := turn.EndpointHost(m.Endpoint)
+		if m.Remote() {
+			host += "  remote"
+		}
 		head := fmt.Sprintf("%s%s  %s  %s  ", mark, name, role, host)
 		if mark == "› " {
 			head = p.Accent(head)
