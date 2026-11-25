@@ -115,3 +115,19 @@ konsolai /set rerank off
 ```
 
 `/set model` prints name, roles, host, id, context, and status. The current main and fast rows are marked. `/set model discover` lists ids on each endpoint that are not configured yet, each with the `/set model add` line. Embed and rerank URLs are optional. The client appends `/embed` and `/rerank`. With `rag.enabled` false there is no ingestion, no recall tool, and no warning. `/status` prints `not configured` for a role that is off.
+
+### API-key models and request quirks
+
+A model entry can name the environment variable that holds its bearer key: `api_key_env`. The key is read at call time; when the variable is unset the client falls back to `~/.config/konsolai/secrets` (mode `0600`, directory `0700`, never in the repository or in `config.yaml`). `/set key <model>` reads a key with hidden input and writes that file. `/set` refuses keys as plain arguments.
+
+A model also accepts `max_tokens_field` (`max_tokens` or `max_completion_tokens`), `send_temperature` (default true; some providers reject the field), `context` (required for a remote provider), and optional `price_in` / `price_out` in USD per million tokens.
+
+```sh
+konsolai /set model add gpt --provider openai
+konsolai /set key gpt
+konsolai /set model main gpt
+```
+
+The presets `openai`, `openrouter`, `groq`, `together`, `mistral`, `deepseek`, `gemini`, and `anthropic` fill the endpoint, context and quirks. They come from each provider's OpenAI-compatible documentation and were not exercised against live accounts here.
+
+A model whose host resolves to a public address is marked `remote` in `/set model`. Embedding endpoints must be loopback or private; a remote embed service is rejected. The `privacy.allow_remote`, `privacy.remote_roles`, and `privacy.session_token_cap` keys are defined; the remote-use prompt, role enforcement, cost line and token cap are not wired yet.
