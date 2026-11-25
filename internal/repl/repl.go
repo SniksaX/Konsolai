@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -16,6 +15,7 @@ import (
 	"github.com/SniksaX/Konsolai/internal/banner"
 	"github.com/SniksaX/Konsolai/internal/commands"
 	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/llm"
 	"github.com/SniksaX/Konsolai/internal/repo"
 	"github.com/SniksaX/Konsolai/internal/safety"
 	"github.com/SniksaX/Konsolai/internal/shellmode"
@@ -780,28 +780,29 @@ func probeBackground(ctx context.Context, prof config.Profile, errw io.Writer, s
 	p := ui.Current()
 	var wg sync.WaitGroup
 	wg.Add(2)
-	unreachable := p.Warn("main model unreachable at " + turn.EndpointHost(prof.MainEndpoint()))
 	go func() {
 		defer wg.Done()
 		if prof.MainEndpoint() == "" {
 			markDown(st, p.Warn("no main model endpoint configured")+p.Muted(" · /set model"))
 			return
 		}
+		host := turn.EndpointHost(prof.MainEndpoint())
 		cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		defer cancel()
-		req, err := http.NewRequestWithContext(cctx, http.MethodGet, strings.TrimRight(prof.MainEndpoint(), "/")+"/models", nil)
-		if err != nil {
-			markDown(st, unreachable)
-			return
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			markDown(st, unreachable)
-			return
-		}
-		_ = resp.Body.Close()
-		if resp.StatusCode >= 400 {
-			markDown(st, unreachable)
+		c := llm.New(prof.MainEndpoint(), prof.MainModelID())
+		c.SetAPIKey(prof.APIKeyResolver(prof.Roles.Main))
+		c.SetRemoteProbeTimeout(prof.RemoteProbeTimeout())
+		res := c.Probe(cctx)
+		switch res.Kind {
+		case llm.ProbeOK:
+		case llm.ProbeAuthFailed:
+			addWarn(st, p.Warn("main model auth failed at "+host)+p.Muted(" · /set key"))
+		case llm.ProbeSlow:
+			addWarn(st, p.Warn("main model slow at "+host)+p.Muted(" · /doctor"))
+		case llm.ProbeHTTPError:
+			addWarn(st, p.Warn(fmt.Sprintf("main model answered http %d at %s", res.Status, host))+p.Muted(" · /doctor"))
+		default:
+			markDown(st, p.Warn("main model unreachable at "+host))
 		}
 	}()
 	go func() {
