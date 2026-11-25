@@ -33,7 +33,7 @@ func TestRemoteTokenCapTripsThroughRunTurn(t *testing.T) {
 	srv := remoteAnswerServer(t)
 	r := testRunner(t, llm.New(srv.URL+"/v1", "m"), autoConfirm{})
 	c := config.Builtin()
-	c.Models["api"] = config.Model{Endpoint: "http://203.0.113.9/v1"}
+	c.Models["api"] = config.Model{Endpoint: "http://203.0.113.9/v1", Model: "m"}
 	c.Roles.Main = "api"
 	c.Privacy.SessionTokenCap = 1
 	r.Profile = c
