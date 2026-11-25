@@ -27,6 +27,7 @@ func runStatus(ctx context.Context, env *Env, _ []string) int {
 	probe := modelsProbe(ctx, env.Profile, env.Profile.Roles.Main, ep)
 	fmt.Fprintf(env.out(), "endpoint       %s  %s\n", endpointHost(ep, env.Profile.ModelRemote(env.Profile.Roles.Main)), probe.reach)
 	model := env.Profile.MainModelID()
+	configured := strings.TrimSpace(model)
 	note := ""
 	win := 0
 	if env.Runner != nil && env.Runner.Client != nil {
@@ -40,7 +41,11 @@ func runStatus(ctx context.Context, env *Env, _ []string) int {
 				model = dashIfEmpty(model)
 			}
 		}
-		if model != "" && probe.kind == llm.ProbeOK && !containsID(probe.ids, model) {
+		// The probe runs before the client resolves and may be stale. Only a
+		// configured id is checked against it; an id the client resolved from
+		// the server is already the server's answer, so noting the earlier
+		// probe there would contradict a successful resolution.
+		if configured != "" && probe.kind == llm.ProbeOK && !containsID(probe.ids, model) {
 			note = "  (not served; server serves: " + strings.Join(limitNames(probe.ids, 8), ", ") + ")"
 		}
 		win = env.Runner.Client.ContextWindow()
