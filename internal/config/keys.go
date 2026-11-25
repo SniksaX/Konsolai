@@ -188,6 +188,8 @@ var keyTable = []Key{
 		func(c *Config, v int) { c.LLM.Retries = v }, func(c Config) int { return c.LLM.Retries }).when(ApplyNext),
 	km("llm.retry_wait_ms", "pause before a model retry", 2000,
 		func(c *Config, v int) { c.LLM.RetryWaitMS = v }, func(c Config) int { return c.LLM.RetryWaitMS }).when(ApplyNext),
+	km("llm.remote_probe_timeout_ms", "timeout for one remote model probe", 3000,
+		func(c *Config, v int) { c.LLM.RemoteProbeTimeoutMS = v }, func(c Config) int { return c.LLM.RemoteProbeTimeoutMS }).when(ApplyNext),
 
 	kf("fast.context_guard_ratio", "skip fast when the prompt fills past this fraction of its window", 0.60,
 		func(c *Config, v float64) { c.Fast.ContextGuardRatio = v }, func(c Config) float64 { return c.Fast.ContextGuardRatio }),
@@ -397,6 +399,8 @@ var keyTable = []Key{
 		func(c *Config, v []string) { c.Router.ActionVerbs = copyList(v) }, func(c Config) []string { return c.Router.ActionVerbs }),
 	kli("router.targets", "nouns that suggest a project target", nil,
 		func(c *Config, v []string) { c.Router.Targets = copyList(v) }, func(c Config) []string { return c.Router.Targets }),
+	knn("router.answer_main_above_tokens", "answer on main above this many prompt tokens; 0 = off", 200,
+		func(c *Config, v int) { c.Router.AnswerMainAboveTokens = v }, func(c Config) int { return c.Router.AnswerMainAboveTokens }).when(ApplyNext),
 	kb("privacy.allow_remote", "allow prompts to be sent to a remote model", true,
 		func(c *Config, v bool) { c.Privacy.AllowRemote = v }, func(c Config) bool { return c.Privacy.AllowRemote }).when(ApplyNext),
 	kli("privacy.remote_roles", "roles that may point at a remote model", []string{"main", "fast"},
