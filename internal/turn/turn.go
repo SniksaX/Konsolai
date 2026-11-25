@@ -432,9 +432,14 @@ func (r *Runner) servingModel(ctx context.Context, client *llm.Client, role stri
 		name = "default"
 	}
 	id := ""
+	// Never probe a remote host just to label a call: the attribution must not
+	// trigger the confirmation or a request. Use the configured id.
+	remote := c.ModelRemote(name)
 	if client != nil {
-		if got, err := client.ResolveModel(ctx); err == nil {
-			id = got
+		if !remote {
+			if got, err := client.ResolveModel(ctx); err == nil {
+				id = got
+			}
 		}
 		if id == "" {
 			id = client.ModelID()
