@@ -171,6 +171,38 @@ func (m Model) ChatThinking() string {
 
 // ChatToolChoiceFor resolves the forced-tool mode for one model name: the
 // model entry first, then the built-in llm.tool_choice_mode, then named.
+// ChatReasoningEffort is the model's reasoning_effort value, or "" when the
+// field must be omitted.
+func (m Model) ChatReasoningEffort() string {
+	v := strings.ToLower(strings.TrimSpace(m.ReasoningEffort))
+	switch v {
+	case "none", "minimal", "low", "medium", "high":
+		return v
+	}
+	return ""
+}
+
+// ChatReasoningEffortFor resolves reasoning_effort for one model name: the
+// model entry first, then the built-in llm.reasoning_effort, then none.
+func (c Config) ChatReasoningEffortFor(name string) string {
+	if m, ok := c.Models[name]; ok {
+		if v := m.ChatReasoningEffort(); v != "" {
+			return v
+		}
+	}
+	return Model{ReasoningEffort: c.LLM.ReasoningEffort}.ChatReasoningEffort()
+}
+
+// ReasoningHeadroom is the extra output budget a reasoning model gets so the
+// reasoning tokens do not eat the whole max_completion_tokens budget.
+func (c Config) ReasoningHeadroomFor(name string) int {
+	effort := c.ChatReasoningEffortFor(name)
+	if effort == "" || effort == "none" {
+		return 0
+	}
+	return nonzero(c.LLM.ThinkingMaxTokens, 4096)
+}
+
 func (c Config) ChatToolChoiceFor(name string) string {
 	if m, ok := c.Models[name]; ok {
 		if mode := m.ChatToolChoice(); mode != "" {
