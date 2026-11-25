@@ -37,6 +37,13 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	}
 	r.escalated = false
 	r.remoteYes = req.Yes
+	// An identity question is answered from the configured model facts: it makes
+	// no model call, so it needs no client and no remote confirmation.
+	if identityFloor(req.Text) {
+		mem := r.mem()
+		projectID := UpsertProject(ctx, mem, cwd)
+		return r.answerIdentityTurn(ctx, req, cwd, mem, projectID)
+	}
 	// A remote model is gated before any request: policy, role list,
 	// confirmation and the session token cap all fail here.
 	for _, rm := range []struct{ role, name string }{
@@ -317,23 +324,19 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		dec.Language = intent.ResolveLanguage(req.Text, lastUserOf(history), dec.Language, r.Profile.Language.Default, r.Profile.Language.Languages)
 	}
 	lang := agent.ReplyInstruction(dec.Language)
+	snap.Model = r.modelFacts("main")
 	if dec.Intent == intent.Answer {
 		prompt := agent.AnswerPrompt + "\n" + lang
 		if r.SlashHelp != "" {
 			prompt += "\nSlash commands:\n" + r.SlashHelp
 		}
 		answerClient := client
-		if dec.EffectiveEffort() == intent.EffortNone {
-			if fc := r.fastClient(); fc != nil && fc.Reachable(ctx) {
-				if r.fastPromptTooLarge(ctx, fc, snap, history, req.Text, prompt) {
-					if req.Trace {
-						fmt.Fprintln(r.errw(), "fast model skipped (history too large)")
-					}
-				} else {
-					answerClient = fc
-				}
-			}
+		answerRole := "main"
+		if fc := r.fastAnswer(ctx, *dec, snap, history, req.Text, prompt, req.Trace); fc != nil {
+			answerClient = fc
+			answerRole = "fast"
 		}
+		snap.Model = r.modelFacts(answerRole)
 		think := answerThink(dec, r.Profile.AnswerThinking(), thinkMode)
 		code, answer, ptok, used, esc := r.runAnswer(ctx, client, answerClient, snap, history, rec, req.Text, prompt, think, req, *dec, routerTime)
 		if esc != "" && !r.escalated {
@@ -472,6 +475,8 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			r.emitBadge(req, "lookup", false)
 		}
 
+		cfg.Serving = r.servingModel(ctx, client, "main")
+		r.Serving = cfg.Serving
 		err = agent.Run(ctx, cfg, sys, req.Text)
 		if dec.Intent == intent.Lookup && errors.Is(err, tools.ErrLookupMutating) && !r.escalated && attempt == 0 {
 			r.escalated = true
@@ -534,21 +539,62 @@ func FastWindowTooFullRatio(est, window int, ratio float64) bool {
 	return float64(est) > float64(window)*ratio
 }
 
-func (r *Runner) fastPromptTooLarge(ctx context.Context, fc *llm.Client, snap sysctx.Snapshot, history []llm.Message, query, extra string) bool {
+// answerSystem is the answer turn's system prompt: the brief environment, the
+// model facts, and the answer instructions.
+func answerSystem(extra string, snap sysctx.Snapshot) string {
+	content := extra + "\n\n" + snap.Brief()
+	if facts := snap.Model.String(); facts != "" {
+		content += "\n\n" + facts
+	}
+	return content
+}
+
+// answerPromptTokens estimates the answer prompt on the fast client.
+func (r *Runner) answerPromptTokens(ctx context.Context, fc *llm.Client, snap sysctx.Snapshot, history []llm.Message, query, extra string) int {
 	_, _ = fc.ResolveModel(ctx)
-	sys := llm.Message{Role: llm.RoleSystem, Content: extra + "\n\n" + snap.Brief()}
-	user := llm.Message{Role: llm.RoleUser, Content: query}
-	msgs := []llm.Message{sys}
+	msgs := []llm.Message{{Role: llm.RoleSystem, Content: answerSystem(extra, snap)}}
 	msgs = append(msgs, SanitizeAnswerHistory(history)...)
-	msgs = append(msgs, user)
-	return FastWindowTooFullRatio(fc.EstimatePromptTokens(msgs, nil), fc.ContextWindow(), r.Profile.FastGuardRatio())
+	msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: query})
+	return fc.EstimatePromptTokens(msgs, nil)
+}
+
+// fastAnswer returns the fast client when this answer may stream on it. Fast
+// answers only greetings and effort-none turns whose prompt is under
+// router.answer_main_above_tokens; a zero threshold disables the token gate.
+func (r *Runner) fastAnswer(ctx context.Context, dec intent.Decision, snap sysctx.Snapshot, history []llm.Message, query, extra string, trace bool) *llm.Client {
+	fc := r.fastClient()
+	if fc == nil {
+		return nil
+	}
+	greeting := LooksLikeGreeting(query)
+	if !greeting && dec.EffectiveEffort() != intent.EffortNone {
+		return nil
+	}
+	if !fc.Reachable(ctx) {
+		return nil
+	}
+	est := r.answerPromptTokens(ctx, fc, snap, history, query, extra)
+	limit := r.Profile.Router.AnswerMainAboveTokens
+	if limit > 0 && !greeting && est >= limit {
+		if trace {
+			fmt.Fprintf(r.errw(), "fast model skipped (prompt %d tokens reaches router.answer_main_above_tokens %d)\n", est, limit)
+		}
+		return nil
+	}
+	if FastWindowTooFullRatio(est, fc.ContextWindow(), r.Profile.FastGuardRatio()) {
+		if trace {
+			fmt.Fprintln(r.errw(), "fast model skipped (history too large)")
+		}
+		return nil
+	}
+	return fc
 }
 
 func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap sysctx.Snapshot, history []llm.Message, rec agent.Recorder, query, extra string, think bool, req Request, dec intent.Decision, routerTime time.Duration) (int, string, int, bool, intent.Intent) {
 	if rec == nil {
 		rec = agent.NopRecorder{}
 	}
-	system := llm.Message{Role: llm.RoleSystem, Content: extra + "\n\n" + snap.Brief()}
+	system := llm.Message{Role: llm.RoleSystem, Content: answerSystem(extra, snap)}
 	user := llm.Message{Role: llm.RoleUser, Content: query}
 	msgs := []llm.Message{system}
 	msgs = append(msgs, SanitizeAnswerHistory(history)...)
@@ -627,6 +673,12 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 	if strings.TrimSpace(out) != "" {
 		_ = rec.Message(ctx, llm.Message{Role: llm.RoleAssistant, Content: out})
 	}
+	servingRole := "fast"
+	if usedMain || client == main {
+		servingRole = "main"
+	}
+	serving := r.servingModel(ctx, client, servingRole)
+	r.Serving = serving
 	st := agent.Stats{
 		Steps:            1,
 		ModelTime:        modelTime,
@@ -637,9 +689,10 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 		ReasoningTokens:  usage.ReasoningTokens,
 		RouterTime:       routerTime,
 		Pricing:          r.turnPricing(usedMain),
+		Serving:          serving,
 	}
 	if req.Trace {
-		agent.PrintTrace(r.errw(), 1, think, modelTime, usage.PromptTokens, usage.CompletionTokens, usage.ReasoningTokens, main.ContextWindow(), nil)
+		agent.PrintTraceServing(r.errw(), serving, 1, think, modelTime, usage.PromptTokens, usage.CompletionTokens, usage.ReasoningTokens, main.ContextWindow(), nil)
 		fmt.Fprintln(r.errw(), agent.FormatStatsLine(st))
 	}
 	if r.Profile.ShowStatsLine() {
@@ -941,4 +994,22 @@ func printDiffStat(w io.Writer, root string) {
 		return
 	}
 	fmt.Fprintln(w, ui.Dim(s))
+}
+
+// greetingSet holds the short greetings the fast model may answer. Anything
+// else needs effort "none" and a prompt under router.answer_main_above_tokens.
+var greetingSet = map[string]bool{
+	"hi": true, "hello": true, "hey": true, "yo": true, "hiya": true, "howdy": true,
+	"salut": true, "bonjour": true, "bonsoir": true, "coucou": true,
+	"hi there": true, "hey there": true, "hello there": true,
+	"good morning": true, "good afternoon": true, "good evening": true,
+	"how are you": true, "how are you doing": true, "how is it going": true,
+	"what s up": true, "sup": true,
+	"ca va": true, "comment vas tu": true, "comment ca va": true, "tu vas bien": true,
+	"thanks": true, "thank you": true, "thx": true, "merci": true, "merci beaucoup": true,
+}
+
+// LooksLikeGreeting reports whether the whole message is a short greeting.
+func LooksLikeGreeting(text string) bool {
+	return greetingSet[foldIdentity(text)]
 }
