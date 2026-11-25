@@ -44,20 +44,9 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 		projectID := UpsertProject(ctx, mem, cwd)
 		return r.answerIdentityTurn(ctx, req, cwd, mem, projectID)
 	}
-	// A remote model is gated before any request: policy, role list,
-	// confirmation and the session token cap all fail here.
-	for _, rm := range []struct{ role, name string }{
-		{"main", r.Profile.Roles.Main},
-		{"fast", r.Profile.Roles.Fast},
-	} {
-		if rm.name == "" {
-			continue
-		}
-		if err := r.Profile.RemoteCallPolicy(rm.role, rm.name, req.Yes)(); err != nil {
-			fmt.Fprintln(r.errw(), "konsolai:", err)
-			return Result{ExitCode: 1}
-		}
-	}
+	// The remote gate runs on the client that is actually about to call, so a
+	// turn served only by local models never prompts. Refusals still happen
+	// before that client's request (llm.Client calls the policy first).
 	applyRemotePolicy(r.Client, r.Profile, "main", r.Profile.Roles.Main, req.Yes)
 	applyRemotePolicy(r.FastClient, r.Profile, "fast", r.Profile.Roles.Fast, req.Yes)
 	if r.RebindNext {
@@ -96,9 +85,14 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	r.beginStats(req.Intent)
 	defer r.endStats()
 	client := r.client()
-	if _, err := client.ResolveModel(ctx); err != nil {
-		fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.MainEndpoint(), err, req.Trace))
-		return Result{ExitCode: 1}
+	// A remote main is resolved by its first real call, after the gate, so a
+	// turn served by local models never probes (or prompts for) the remote
+	// host. Local mains keep the early check.
+	if !r.Profile.ModelRemote(r.Profile.Roles.Main) {
+		if _, err := client.ResolveModel(ctx); err != nil {
+			fmt.Fprintln(r.errw(), ModelErrorLine(r.Profile.MainEndpoint(), err, req.Trace))
+			return Result{ExitCode: 1}
+		}
 	}
 	thinkMode := r.ThinkMode
 	if thinkMode == ThinkAuto {
