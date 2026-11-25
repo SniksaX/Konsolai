@@ -71,6 +71,12 @@ type Model struct {
 	ThinkingKwargs  bool    `yaml:"thinking_kwargs"`
 	Context         int     `yaml:"context"`
 	Notes           string  `yaml:"notes"`
+	// ToolChoiceMode is how a forced tool is requested: named, required, or
+	// auto (omit tool_choice and nudge instead). Empty inherits the built-in.
+	ToolChoiceMode string `yaml:"tool_choice_mode"`
+	// ThinkingMode is DeepSeek's per-request thinking toggle: enabled or
+	// disabled. Empty sends no toggle, as before.
+	ThinkingMode string `yaml:"thinking_mode"`
 }
 
 // Roles selects named models and optional embed/rerank URLs.
@@ -90,6 +96,8 @@ type LLM struct {
 	Retries              int          `yaml:"retries"`
 	RetryWaitMS          int          `yaml:"retry_wait_ms"`
 	RemoteProbeTimeoutMS int          `yaml:"remote_probe_timeout_ms"`
+	// ToolChoiceMode is the built-in mode when a model does not set its own.
+	ToolChoiceMode string `yaml:"tool_choice_mode"`
 }
 
 // Temperatures are sampling temperatures per intent.
