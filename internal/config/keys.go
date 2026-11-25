@@ -57,6 +57,7 @@ type Key struct {
 	Doc      string
 	Env      string
 	Secret   bool
+	Hidden   bool
 	Aliases  []string
 	Name     string
 	Apply    Apply
@@ -105,6 +106,12 @@ func (k Key) allowed(v ...string) Key {
 	if k.Kind == KindString {
 		k.Kind = KindEnum
 	}
+	return k
+}
+
+// hidden keeps a key out of the interactive /set menu; /set path still works.
+func (k Key) hidden() Key {
+	k.Hidden = true
 	return k
 }
 
@@ -397,6 +404,12 @@ var keyTable = []Key{
 		func(c *Config, v []string) { c.Router.ActionVerbs = copyList(v) }, func(c Config) []string { return c.Router.ActionVerbs }),
 	kli("router.targets", "nouns that suggest a project target", nil,
 		func(c *Config, v []string) { c.Router.Targets = copyList(v) }, func(c Config) []string { return c.Router.Targets }),
+	kb("privacy.allow_remote", "allow prompts to be sent to a remote model", true,
+		func(c *Config, v bool) { c.Privacy.AllowRemote = v }, func(c Config) bool { return c.Privacy.AllowRemote }).hidden().when(ApplyNext),
+	kli("privacy.remote_roles", "roles that may point at a remote model", []string{"main", "fast"},
+		func(c *Config, v []string) { c.Privacy.RemoteRoles = v }, func(c Config) []string { return c.Privacy.RemoteRoles }).hidden().when(ApplyNext),
+	knn("privacy.session_token_cap", "stop remote calls after this many tokens; 0 = off", 0,
+		func(c *Config, v int) { c.Privacy.SessionTokenCap = v }, func(c Config) int { return c.Privacy.SessionTokenCap }).hidden().when(ApplyNext),
 }
 
 type trieNode struct {
