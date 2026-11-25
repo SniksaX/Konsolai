@@ -121,6 +121,28 @@ Konsolai requires one OpenAI-compatible chat endpoint. Everything else is option
 
 ![Theme picker](docs/assets/screens/themes.png)
 
+## Cloud models
+
+Konsolai also talks to remote OpenAI-compatible providers. A model whose host resolves to a public address is `remote`; loopback and private addresses stay local. A remote model is marked `remote` in `/set model`, `/status`, and the welcome; the footer marks a remote main model, and `/doctor` reports each one. The presets fill the endpoint and request quirks:
+
+```sh
+konsolai /set model add gpt --provider openai   # also openrouter, groq, together, mistral, deepseek, gemini, anthropic
+konsolai /set key gpt                            # hidden input, saved to ~/.config/konsolai/secrets (0600)
+konsolai /set model main gpt
+```
+
+The key never goes into `config.yaml`. `api_key_env` names an environment variable that is read at call time; when it is unset, the secrets file is used. Remote use is allowed by default and gated by `privacy.allow_remote` (`true`), `privacy.remote_roles` (`main`, `fast`), and `privacy.session_token_cap` (`0` = off). The first remote call in a process asks once:
+
+```
+this sends your prompts and file contents to api.openai.com [y/N]:
+```
+
+In the REPL the question uses the normal editor, so Ctrl+C or Ctrl+D means no; a one-shot run reads the answer from stdin. Only y/yes agrees, and a no refuses every remote model for the rest of the process. `--yes` skips the question; a non-interactive run without `--yes` refuses the remote model before sending anything. What leaves the machine is the prompts and attached file contents, not your config or the key; a key over plain HTTP to a non-local host is refused.
+
+Set `price_in` or `price_out` (USD per million tokens) on a remote model to add the turn cost (for example `$0.015`) to the end-of-turn stats line and the `--trace` stats line; a local or unpriced model shows none. The `anthropic` preset is experimental: its OpenAI-compatible auth header has not been verified.
+
+Full details: [docs/configuration.md](docs/configuration.md#cloud-models).
+
 ## Configuration
 
 Configuration lives in `config.yaml`: `/config init` writes it, `/set` changes it, and `/config path` prints the file in use. Profiles, the environment variables for containers and CI, the full friendly-name table, and the model roles are in [docs/configuration.md](docs/configuration.md).
