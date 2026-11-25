@@ -168,6 +168,9 @@ func UpsertModel(path, name string, m Model, remove bool) error {
 		setScalar(body, "price_in", formatPrice(m.PriceIn))
 		setScalar(body, "price_out", formatPrice(m.PriceOut))
 		setScalar(body, "thinking_kwargs", boolText(m.ThinkingKwargs))
+		setScalar(body, "tool_choice_mode", m.ToolChoiceMode)
+		setScalar(body, "thinking_mode", m.ThinkingMode)
+		setScalar(body, "reasoning_effort", m.ReasoningEffort)
 		setScalar(body, "context", fmt.Sprintf("%d", m.Context))
 		setScalar(body, "notes", m.Notes)
 	}
