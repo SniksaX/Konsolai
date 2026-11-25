@@ -73,6 +73,9 @@ func (t *writeFileTool) Prepare(rawArgs string) (Action, error) {
 	if t.docsTask && !DocsPathAllowed(args.Path) {
 		return nil, errors.New(DocsSourceReject)
 	}
+	if suggestion, ok := safety.SuggestPath(args.Path, ""); ok {
+		return nil, fmt.Errorf("tools: write_file: %s does not exist; did you mean %s?", args.Path, suggestion)
+	}
 	resolved, err := t.guard.ResolvePath(args.Path)
 	if err != nil {
 		return nil, err
