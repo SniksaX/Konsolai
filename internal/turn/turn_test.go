@@ -539,3 +539,21 @@ func TestSessionStatusCodes(t *testing.T) {
 		t.Error("a rejected turn must be continuable")
 	}
 }
+
+func TestRemoteRefusedBeforeRequest(t *testing.T) {
+	c := config.Builtin()
+	c.Models["api"] = config.Model{Endpoint: "http://203.0.113.9/v1"}
+	c.Roles.Main = "api"
+	c.Privacy.AllowRemote = false
+	r := testRunner(t, fakeLLM(t, nil), autoConfirm{})
+	r.Profile = c
+	var errB bytes.Buffer
+	r.Err = &errB
+	res := r.RunTurn(context.Background(), Request{Text: "hi", Intent: "answer", Yes: true, Cwd: t.TempDir(), New: true})
+	if res.ExitCode != 1 {
+		t.Fatalf("exit %d", res.ExitCode)
+	}
+	if !strings.Contains(errB.String(), "privacy.allow_remote") {
+		t.Fatalf("stderr %q", errB.String())
+	}
+}
