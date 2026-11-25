@@ -111,6 +111,35 @@ func applyModelFields(m *Model, n *yaml.Node, full string) error {
 				return fmt.Errorf("config: %s.model must be a string (line %d)", full, vn.Line)
 			}
 			m.Model = vn.Value
+		case "api_key_env":
+			if vn.Kind != yaml.ScalarNode {
+				return fmt.Errorf("config: %s.api_key_env must be a string (line %d)", full, vn.Line)
+			}
+			m.APIKeyEnv = vn.Value
+		case "max_tokens_field":
+			if vn.Kind != yaml.ScalarNode {
+				return fmt.Errorf("config: %s.max_tokens_field must be a string (line %d)", full, vn.Line)
+			}
+			m.MaxTokensField = vn.Value
+		case "send_temperature":
+			b, err := parseBool(vn, full+".send_temperature")
+			if err != nil {
+				return err
+			}
+			m.SendTemperature = &b
+		case "price_in", "price_out":
+			if vn.Kind != yaml.ScalarNode {
+				return fmt.Errorf("config: %s.%s must be a number (line %d)", full, kn.Value, vn.Line)
+			}
+			v, err := strconv.ParseFloat(vn.Value, 64)
+			if err != nil || v < 0 {
+				return fmt.Errorf("config: %s.%s must be a number >= 0 (line %d)", full, kn.Value, vn.Line)
+			}
+			if kn.Value == "price_in" {
+				m.PriceIn = v
+			} else {
+				m.PriceOut = v
+			}
 		case "thinking_kwargs":
 			b, err := parseBool(vn, full+".thinking_kwargs")
 			if err != nil {
@@ -169,8 +198,21 @@ func validateModels(c Config) error {
 	if err := optionalURL("roles.embed", c.Roles.Embed); err != nil {
 		return err
 	}
+	if strings.TrimSpace(c.Roles.Embed) != "" && URLResolvesRemote(c.Roles.Embed) {
+		return fmt.Errorf("config: roles.embed must be a loopback or private endpoint; a remote embedding service is not supported")
+	}
 	if err := optionalURL("roles.rerank", c.Roles.Rerank); err != nil {
 		return err
+	}
+	for name, m := range c.Models {
+		switch m.TokensField() {
+		case "max_tokens", "max_completion_tokens":
+		default:
+			return fmt.Errorf("config: models.%s.max_tokens_field must be max_tokens or max_completion_tokens", name)
+		}
+		if m.PriceIn < 0 || m.PriceOut < 0 {
+			return fmt.Errorf("config: models.%s prices must be >= 0", name)
+		}
 	}
 	return nil
 }
@@ -181,6 +223,13 @@ func optionalURL(name, raw string) error {
 		return nil
 	}
 	return requireURL(name, raw)
+}
+
+func formatPrice(v float64) string {
+	if v == 0 {
+		return "0"
+	}
+	return strconv.FormatFloat(v, 'f', -1, 64)
 }
 
 func pruneBuiltinModel(c *Config, mentioned map[string]bool, saw bool) {
@@ -383,6 +432,11 @@ func writeModels(b *strings.Builder, c Config, indent int, mask bool) {
 		fmt.Fprintf(b, "%s  %s:\n", pad, name)
 		fmt.Fprintf(b, "%s    endpoint: %s   # OpenAI-compatible API base\n", pad, yamlScalar(endpoint))
 		fmt.Fprintf(b, "%s    model: %s   # empty uses the server default\n", pad, yamlScalar(m.Model))
+		fmt.Fprintf(b, "%s    api_key_env: %s   # environment variable holding the bearer key\n", pad, yamlScalar(m.APIKeyEnv))
+		fmt.Fprintf(b, "%s    max_tokens_field: %s   # max_tokens or max_completion_tokens\n", pad, yamlScalar(m.MaxTokensField))
+		fmt.Fprintf(b, "%s    send_temperature: %s   # some providers reject temperature\n", pad, strconv.FormatBool(m.SendsTemperature()))
+		fmt.Fprintf(b, "%s    price_in: %s   # USD per million input tokens\n", pad, formatPrice(m.PriceIn))
+		fmt.Fprintf(b, "%s    price_out: %s   # USD per million output tokens\n", pad, formatPrice(m.PriceOut))
 		fmt.Fprintf(b, "%s    thinking_kwargs: %s   # send chat_template_kwargs.enable_thinking\n", pad, strconv.FormatBool(m.ThinkingKwargs))
 		fmt.Fprintf(b, "%s    context: %d   # 0 uses the server context window\n", pad, m.Context)
 		fmt.Fprintf(b, "%s    notes: %s   # optional note\n", pad, yamlScalar(m.Notes))
