@@ -1,6 +1,6 @@
 
   ▀▄     █  ▄▀ ▄▀▀▀▄ █▄  █ ▄▀▀▀▀ ▄▀▀▀▄ █     ▄▀▀▀▄ ▀▀█▀▀ █████      ╭─ gpu-box ─────────────────────────────────────────────────── 0/4 up ─╮
-    ▀▄   █▄▀   █   █ █ ▀▄█ ▀▄▄▄  █   █ █     █▄▄▄█   █   █████      │ ○ main-model    main    :8000 unreachable                            │
+    ▀▄   █▄▀   █   █ █ ▀▄█ ▀▄▄▄  █   █ █     █▄▄▄█   █   █████      │ ○ main-model    main    :8000 unreachable  remote                    │
    ▄▀    █ ▀▄  █   █ █   █     █ █   █ █     █   █   █   █████      │ ○ fast-model    fast    :11437 unreachable                           │
   ▀      ▀   ▀  ▀▀▀  ▀   ▀ ▀▀▀▀   ▀▀▀  ▀▀▀▀▀ ▀   ▀ ▀▀▀▀▀ ▀▀▀▀▀      │ ○ embed-model   embed   :8081 unreachable                            │
          your terminal agent, on your own models                    │ ○ rerank-model  rerank  :8082 unreachable                            │

@@ -38,7 +38,7 @@ func allUp() Data {
 	return Data{
 		Host: "gpu-box",
 		Models: []Model{
-			{Name: "main-model", Role: "main", Status: StatusUp, Stat: "84 tokens/s"},
+			{Name: "main-model", Role: "main", Status: StatusUp, Stat: "84 tokens/s", Remote: true},
 			{Name: "fast-model", Role: "fast", Status: StatusUp, Stat: "120 tokens/s"},
 			{Name: "embed-model", Role: "embed", Status: StatusUp, Stat: "40ms"},
 			{Name: "rerank-model", Role: "rerank", Status: StatusUp, Stat: "18ms"},
@@ -640,4 +640,53 @@ func itoa(n int) string {
 		buf[i] = '-'
 	}
 	return string(buf[i:])
+}
+
+// rowWith returns the first rendered line that contains word.
+func rowWith(t *testing.T, lines []string, word string) string {
+	t.Helper()
+	for _, ln := range lines {
+		if strings.Contains(ln, word) {
+			return ln
+		}
+	}
+	t.Fatalf("no row with %q\n%s", word, strings.Join(lines, "\n"))
+	return ""
+}
+
+func TestRemoteModelMarked(t *testing.T) {
+	plain(t)
+	d := Data{
+		Host: "gpu-box",
+		Models: []Model{
+			{Name: "main-model", Role: "main", Status: StatusUp, Stat: "84 tokens/s", Remote: true},
+			{Name: "fast-model", Role: "fast", Status: StatusUp, Stat: "120 tokens/s"},
+		},
+		Up: 2, Total: 2,
+		Version: "v0.1.0",
+	}
+	rows := strings.Split(renderString(d, "split", 140, 40), "\n")
+	if got := rowWith(t, rows, "main-model"); !strings.Contains(got, "84 tokens/s  remote") {
+		t.Fatalf("remote marker missing: %q", got)
+	}
+	if got := rowWith(t, rows, "fast-model"); strings.Contains(got, "remote") {
+		t.Fatalf("local model marked: %q", got)
+	}
+
+	local := d
+	local.Models = append([]Model(nil), d.Models...)
+	local.Models[0].Remote = false
+	if strings.Contains(renderString(local, "split", 140, 40), "remote") {
+		t.Fatal("local model marked")
+	}
+
+	// When the marker does not fit, it is dropped instead of truncating the
+	// rest of the row.
+	narrow := strings.Split(renderString(d, "split", 110, 40), "\n")
+	if got := rowWith(t, narrow, "main-model"); strings.Contains(got, "remote") {
+		t.Fatalf("marker should not fit at 110: %q", got)
+	}
+	if got := rowWith(t, narrow, "main-model"); !strings.Contains(got, "84 tokens/s") {
+		t.Fatalf("narrow row lost its stat: %q", got)
+	}
 }

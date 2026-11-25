@@ -1,6 +1,6 @@
 
   ▀▄     █  ▄▀ ▄▀▀▀▄ █▄  █ ▄▀▀▀▀ ▄▀▀▀▄ █     ▄▀▀▀▄ ▀▀█▀▀ █████      ╭─ gpu-box ─────────────────────────────────────────────────── 4/4 up ─╮
-    ▀▄   █▄▀   █   █ █ ▀▄█ ▀▄▄▄  █   █ █     █▄▄▄█   █   █████      │ ● main-model    main    84 tokens/s                                  │
+    ▀▄   █▄▀   █   █ █ ▀▄█ ▀▄▄▄  █   █ █     █▄▄▄█   █   █████      │ ● main-model    main    84 tokens/s  remote                          │
    ▄▀    █ ▀▄  █   █ █   █     █ █   █ █     █   █   █   █████      │ ● fast-model    fast    120 tokens/s                                 │
   ▀      ▀   ▀  ▀▀▀  ▀   ▀ ▀▀▀▀   ▀▀▀  ▀▀▀▀▀ ▀   ▀ ▀▀▀▀▀ ▀▀▀▀▀      │ ● embed-model   embed   40ms                                         │
          your terminal agent, on your own models                    │ ● rerank-model  rerank  18ms                                         │

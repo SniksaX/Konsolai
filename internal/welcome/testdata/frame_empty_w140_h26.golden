@@ -8,7 +8,7 @@
 │                                                                                                                                          │
 ├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │  MODELS                                       SESSION                                                                                    │
-│  ● main-model    main    84 tokens/s          dir      ~/projects/demo                                                                   │
+│  ● main-model    main    84 tokens/s  remote  dir      ~/projects/demo                                                                   │
 │  ● fast-model    fast    120 tokens/s         branch   main*                                                                             │
 │  ● embed-model   embed   40ms                 changed  3                                                                                 │
 │  ● rerank-model  rerank  18ms                 ahead    1                                                                                 │
