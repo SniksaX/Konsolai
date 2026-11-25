@@ -73,6 +73,7 @@ func doctorChecks(ctx context.Context, env *Env) []doctorCheck {
 	if env.Profile.FastOn() {
 		out = append(out, checkModels(ctx, "fast endpoint", env.Profile.FastEndpoint(), "roles.fast", timeout))
 	}
+	out = append(out, checkRemoteModels(env)...)
 	if strings.TrimSpace(env.Profile.EmbedURL()) != "" {
 		out = append(out, checkKind(ctx, "embed endpoint", env.Profile.EmbedURL(), "embed", "roles.embed", timeout))
 	}
@@ -145,6 +146,75 @@ func checkKind(ctx context.Context, name, endpoint, kind, fix string, timeout ti
 		hit.fix = fix
 	}
 	return hit
+}
+
+// checkRemoteModels prints one line per model that points outside the machine:
+// its host, whether a key is stored (never the key itself), and a warning when
+// the traffic is plain HTTP. A missing key or plain HTTP is a warning, not a
+// failure, because a reachable endpoint still needs no auth and some hosts
+// only speak http.
+func checkRemoteModels(env *Env) []doctorCheck {
+	if env == nil {
+		return nil
+	}
+	var out []doctorCheck
+	for _, name := range env.Profile.ModelNames() {
+		m := env.Profile.Models[name]
+		if !m.Remote() {
+			continue
+		}
+		detail := config.URLHost(m.Endpoint)
+		fixes := []string{}
+		if modelKeyPresent(env.Profile, name) {
+			detail += ", key present"
+		} else {
+			detail += ", key absent"
+			fixes = append(fixes, modelKeyFix(m, name))
+		}
+		if endpointScheme(m.Endpoint) == "http" {
+			detail += ", plain http (not encrypted)"
+			fixes = append(fixes, "models."+name+".endpoint needs https")
+		}
+		mark := "✓"
+		if len(fixes) > 0 {
+			mark = "!"
+		}
+		out = append(out, doctorCheck{
+			mark: mark, name: "remote " + name, detail: detail, fix: strings.Join(fixes, "; "),
+		})
+	}
+	return out
+}
+
+// modelKeyPresent reports whether a stored or exported key exists for a model.
+// Only the presence is used; the key is never read into output.
+func modelKeyPresent(c config.Config, name string) bool {
+	m, ok := c.Models[name]
+	if !ok {
+		return false
+	}
+	if variable := strings.TrimSpace(m.APIKeyVariable()); variable != "" {
+		if strings.TrimSpace(os.Getenv(variable)) != "" {
+			return true
+		}
+	}
+	key, ok := config.ReadSecret(name)
+	return ok && strings.TrimSpace(key) != ""
+}
+
+func modelKeyFix(m config.Model, name string) string {
+	if variable := strings.TrimSpace(m.APIKeyVariable()); variable != "" {
+		return "export " + variable + " or /set key " + name
+	}
+	return "/set key " + name
+}
+
+func endpointScheme(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Scheme)
 }
 
 func checkThinking(ctx context.Context, env *Env, timeout time.Duration) doctorCheck {
