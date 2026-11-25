@@ -51,7 +51,7 @@ func (c *Client) probeModels(ctx context.Context) bool {
 	if err != nil {
 		return false
 	}
-	_ = c.authorize(req)
+	_, _ = c.authorize(req)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return false
