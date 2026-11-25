@@ -102,6 +102,7 @@ The `name` cell is `Command.DisplayNames`. The `args` cell lists `Arg.Name`; opt
 | /clear | | Clear the screen |
 | /cd | dir | Change the working directory |
 | /cmd | [clear] [forget] | Toggle shell mode |
+| /remote | action | Forget a declined remote confirmation |
 | /yes | mode | Auto-approve for this REPL session |
 | /trace | mode | Toggle per-call traces |
 | /think | mode | Override thinking for this session |
