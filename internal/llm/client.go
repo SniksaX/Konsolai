@@ -419,6 +419,11 @@ func (c *Client) SetIdleTimeout(d time.Duration) {
 // An ambiguous or mismatched list fails with the served ids instead of making
 // up an id the server does not serve.
 func (c *Client) ResolveModel(ctx context.Context) (string, error) {
+	if c.policy != nil {
+		if err := c.policy(); err != nil {
+			return "", err
+		}
+	}
 	c.mu.Lock()
 	if c.model != "" && c.windowReady {
 		id := c.model
