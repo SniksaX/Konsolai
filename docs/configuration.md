@@ -128,6 +128,6 @@ konsolai /set key gpt
 konsolai /set model main gpt
 ```
 
-The presets `openai`, `openrouter`, `groq`, `together`, `mistral`, `deepseek`, `gemini`, and `anthropic` fill the endpoint, context and quirks. They come from each provider's OpenAI-compatible documentation and were not exercised against live accounts here.
+The presets `openai`, `openrouter`, `groq`, `together`, `mistral`, `deepseek`, `gemini`, and `anthropic` fill the endpoint, context and quirks. They come from each provider's OpenAI-compatible documentation and were not exercised against live accounts here. The `anthropic` preset is experimental: its OpenAI-compatible endpoint accepts an auth header that has not been verified.
 
 A model whose host resolves to a public address is marked `remote` in `/set model`. Embedding endpoints must be loopback or private; a remote embed service is rejected. The `privacy.allow_remote`, `privacy.remote_roles`, and `privacy.session_token_cap` keys are defined; the remote-use prompt, role enforcement, cost line and token cap are not wired yet.
