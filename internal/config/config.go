@@ -27,6 +27,13 @@ const builtinProfile = "default"
 // so existing callers keep compiling.
 type Profile = Config
 
+// Privacy controls remote model use and the per-session remote token cap.
+type Privacy struct {
+	AllowRemote     bool     `yaml:"allow_remote"`
+	RemoteRoles     []string `yaml:"remote_roles"`
+	SessionTokenCap int      `yaml:"session_token_cap"`
+}
+
 type Config struct {
 	Name string `yaml:"-" json:"-"`
 
@@ -42,6 +49,7 @@ type Config struct {
 	UI       UI               `yaml:"ui"`
 	Language Language         `yaml:"language"`
 	Safety   Safety           `yaml:"safety"`
+	Privacy  Privacy          `yaml:"privacy"`
 	Router   Router           `yaml:"router"`
 	Tools    Tools            `yaml:"tools"`
 	Store    Store            `yaml:"store"`
@@ -50,12 +58,19 @@ type Config struct {
 }
 
 // Model is one named chat endpoint. Context 0 means the server reports the window.
+// APIKeyEnv names the environment variable holding the bearer key; when it is
+// unset the key is read from the secrets file. SendTemperature nil means true.
 type Model struct {
-	Endpoint       string `yaml:"endpoint"`
-	Model          string `yaml:"model"`
-	ThinkingKwargs bool   `yaml:"thinking_kwargs"`
-	Context        int    `yaml:"context"`
-	Notes          string `yaml:"notes"`
+	Endpoint        string  `yaml:"endpoint"`
+	Model           string  `yaml:"model"`
+	APIKeyEnv       string  `yaml:"api_key_env"`
+	MaxTokensField  string  `yaml:"max_tokens_field"`
+	SendTemperature *bool   `yaml:"send_temperature"`
+	PriceIn         float64 `yaml:"price_in"`
+	PriceOut        float64 `yaml:"price_out"`
+	ThinkingKwargs  bool    `yaml:"thinking_kwargs"`
+	Context         int     `yaml:"context"`
+	Notes           string  `yaml:"notes"`
 }
 
 // Roles selects named models and optional embed/rerank URLs.
