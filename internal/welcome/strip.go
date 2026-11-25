@@ -125,7 +125,7 @@ func paintDot(pal ui.Palette, st Status) string {
 	switch st {
 	case StatusUp:
 		return pal.Success("●")
-	case StatusSlow:
+	case StatusSlow, StatusAuth:
 		return pal.Warn("●")
 	case StatusDown, StatusTimeout:
 		return pal.Error("○")
