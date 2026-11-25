@@ -23,6 +23,7 @@ import (
 	"github.com/SniksaX/Konsolai/internal/sysctx"
 	"github.com/SniksaX/Konsolai/internal/tools"
 	"github.com/SniksaX/Konsolai/internal/ui"
+	"github.com/SniksaX/Konsolai/internal/ui/theme"
 )
 
 func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
@@ -461,6 +462,8 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		cfg.Temperature = r.Profile.TemperatureFor(string(dec.Intent))
 		cfg.ToolChoiceMode = r.Profile.ChatToolChoiceFor(r.Profile.Roles.Main)
 		cfg.ReasoningHeadroom = r.Profile.ReasoningHeadroomFor(r.Profile.Roles.Main)
+		cfg.AnswerPanel = r.Profile.AnswerPanelOn()
+		cfg.JSONMaxLines = r.Profile.JSONMaxLines()
 		cfg.TopP = r.Profile.LLM.TopP
 		cfg.TokenCap = r.Profile.TokenCap(string(dec.Intent))
 		cfg.ElideTrigger = r.Profile.ElideTrigger()
@@ -603,7 +606,8 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 
 	usedMain := client == main
 	t0 := time.Now()
-	gate := &answerGate{dst: r.out(), onRelease: func() {
+	streamRows := ui.NewRowCounter(r.out(), theme.TermWidth())
+	gate := &answerGate{dst: streamRows, onRelease: func() {
 		r.emitBadge(req, string(dec.Intent), false)
 	}}
 	tokCap := r.Profile.AnswerEffortCap(string(dec.EffectiveEffort()))
@@ -620,6 +624,19 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 		answerTools = answerEscalateTools(client, main)
 		out, calls, usage, streamErr = streamAnswer(ctx, client, msgs, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap, answerTools, r.Profile.ThinkingMaxTokens(), r.Profile.ReasoningHeadroomFor(r.Profile.Roles.Main))
 		cut = errors.Is(streamErr, llm.ErrTruncated)
+	}
+	if strings.TrimSpace(out) != "" && !req.Plain && r.Profile.AnswerPanelOn() && streamRows.Rows() > 0 {
+		if width, height, ok := ui.AnswerPanelAllowed(r.out(), 0); ok {
+			title := ui.PanelTitle(0)
+			if cut || streamErr != nil {
+				title = ui.PanelTitle(1)
+			}
+			panel := ui.AnswerPanel(title, out, width, r.Profile.JSONMaxLines())
+			if rows := strings.Count(panel, "\n"); height >= rows+3 {
+				fmt.Fprint(r.out(), theme.CursorUp(streamRows.Rows())+theme.ClearBelow)
+				fmt.Fprint(r.out(), panel)
+			}
+		}
 	}
 	if streamErr == nil && strings.TrimSpace(out) == "" && len(calls) == 0 && !gate.released {
 		gate.reset()
