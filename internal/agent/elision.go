@@ -392,6 +392,23 @@ func aggressiveTrim(msgs []llm.Message, userIdx int) []llm.Message {
 	for i := start; i < len(msgs); i++ {
 		keep[i] = true
 	}
+	// Never keep a tool reply without its assistant, and keep every reply of a
+	// kept assistant, so the emergency trim cannot cut a tool_calls group.
+	for i := 0; i < len(msgs); i++ {
+		if !keep[i] || msgs[i].Role != llm.RoleTool {
+			continue
+		}
+		for j := i - 1; j >= 0; j-- {
+			if msgs[j].Role != llm.RoleAssistant {
+				continue
+			}
+			keep[j] = true
+			for k := j + 1; k < len(msgs) && msgs[k].Role == llm.RoleTool; k++ {
+				keep[k] = true
+			}
+			break
+		}
+	}
 	out := make([]llm.Message, 0, len(msgs))
 	for i, m := range msgs {
 		if !keep[i] {
@@ -402,7 +419,9 @@ func aggressiveTrim(msgs []llm.Message, userIdx int) []llm.Message {
 		}
 		out = append(out, m)
 	}
-	return out
+	// The trim can cut an assistant tool_calls message away from its replies;
+	// repair the pairs before the retry so the provider always accepts them.
+	return llm.RepairToolCalls(out)
 }
 
 func (cfg Config) prepCall(msgs []llm.Message, tools []llm.ToolSpec, spans *[]readSpan, seen map[string]struct{}) (estimate, maxTokens int, elide ElideStats, err error) {
