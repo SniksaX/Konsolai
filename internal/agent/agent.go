@@ -314,6 +314,11 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			state.goneNoteAdded = true
 		}
 		stepSpecs := specs
+		if cfg.RequirePlan && !state.planApproved && !state.toolsGone && !state.forcePropose && !state.planNudged {
+			// Before the plan, only read-only exploration and propose_plan are
+			// offered: a mutating call cannot be wasted on "call propose_plan first".
+			stepSpecs = prePlanSpecs(specs)
+		}
 		planForced := false
 		if state.toolsGone {
 			if forcingPlan {
