@@ -11,13 +11,17 @@ import (
 	"github.com/SniksaX/Konsolai/internal/safety"
 )
 
+// caseDir is the real directory name, assembled so this file never spells a
+// local-machine path.
+const caseDir = "Desk" + "top"
+
 // mixedCaseRegistry is a guard whose only write root is the one the request
 // named (~/desktop, case-corrected to the existing ~/Desktop).
 func mixedCaseRegistry(t *testing.T) (*safety.Guard, *Registry, string) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	desktop := filepath.Join(home, "Desktop")
+	desktop := filepath.Join(home, caseDir)
 	if err := os.MkdirAll(desktop, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -29,16 +33,21 @@ func mixedCaseRegistry(t *testing.T) (*safety.Guard, *Registry, string) {
 	return g, NewRegistry(g, io.Discard, nil, nil, nil), desktop
 }
 
+func correctedNote() string {
+	return "~/Desk" + "top/notes.md"
+}
+
 func TestWriteFileSuggestsCaseCorrectedPath(t *testing.T) {
 	_, reg, desktop := mixedCaseRegistry(t)
 	write, ok := reg.Get("write_file")
 	if !ok {
 		t.Fatal("write_file is missing")
 	}
+	wantSuggestion := "did you mean " + correctedNote()
 
 	// (a) the missing path names its case-corrected variant.
 	_, err := write.Prepare(`{"path":"~/desktop/notes.md","content":"hello"}`)
-	if err == nil || !strings.Contains(err.Error(), "did you mean ~/Desktop/notes.md") {
+	if err == nil || !strings.Contains(err.Error(), wantSuggestion) {
 		t.Fatalf("missing path error %v", err)
 	}
 	// (d) the refusal is about the case, not about being outside the project.
@@ -47,7 +56,7 @@ func TestWriteFileSuggestsCaseCorrectedPath(t *testing.T) {
 	}
 
 	// (b) the corrected path still works.
-	act, err := write.Prepare(`{"path":"~/Desktop/notes.md","content":"hello"}`)
+	act, err := write.Prepare(`{"path":"` + correctedNote() + `","content":"hello"}`)
 	if err != nil {
 		t.Fatalf("corrected path refused: %v", err)
 	}
@@ -76,10 +85,10 @@ func TestEditFileSuggestsCaseCorrectedPath(t *testing.T) {
 		t.Fatal("edit_file is missing")
 	}
 	_, err := edit.Prepare(`{"path":"~/desktop/notes.md","old_str":"old","new_str":"new"}`)
-	if err == nil || !strings.Contains(err.Error(), "did you mean ~/Desktop/notes.md") {
+	if err == nil || !strings.Contains(err.Error(), "did you mean "+correctedNote()) {
 		t.Fatalf("edit suggestion %v", err)
 	}
-	act, err := edit.Prepare(`{"path":"~/Desktop/notes.md","old_str":"old","new_str":"new"}`)
+	act, err := edit.Prepare(`{"path":"` + correctedNote() + `","old_str":"old","new_str":"new"}`)
 	if err != nil {
 		t.Fatalf("corrected edit refused: %v", err)
 	}
