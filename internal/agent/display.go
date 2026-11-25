@@ -80,7 +80,32 @@ func FormatSummary(intent string, s Stats) string {
 			parts = append(parts, fmt.Sprintf("%d tok/s", rate))
 		}
 	}
+	if cost, ok := turnCost(s); ok {
+		parts = append(parts, formatUSD(cost))
+	}
 	return strings.Join(parts, " · ")
+}
+
+// turnCost prices the turn's recorded tokens. It reports false for a local
+// model and for a remote model whose two prices are unset.
+func turnCost(s Stats) (float64, bool) {
+	p := s.Pricing
+	if !p.Remote || (p.PriceIn <= 0 && p.PriceOut <= 0) {
+		return 0, false
+	}
+	return float64(s.PromptTokens)*p.PriceIn/1e6 + float64(s.CompletionTokens)*p.PriceOut/1e6, true
+}
+
+// formatUSD keeps six decimals and trims the tail to at least two, so a
+// sub-cent turn still reads as a dollar figure.
+func formatUSD(v float64) string {
+	s := strconv.FormatFloat(v, 'f', 6, 64)
+	if dot := strings.IndexByte(s, '.'); dot >= 0 {
+		for len(s)-dot > 3 && strings.HasSuffix(s, "0") {
+			s = s[:len(s)-1]
+		}
+	}
+	return "$" + s
 }
 
 func formatArgSize(n int) string {
@@ -179,9 +204,13 @@ func PrintSummary(w io.Writer, intent string, s Stats) {
 }
 
 func FormatStatsLine(s Stats) string {
-	return fmt.Sprintf("stats: steps=%d rejects=%d outside_plan=%d think_tokens=%d max_step_s=%s",
+	line := fmt.Sprintf("stats: steps=%d rejects=%d outside_plan=%d think_tokens=%d max_step_s=%s",
 		s.Steps, s.Rejects, s.OutsidePlan, s.ReasoningTokens,
 		strconv.FormatFloat(s.MaxStep.Seconds(), 'f', 3, 64))
+	if cost, ok := turnCost(s); ok {
+		line += fmt.Sprintf(" cost=%s in=%s out=%s", formatUSD(cost), formatTok(s.PromptTokens), formatTok(s.CompletionTokens))
+	}
+	return line
 }
 
 func PrintTrace(w io.Writer, step int, think bool, d time.Duration, in, out, thinkTok, window int, names []string) {
