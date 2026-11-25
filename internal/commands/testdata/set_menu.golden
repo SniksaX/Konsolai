@@ -25,6 +25,7 @@ llm
   llm.retry_wait_ms            2000
   llm.remote_probe_timeout_ms  3000
   llm.tool_choice_mode         named
+  llm.reasoning_effort         default
 fast
   fast.context_guard_ratio     0.6
 database
