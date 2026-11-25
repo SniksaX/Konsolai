@@ -84,25 +84,27 @@ func (e *HTTPError) Error() string {
 }
 
 type Client struct {
-	baseURL         string
-	model           string
-	http            *http.Client
-	idleTimeout     time.Duration
-	retryWait       time.Duration
-	mu              sync.Mutex
-	contextWindow   int
-	windowReady     bool
-	tokensPerChar   float64
-	fallbackWindow  int
-	sendThinkKwargs bool
-	windowPinned    bool
-	retries         int
-	onCall          func(CallInfo)
-	apiKey          func() (string, error)
-	maxTokensField  string
-	sendTemperature bool
-	policy          func() error
-	onUsage         func(Usage)
+	baseURL            string
+	model              string
+	http               *http.Client
+	idleTimeout        time.Duration
+	retryWait          time.Duration
+	mu                 sync.Mutex
+	contextWindow      int
+	windowReady        bool
+	tokensPerChar      float64
+	fallbackWindow     int
+	sendThinkKwargs    bool
+	windowPinned       bool
+	retries            int
+	onCall             func(CallInfo)
+	apiKey             func() (string, error)
+	maxTokensField     string
+	sendTemperature    bool
+	policy             func() error
+	onUsage            func(Usage)
+	probeTimeout       time.Duration
+	remoteProbeTimeout time.Duration
 }
 
 func New(baseURL, model string) *Client {
@@ -128,6 +130,7 @@ func New(baseURL, model string) *Client {
 		fallbackWindow:  defaultContextWindow,
 		maxTokensField:  "max_tokens",
 		sendTemperature: true,
+		probeTimeout:    reachTimeout,
 	}
 }
 
