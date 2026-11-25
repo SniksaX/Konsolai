@@ -9,6 +9,8 @@ models:
     price_in: 0   # USD per million input tokens
     price_out: 0   # USD per million output tokens
     thinking_kwargs: true   # send chat_template_kwargs.enable_thinking
+    tool_choice_mode: ""   # named, required or auto when a tool is forced
+    thinking_mode: ""   # enabled or disabled (DeepSeek thinking toggle)
     context: 131072   # 0 uses the server context window
     notes: ""   # optional note
   small:
@@ -20,6 +22,8 @@ models:
     price_in: 0   # USD per million input tokens
     price_out: 0   # USD per million output tokens
     thinking_kwargs: false   # send chat_template_kwargs.enable_thinking
+    tool_choice_mode: ""   # named, required or auto when a tool is forced
+    thinking_mode: ""   # enabled or disabled (DeepSeek thinking toggle)
     context: 0   # 0 uses the server context window
     notes: ""   # optional note
 roles:
@@ -46,6 +50,7 @@ llm:
   retries: 1   # extra attempts after a retriable model error
   retry_wait_ms: 2000   # pause before a model retry
   remote_probe_timeout_ms: 3000   # timeout for one remote model probe
+  tool_choice_mode: named   # how a forced tool is requested: named, required or auto
 fast:
   context_guard_ratio: 0.6   # skip fast when the prompt fills past this fraction of its window
 database:
