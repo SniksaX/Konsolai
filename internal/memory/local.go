@@ -41,6 +41,9 @@ func LastPath() string {
 }
 
 func redactMessage(m llm.Message) llm.Message {
+	// Thinking text is replayed inside one tool turn only; it is never part of
+	// the saved session.
+	m.ReasoningContent = ""
 	m.Content = redact.String(m.Content)
 	if len(m.ToolCalls) == 0 {
 		return m
