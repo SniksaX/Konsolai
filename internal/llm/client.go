@@ -30,6 +30,9 @@ type Message struct {
 	Content    string     `json:"content"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
+	// ReasoningContent is the provider's thinking text. DeepSeek requires it
+	// to be sent back while a request carries tools, and only then.
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 type ToolSpec struct {
@@ -754,6 +757,31 @@ func (c *Client) StreamTools(ctx context.Context, msgs []Message, tools []ToolSp
 
 // chatPayload builds the request body, omitting temperature when the provider
 // rejects it and naming the output cap with the model's field.
+// payloadMessages strips the thinking text when the request does not carry
+// tools: DeepSeek ignores (and other providers may reject) it there, while a
+// tool request requires it back on every assistant message that has it.
+func payloadMessages(msgs []Message, withTools bool) []Message {
+	if withTools {
+		return msgs
+	}
+	needs := false
+	for i := range msgs {
+		if msgs[i].ReasoningContent != "" {
+			needs = true
+			break
+		}
+	}
+	if !needs {
+		return msgs
+	}
+	out := make([]Message, len(msgs))
+	copy(out, msgs)
+	for i := range out {
+		out[i].ReasoningContent = ""
+	}
+	return out
+}
+
 func (c *Client) chatPayload(r chatRequest) map[string]any {
 	m := map[string]any{
 		"model":    r.Model,
@@ -788,7 +816,7 @@ func (c *Client) chatPayload(r chatRequest) map[string]any {
 }
 
 func (c *Client) complete(ctx context.Context, msgs []Message, tools []ToolSpec, opts ChatOptions, onDelta func(string) error) (Message, Usage, error) {
-	msgs = Normalize(msgs)
+	msgs = RepairToolCalls(Normalize(msgs))
 	extra := 1
 	if c != nil {
 		extra = c.retries
@@ -864,7 +892,7 @@ func (c *Client) completeAttempt(ctx context.Context, msgs []Message, tools []To
 	}
 	reqBody := chatRequest{
 		Model:         model,
-		Messages:      msgs,
+		Messages:      payloadMessages(msgs, len(tools) > 0),
 		Stream:        true,
 		Temperature:   opts.Temperature,
 		TopP:          opts.TopP,
@@ -1044,6 +1072,7 @@ func readSSE(parent, reqCtx context.Context, r io.Reader, opts ChatOptions, onDe
 			}
 			reason := d.Reasoning + d.ReasoningContent
 			if reason != "" {
+				acc.reasoning.WriteString(reason)
 				acc.reasonChars += len(reason)
 				prog.add(len(reason), 0)
 			}
@@ -1076,6 +1105,7 @@ func readSSE(parent, reqCtx context.Context, r io.Reader, opts ChatOptions, onDe
 
 type accum struct {
 	content     strings.Builder
+	reasoning   strings.Builder
 	calls       map[int]*ToolCall
 	finish      string
 	usage       Usage
@@ -1108,7 +1138,7 @@ func (a *accum) addTool(d streamDeltaTool) {
 }
 
 func (a *accum) message() (Message, error) {
-	msg := Message{Role: RoleAssistant, Content: a.content.String()}
+	msg := Message{Role: RoleAssistant, Content: a.content.String(), ReasoningContent: a.reasoning.String()}
 	if len(a.calls) == 0 {
 		return msg, nil
 	}
