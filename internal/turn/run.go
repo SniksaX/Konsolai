@@ -460,6 +460,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		}
 		cfg.Temperature = r.Profile.TemperatureFor(string(dec.Intent))
 		cfg.ToolChoiceMode = r.Profile.ChatToolChoiceFor(r.Profile.Roles.Main)
+		cfg.ReasoningHeadroom = r.Profile.ReasoningHeadroomFor(r.Profile.Roles.Main)
 		cfg.TopP = r.Profile.LLM.TopP
 		cfg.TokenCap = r.Profile.TokenCap(string(dec.Intent))
 		cfg.ElideTrigger = r.Profile.ElideTrigger()
@@ -607,7 +608,7 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 	}}
 	tokCap := r.Profile.AnswerEffortCap(string(dec.EffectiveEffort()))
 	answerTools := answerEscalateTools(client, main)
-	out, calls, usage, streamErr := streamAnswer(ctx, client, msgs, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap, answerTools, r.Profile.ThinkingMaxTokens())
+	out, calls, usage, streamErr := streamAnswer(ctx, client, msgs, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap, answerTools, r.Profile.ThinkingMaxTokens(), r.Profile.ReasoningHeadroomFor(r.Profile.Roles.Main))
 	cut := errors.Is(streamErr, llm.ErrTruncated)
 	if streamErr != nil && !cut && !usedMain && !gate.released {
 		if req.Trace {
@@ -617,15 +618,23 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 		usedMain = true
 		gate.reset()
 		answerTools = answerEscalateTools(client, main)
-		out, calls, usage, streamErr = streamAnswer(ctx, client, msgs, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap, answerTools, r.Profile.ThinkingMaxTokens())
+		out, calls, usage, streamErr = streamAnswer(ctx, client, msgs, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap, answerTools, r.Profile.ThinkingMaxTokens(), r.Profile.ReasoningHeadroomFor(r.Profile.Roles.Main))
 		cut = errors.Is(streamErr, llm.ErrTruncated)
 	}
 	if streamErr == nil && strings.TrimSpace(out) == "" && len(calls) == 0 && !gate.released {
 		gate.reset()
-		out, calls, usage, streamErr = streamAnswer(ctx, client, []llm.Message{system, user}, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap, answerTools, r.Profile.ThinkingMaxTokens())
+		out, calls, usage, streamErr = streamAnswer(ctx, client, []llm.Message{system, user}, think, req.Plain, gate, r.errw(), r.Profile.TemperatureFor("answer"), r.Profile.LLM.TopP, tokCap, answerTools, r.Profile.ThinkingMaxTokens(), r.Profile.ReasoningHeadroomFor(r.Profile.Roles.Main))
 		cut = errors.Is(streamErr, llm.ErrTruncated)
 	}
 	modelTime := time.Since(t0)
+	if req.Trace {
+		for _, c := range []*llm.Client{client, main} {
+			if c != nil && c.LastReasoningFallback() != "" {
+				fmt.Fprintf(r.errw(), "reasoning_effort not supported with tools; using %s for this model (retried once)\n", c.LastReasoningFallback())
+				break
+			}
+		}
+	}
 	ptok := 0
 	if usedMain {
 		ptok = usage.PromptTokens
@@ -725,7 +734,7 @@ func SanitizeAnswerHistory(hist []llm.Message) []llm.Message {
 }
 
 func StreamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, think, plain bool, outw, errw io.Writer, temp, topP float64) (string, llm.Usage, error) {
-	out, _, usage, err := streamAnswer(ctx, client, msgs, think, plain, outw, errw, temp, topP, 0, nil, 0)
+	out, _, usage, err := streamAnswer(ctx, client, msgs, think, plain, outw, errw, temp, topP, 0, nil, 0, 0)
 	return out, usage, err
 }
 
@@ -736,7 +745,7 @@ func answerEscalateTools(client, main *llm.Client) []llm.ToolSpec {
 	return []llm.ToolSpec{EscalateTool}
 }
 
-func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, think, plain bool, outw, errw io.Writer, temp, topP float64, tokenCap int, tools []llm.ToolSpec, thinkBudget int) (string, []llm.ToolCall, llm.Usage, error) {
+func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, think, plain bool, outw, errw io.Writer, temp, topP float64, tokenCap int, tools []llm.ToolSpec, thinkBudget, reasoningHeadroom int) (string, []llm.ToolCall, llm.Usage, error) {
 	if outw == nil {
 		outw = os.Stdout
 	}
@@ -765,6 +774,7 @@ func streamAnswer(ctx context.Context, client *llm.Client, msgs []llm.Message, t
 		live.Stop()
 		return "", nil, llm.Usage{}, err
 	}
+	maxTok += reasoningHeadroom
 	if tokenCap > 0 && maxTok > tokenCap {
 		maxTok = tokenCap
 	}
