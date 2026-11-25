@@ -404,8 +404,10 @@ func (c *Client) SetIdleTimeout(d time.Duration) {
 	}
 }
 
-// ResolveModel returns the configured model or the first model advertised by /models
-// and reads max_model_len for the resolved model (fallback 32768).
+// ResolveModel returns the configured model, or the one model advertised by
+// /models when the id is empty, and reads its context window (fallback 32768).
+// An ambiguous or mismatched list fails with the served ids instead of making
+// up an id the server does not serve.
 func (c *Client) ResolveModel(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	if c.model != "" && c.windowReady {
@@ -416,12 +418,8 @@ func (c *Client) ResolveModel(ctx context.Context) (string, error) {
 	want := c.model
 	c.mu.Unlock()
 
-	fetchCtx := ctx
-	if want != "" {
-		var cancel context.CancelFunc
-		fetchCtx, cancel = context.WithTimeout(ctx, 400*time.Millisecond)
-		defer cancel()
-	}
+	fetchCtx, cancel := context.WithTimeout(ctx, c.probeBudget())
+	defer cancel()
 	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, c.baseURL+"/models", nil)
 	if err != nil {
 		if want != "" {
@@ -430,22 +428,34 @@ func (c *Client) ResolveModel(ctx context.Context) (string, error) {
 		}
 		return "", fmt.Errorf("llm: build models request: %w", err)
 	}
-	key, _ := c.authorize(req)
+	key, aerr := c.authorize(req)
+	if aerr != nil {
+		if want != "" {
+			c.setWindow(defaultContextWindow)
+			return want, nil
+		}
+		return "", &ProbeError{Kind: ProbeAuthFailed, Endpoint: c.baseURL, Err: aerr}
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		if want != "" {
 			c.setWindow(defaultContextWindow)
 			return want, nil
 		}
-		return "", fmt.Errorf("llm: list models: %w", err)
+		return "", &ProbeError{Kind: probeTransportKind(fetchCtx, err), Endpoint: c.baseURL, Err: fmt.Errorf("llm: list models: %w", err)}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		herr := httpErrorKey(resp, key)
 		if want != "" {
 			c.setWindow(defaultContextWindow)
 			return want, nil
 		}
-		return "", httpErrorKey(resp, key)
+		kind := ProbeHTTPError
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			kind = ProbeAuthFailed
+		}
+		return "", &ProbeError{Kind: kind, Status: resp.StatusCode, Endpoint: c.baseURL, Err: herr}
 	}
 	var body struct {
 		Data []struct {
@@ -463,16 +473,25 @@ func (c *Client) ResolveModel(ctx context.Context) (string, error) {
 		}
 		return "", fmt.Errorf("llm: decode models: %w", err)
 	}
-	if len(body.Data) == 0 || (want == "" && body.Data[0].ID == "") {
+	if len(body.Data) == 0 {
 		if want != "" {
 			c.setWindow(defaultContextWindow)
 			return want, nil
 		}
-		return "", errors.New("llm: server advertises no models, set KONSOLAI_MODEL")
+		return "", errors.New("llm: server advertises no models; set the model id")
 	}
-
+	served := make([]string, 0, len(body.Data))
+	for _, m := range body.Data {
+		if m.ID != "" {
+			served = append(served, m.ID)
+		}
+	}
 	chosen := body.Data[0]
-	if want != "" {
+	if want == "" {
+		if len(body.Data) != 1 {
+			return "", fmt.Errorf("llm: server at %s serves %d models; set the model id to one of: %s", c.baseURL, len(body.Data), servedIDList(served))
+		}
+	} else {
 		found := false
 		for _, m := range body.Data {
 			if m.ID == want {
@@ -482,8 +501,7 @@ func (c *Client) ResolveModel(ctx context.Context) (string, error) {
 			}
 		}
 		if !found {
-			chosen.ID = want
-			chosen.MaxModelLen = 0
+			return "", fmt.Errorf("llm: model %q is not served at %s; server serves: %s", want, c.baseURL, servedIDList(served))
 		}
 	}
 	win := chosen.MaxModelLen
@@ -508,6 +526,19 @@ func (c *Client) ResolveModel(ctx context.Context) (string, error) {
 	id := c.model
 	c.mu.Unlock()
 	return id, nil
+}
+
+// servedIDList lists the served ids for one error, capped so a provider with
+// a large catalog still prints one readable line.
+func servedIDList(ids []string) string {
+	const maxIDs = 10
+	if len(ids) == 0 {
+		return "none"
+	}
+	if len(ids) <= maxIDs {
+		return strings.Join(ids, ", ")
+	}
+	return strings.Join(ids[:maxIDs], ", ") + fmt.Sprintf(", +%d more", len(ids)-maxIDs)
 }
 
 func (c *Client) propsNCtx(ctx context.Context) int {
@@ -569,6 +600,7 @@ type Usage struct {
 type usageJSON struct {
 	PromptTokens      int                `json:"prompt_tokens"`
 	CompletionTokens  int                `json:"completion_tokens"`
+	ReasoningTokens   int                `json:"reasoning_tokens"`
 	CompletionDetails *completionDetails `json:"completion_tokens_details"`
 }
 
@@ -653,6 +685,8 @@ func usageOf(u *usageJSON) Usage {
 	out := Usage{PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens}
 	if u.CompletionDetails != nil && u.CompletionDetails.ReasoningTokens > 0 {
 		out.ReasoningTokens = u.CompletionDetails.ReasoningTokens
+	} else if u.ReasoningTokens > 0 {
+		out.ReasoningTokens = u.ReasoningTokens
 	}
 	return out
 }
@@ -660,10 +694,16 @@ func usageOf(u *usageJSON) Usage {
 // EstimateReasoningTokens converts a streamed reasoning length with the
 // calibrated tokens-per-character ratio (chars / (1/ratio)).
 func (c *Client) EstimateReasoningTokens(chars int) int {
-	if c == nil || chars <= 0 {
+	if c == nil {
 		return 0
 	}
-	ratio := c.TokensPerChar()
+	return estimateReasoningTokens(chars, c.TokensPerChar())
+}
+
+func estimateReasoningTokens(chars int, ratio float64) int {
+	if chars <= 0 {
+		return 0
+	}
 	if ratio <= 0 {
 		ratio = defaultTokensPerChar
 	}
@@ -874,7 +914,7 @@ func (c *Client) completeAttempt(ctx context.Context, msgs []Message, tools []To
 		return Message{}, Usage{}, mapRequestError(ctx, reqCtx, fmt.Errorf("llm: read stream: %w", peekErr)), gotBytes
 	}
 	if !isSSE(preview) {
-		msg, usage, err := decodeJSONCompletion(br, opts)
+		msg, usage, err := decodeJSONCompletion(br, opts, c.TokensPerChar())
 		return msg, usage, err, gotBytes
 	}
 	msg, usage, err := readSSE(ctx, reqCtx, br, opts, onDelta, c.TokensPerChar())
@@ -886,9 +926,13 @@ func isSSE(preview []byte) bool {
 	return bytes.HasPrefix(p, []byte("data:")) || bytes.HasPrefix(p, []byte("data"))
 }
 
-func decodeJSONCompletion(r io.Reader, opts ChatOptions) (Message, Usage, error) {
+func decodeJSONCompletion(r io.Reader, opts ChatOptions, ratio float64) (Message, Usage, error) {
+	data, err := io.ReadAll(io.LimitReader(r, 8<<20))
+	if err != nil {
+		return Message{}, Usage{}, fmt.Errorf("llm: decode completion: %w", err)
+	}
 	var body completeResponse
-	if err := json.NewDecoder(r).Decode(&body); err != nil {
+	if err := json.Unmarshal(data, &body); err != nil {
 		return Message{}, Usage{}, fmt.Errorf("llm: decode completion: %w", err)
 	}
 	if body.Error != nil {
@@ -899,10 +943,36 @@ func decodeJSONCompletion(r io.Reader, opts ChatOptions) (Message, Usage, error)
 	}
 	msg := body.Choices[0].Message
 	msg.Role = RoleAssistant
-	if opts.OnProgress != nil {
-		opts.OnProgress(Progress{ContentTokens: len(msg.Content) / 4})
+	usage := usageOf(body.Usage)
+	// Reasoning is trace-only: it counts in think tokens and never becomes the
+	// answer, which keeps a DeepSeek reasoning_content reply readable.
+	if chars := reasoningContentChars(data); chars > 0 && usage.ReasoningTokens == 0 {
+		usage.ReasoningTokens = estimateReasoningTokens(chars, ratio)
 	}
-	return msg, usageOf(body.Usage), nil
+	if opts.OnProgress != nil {
+		opts.OnProgress(Progress{
+			ReasoningTokens: usage.ReasoningTokens,
+			ContentTokens:   len(msg.Content) / 4,
+		})
+	}
+	return msg, usage, nil
+}
+
+// reasoningContentChars returns the reasoning characters of a non-streamed
+// completion. DeepSeek uses reasoning_content; some servers use reasoning.
+func reasoningContentChars(data []byte) int {
+	var body struct {
+		Choices []struct {
+			Message struct {
+				ReasoningContent string `json:"reasoning_content"`
+				Reasoning        string `json:"reasoning"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil || len(body.Choices) == 0 {
+		return 0
+	}
+	return len(body.Choices[0].Message.ReasoningContent) + len(body.Choices[0].Message.Reasoning)
 }
 
 func readSSE(parent, reqCtx context.Context, r io.Reader, opts ChatOptions, onDelta func(string) error, ratio float64) (Message, Usage, error) {
@@ -963,8 +1033,8 @@ func readSSE(parent, reqCtx context.Context, r io.Reader, opts ChatOptions, onDe
 		return Message{}, Usage{}, mapRequestError(parent, reqCtx, fmt.Errorf("llm: read stream: %w", err))
 	}
 	msg, err := acc.message()
-	if acc.usage.ReasoningTokens == 0 && acc.reasonChars > 0 && ratio > 0 {
-		acc.usage.ReasoningTokens = int(float64(acc.reasonChars)*ratio + 0.5)
+	if acc.usage.ReasoningTokens == 0 && acc.reasonChars > 0 {
+		acc.usage.ReasoningTokens = estimateReasoningTokens(acc.reasonChars, ratio)
 	}
 	if err != nil {
 		return msg, acc.usage, err
