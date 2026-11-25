@@ -127,7 +127,7 @@ Work lands on `dev`. Config keys are the single table in `internal/config/keys.g
 - `/save [file]` writes the last answer as Markdown. `/pdf [file]` renders it through `docrender`, the same pipeline as `export_doc`. The default name is a slug of the session title. Overwrite needs `--force`. Paths go through the Guard. `konsolai new "<request>"` is one turn; `/save` then reads that answer from the session store, or from the local last-session file when the database is off.
 - `/explain` runs an answer turn at high effort for the latest failed shell-mode command and does not re-run it. With no capture, a readable `$HISTFILE` is explained after `no captured output; explaining the command only`. The help text documents `PROMPT_COMMAND="history -a"`.
 - The first mutating call rejected by the plan gate forces the next request to `propose_plan` (thinking follows `plan_step`) and does not spend the explore budget. Later gate rejects are unchanged. `run_shell` still needs an accepted plan.
-- `scripts/changelog.sh` groups commits after the latest `v*` tag. With no `v*` tag it uses `prod`, or else the root commit and the whole history. `CHANGELOG.md` is titled `## Unreleased`. The next tag is not created.
+- `scripts/changelog.sh` groups commits after the latest `v*` tag. With no `v*` tag it uses `prod`, or else the root commit and the whole history. `CHANGELOG.md` is titled `## v0.4.0` (regenerated from the `v0.3.0` tag). The next tag is not created.
 - Secret-shaped test literals are assembled at runtime in each package's `fixtures_test.go`.
 - `TestNoLocalMachine` in `internal/commands` and the `machine_name` filter in `scripts/changelog.sh` deny machine and personal names only: host, user, home paths, and local ports. Public model ids are not in that list.
 
@@ -150,7 +150,7 @@ Work lands on `dev`. Config keys are the single table in `internal/config/keys.g
 - The provider presets come from published docs and are not exercised against live accounts; `anthropic`'s OpenAI-compatible auth header stays unverified, and `deepseek` sends no temperature by default.
 - Embeddings stay loopback or private; a remote embed service is rejected, so RAG cannot use a cloud provider.
 - README embeds four screenshots. `slash-menu`, `act-plan`, and `pdf` are not captured.
-- Latest tag `v0.2.2`; `dev` is past it and no newer tag exists. `version` in `cmd/konsolai` is still `"dev"` unless ldflags stamp it.
+- Latest tag `v0.3.0`; `dev` is past it and no `v0.4.0` tag exists. `version` in `cmd/konsolai` is still `"dev"` unless ldflags stamp it.
 
 ## Lessons
 
