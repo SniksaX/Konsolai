@@ -1,6 +1,7 @@
 package turn
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/redact"
 )
 
 func ModelErrorLine(endpoint string, err error, trace bool) string {
@@ -29,15 +31,7 @@ func ModelErrorLine(endpoint string, err error, trace bool) string {
 	}
 	var he *llm.HTTPError
 	if errors.As(err, &he) {
-		if he.Status >= 500 {
-			return "konsolai: the model server returned an error (" + host + "). Try again."
-		}
-		if he.Status >= 400 {
-			if msg := friendlyErrBody(he.Body); msg != "" {
-				return "konsolai: the model server rejected the request: " + msg
-			}
-			return "konsolai: the model server rejected the request."
-		}
+		return httpErrorLine(host, he)
 	}
 	if isDialErr(err) {
 		return "konsolai: cannot reach the model server at " + host + ". Run /doctor to check every endpoint."
@@ -72,12 +66,79 @@ func probeErrorLine(host string, probe *llm.ProbeError) string {
 	}
 }
 
-func friendlyErrBody(s string) string {
-	s = firstErrLine(s)
-	if s == "" || strings.HasPrefix(s, "{") || strings.HasPrefix(s, "[") {
+// httpErrorLine reports a rejected chat call with its HTTP status and the
+// provider's own message. It runs in every mode, not only with --trace, and the
+// message is masked before it reaches the terminal.
+func httpErrorLine(host string, he *llm.HTTPError) string {
+	status := fmt.Sprintf("HTTP %d", he.Status)
+	detail := redact.String(providerMessage(he.Body))
+	if he.Status >= 500 {
+		if detail != "" {
+			return fmt.Sprintf("konsolai: the model server returned an error (%s) at %s: %s. Try again.", status, host, detail)
+		}
+		return fmt.Sprintf("konsolai: the model server returned an error (%s) at %s; it sent no error message. Try again.", status, host)
+	}
+	if he.Status >= 400 {
+		if detail != "" {
+			return fmt.Sprintf("konsolai: the model server rejected the request (%s): %s", status, detail)
+		}
+		return fmt.Sprintf("konsolai: the model server rejected the request (%s); it sent no error message.", status)
+	}
+	return fmt.Sprintf("konsolai: the model server answered %s at %s.", status, host)
+}
+
+// rawErrorText reads the error value of an OpenAI-style body, which may be an
+// object with message/detail/type or a plain string.
+func rawErrorText(raw json.RawMessage) string {
+	if len(raw) == 0 {
 		return ""
 	}
-	return s
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return firstErrLine(s)
+	}
+	var obj struct {
+		Message string `json:"message"`
+		Detail  string `json:"detail"`
+		Type    string `json:"type"`
+	}
+	if json.Unmarshal(raw, &obj) != nil {
+		return ""
+	}
+	for _, candidate := range []string{obj.Message, obj.Detail, obj.Type} {
+		if line := firstErrLine(candidate); line != "" {
+			return line
+		}
+	}
+	return ""
+}
+
+// providerMessage extracts the provider's error text from an OpenAI-style body
+// ({"error":{"message":"..."}}) and falls back to a single plain line.
+func providerMessage(body string) string {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return ""
+	}
+	var payload struct {
+		Error   json.RawMessage `json:"error"`
+		Message string          `json:"message"`
+		Detail  string          `json:"detail"`
+	}
+	if json.Unmarshal([]byte(body), &payload) == nil {
+		if line := rawErrorText(payload.Error); line != "" {
+			return line
+		}
+		for _, candidate := range []string{payload.Message, payload.Detail} {
+			if line := firstErrLine(candidate); line != "" {
+				return line
+			}
+		}
+		if strings.HasPrefix(body, "{") || strings.HasPrefix(body, "[") {
+			return ""
+		}
+	}
+	return firstErrLine(body)
 }
 
 func EndpointHost(endpoint string) string {
