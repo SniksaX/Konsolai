@@ -55,6 +55,16 @@ konsolai /set model main vllm
 
 The optional third argument is the model id; leave it empty to use the first id returned by `<endpoint>/models`. `konsolai /set model discover` lists the ids each endpoint offers.
 
+For an API-key provider, the preset fills the endpoint and request quirks, and the key is stored outside the repo:
+
+```sh
+konsolai /set model add gpt --provider openai   # or openrouter, groq, together, mistral, deepseek, gemini, anthropic
+konsolai /set key gpt                            # hidden input, saved to ~/.config/konsolai/secrets (0600)
+konsolai /set model main gpt
+```
+
+`api_key_env` names an environment variable read at call time; when it is unset the secrets file is used. A model whose host resolves to a public address is marked `remote`, and embeddings must stay loopback or private.
+
 ### 3. Run it
 
 ```sh
