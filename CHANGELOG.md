@@ -1,3 +1,12 @@
+## Unreleased
+
+### Fixed
+- [FIX|MAJOR] Pause the spinner and wait for an explicit y/n at the remote gate
+- [FIX|MAJOR] Stop offering mutating tools before the plan is approved
+- [FIX|MEDIUM] Draw the answer panel after the stream when a rewind is not possible
+- [ADD|MINOR] Retry a 429 once when the provider asks for 15 seconds or less
+- [ADD|MINOR] Implement /remote allow to reset a declined remote decision
+
 ## v0.4.0
 
 ### Added
