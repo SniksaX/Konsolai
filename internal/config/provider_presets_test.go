@@ -70,7 +70,8 @@ func TestProviderPresetAnthropicNote(t *testing.T) {
 		t.Fatal("the anthropic preset has no experimental note")
 	}
 	for _, other := range ProviderNames() {
-		if other == "anthropic" {
+		// deepseek carries a documented reasoner caveat, not an experiment note.
+		if other == "anthropic" || other == "deepseek" {
 			continue
 		}
 		o, _ := Provider(other)
