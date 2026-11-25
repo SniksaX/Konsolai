@@ -244,6 +244,15 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 	return r, nil
 }
 
+// Repaint redraws the active prompt and its buffer. The welcome uses it after
+// a live probe repaint, so a late update cannot leave the prompt erased.
+func (r *rlReader) Repaint() {
+	if r == nil || r.sh == nil {
+		return
+	}
+	r.sh.Display.Refresh()
+}
+
 func (r *rlReader) SetPlaceholder(s string) {
 	if strings.TrimSpace(s) == "" {
 		s = "ask anything"
