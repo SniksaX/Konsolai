@@ -40,6 +40,9 @@ func runStatus(ctx context.Context, env *Env, _ []string) int {
 				model = dashIfEmpty(model)
 			}
 		}
+		if model != "" && probe.kind == llm.ProbeOK && !containsID(probe.ids, model) {
+			note = "  (not served; server serves: " + strings.Join(limitNames(probe.ids, 8), ", ") + ")"
+		}
 		win = env.Runner.Client.ContextWindow()
 	} else {
 		resolved, resolvedNote := servedModel(env.Profile, probe, model)
