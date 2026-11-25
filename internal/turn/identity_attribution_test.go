@@ -13,8 +13,10 @@ import (
 
 	"github.com/SniksaX/Konsolai/internal/agent"
 	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/intent"
 	"github.com/SniksaX/Konsolai/internal/llm"
 	"github.com/SniksaX/Konsolai/internal/memory"
+	"github.com/SniksaX/Konsolai/internal/sysctx"
 )
 
 // roleServer is one fake OpenAI-compatible role. It records every chat body so
@@ -374,6 +376,33 @@ func TestModelFactsUseTheConfiguredNamesAndIds(t *testing.T) {
 	for _, want := range []string{"deepseek-flash", "main-model", "fast", "fast-model", "answered by the fast role", "local"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("facts miss %q:\n%s", want, text)
+		}
+	}
+}
+
+// TestDecideIntentFloorAppliesTheIdentityFloor proves the floor is part of the
+// router decision, not only a RunTurn shortcut.
+func TestDecideIntentFloorAppliesTheIdentityFloor(t *testing.T) {
+	dec := DecideIntentFloor(context.Background(), nil, "", "what model are you ?", true, nil, false, nil, nil, "")
+	if dec.Intent != intent.Answer || dec.Reason != "identity floor" || dec.Effort != intent.EffortLow {
+		t.Fatalf("floor decision %+v", dec)
+	}
+	if dec.Language != "en" {
+		t.Fatalf("floor language %q", dec.Language)
+	}
+}
+
+// TestBuildContextCarriesTheModelFacts proves the build intent's code context
+// also carries the facts.
+func TestBuildContextCarriesTheModelFacts(t *testing.T) {
+	main := newRoleServer(t, "main-model", "x")
+	r, _, _ := modelRunner(t, main, nil)
+	snap := sysctx.Snapshot{OS: "Linux", Shell: "bash", CWD: "/tmp/proj"}
+	snap.Model = r.modelFacts("main")
+	got := codeContext(context.Background(), snap, t.TempDir())
+	for _, want := range []string{"deepseek-flash", "main-model", "answered by the main role"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("the build context misses %q:\n%s", want, got)
 		}
 	}
 }
