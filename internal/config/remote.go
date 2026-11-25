@@ -149,3 +149,37 @@ func (c Config) RemoteRoleAllowed(role string) bool {
 	}
 	return false
 }
+
+// ChatToolChoice is how a forced tool is requested for this model: named,
+// required, or auto. Empty inherits the built-in.
+func (m Model) ChatToolChoice() string {
+	switch strings.ToLower(strings.TrimSpace(m.ToolChoiceMode)) {
+	case "auto", "required", "named":
+		return strings.ToLower(strings.TrimSpace(m.ToolChoiceMode))
+	}
+	return ""
+}
+
+// ChatThinking is DeepSeek's per-request thinking toggle, or "" to send none.
+func (m Model) ChatThinking() string {
+	switch strings.ToLower(strings.TrimSpace(m.ThinkingMode)) {
+	case "enabled", "disabled":
+		return strings.ToLower(strings.TrimSpace(m.ThinkingMode))
+	}
+	return ""
+}
+
+// ChatToolChoiceFor resolves the forced-tool mode for one model name: the
+// model entry first, then the built-in llm.tool_choice_mode, then named.
+func (c Config) ChatToolChoiceFor(name string) string {
+	if m, ok := c.Models[name]; ok {
+		if mode := m.ChatToolChoice(); mode != "" {
+			return mode
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(c.LLM.ToolChoiceMode)) {
+	case "auto", "required":
+		return strings.ToLower(strings.TrimSpace(c.LLM.ToolChoiceMode))
+	}
+	return "named"
+}
