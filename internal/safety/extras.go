@@ -124,6 +124,12 @@ func acceptNamed(tok, home string) (string, bool) {
 	if _, err := os.Lstat(abs); err == nil {
 		return abs, true
 	}
+	// A named path that is missing may be a case typo of an existing one
+	// (~/desktop vs ~/Desktop). Grant the real path so a write to it is not
+	// refused as outside the project; the tools name the correction.
+	if corrected, ok := caseVariant(abs); ok && containsPath(home, corrected) && !underDeniedHome(corrected, home) {
+		return corrected, true
+	}
 	parent, err := nearestExisting(abs)
 	if err != nil {
 		return "", false
