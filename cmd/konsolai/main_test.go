@@ -357,7 +357,7 @@ func TestModelErrorLine(t *testing.T) {
 		t.Fatalf("trunc %q", got)
 	}
 	he := &llm.HTTPError{Status: 400, Body: "bad schema\nmore"}
-	if got := modelErrorLine(ep, he, false); got != "konsolai: the model server rejected the request: bad schema" {
+	if got := modelErrorLine(ep, he, false); got != "konsolai: the model server rejected the request (HTTP 400): bad schema" {
 		t.Fatalf("4xx %q", got)
 	}
 	dial := errors.New("llm: chat: dial tcp: connection refused")
