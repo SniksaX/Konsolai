@@ -46,7 +46,7 @@ func TestSetMenuPicksEnum(t *testing.T) {
 		"KONSOLAI_THEME_CWD="+dir,
 		"KONSOLAI_THEME_CFG="+cfg,
 		"COLUMNS=120",
-		"LINES=48",
+		"LINES=200",
 		"INPUTRC=/dev/null",
 		"NO_COLOR=1",
 	)
@@ -61,8 +61,8 @@ func TestSetMenuPicksEnum(t *testing.T) {
 		_ = ptmx.Close()
 		_ = cmd.Wait()
 	}()
-	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 48, Cols: 120})
-	v := startView(t, ptmx, 48, 120)
+	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 200, Cols: 120})
+	v := startView(t, ptmx, 200, 120)
 	v.expect("welcome", screenHas("main-model"))
 	v.typeKeys("/set", func(sc *screen) bool { return strings.Contains(screenPrompt(sc), "/set") })
 	v.typeKeys("\r", screenHas("welcome"))
