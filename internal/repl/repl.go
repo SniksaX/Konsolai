@@ -197,6 +197,8 @@ func Run(ctx context.Context, cfg Config) int {
 	commands.SetEditorLineReader(func(ctx context.Context, prompt string) (string, error) {
 		return rd.ReadLine(ctx, prompt)
 	})
+	restoreRemotePrompt := wireRemotePrompt()
+	defer restoreRemotePrompt()
 	if s, ok := rd.(interface{ SetEscTimeout(func() time.Duration) }); ok && env != nil {
 		s.SetEscTimeout(func() time.Duration { return env.Profile.EscTimeout() })
 	}
