@@ -13,6 +13,8 @@ type ProviderPreset struct {
 	MaxTokensField  string
 	SendTemperature bool
 	Note            string
+	// ToolChoiceMode is the provider's forced-tool mode; empty keeps named.
+	ToolChoiceMode string
 }
 
 var providerPresets = []ProviderPreset{
@@ -21,7 +23,7 @@ var providerPresets = []ProviderPreset{
 	{Name: "groq", Endpoint: "https://api.groq.com/openai/v1", APIKeyEnv: "GROQ_API_KEY", Context: 131072, MaxTokensField: "max_tokens", SendTemperature: true},
 	{Name: "together", Endpoint: "https://api.together.xyz/v1", APIKeyEnv: "TOGETHER_API_KEY", Context: 131072, MaxTokensField: "max_tokens", SendTemperature: true},
 	{Name: "mistral", Endpoint: "https://api.mistral.ai/v1", APIKeyEnv: "MISTRAL_API_KEY", Context: 128000, MaxTokensField: "max_tokens", SendTemperature: true},
-	{Name: "deepseek", Endpoint: "https://api.deepseek.com/v1", APIKeyEnv: "DEEPSEEK_API_KEY", Context: 128000, MaxTokensField: "max_tokens", SendTemperature: false, Note: "the reasoner may reject temperature"},
+	{Name: "deepseek", Endpoint: "https://api.deepseek.com/v1", APIKeyEnv: "DEEPSEEK_API_KEY", Context: 128000, MaxTokensField: "max_tokens", SendTemperature: false, Note: "the reasoner may reject temperature", ToolChoiceMode: "auto"},
 	{Name: "gemini", Endpoint: "https://generativelanguage.googleapis.com/v1beta/openai", APIKeyEnv: "GEMINI_API_KEY", Context: 1048576, MaxTokensField: "max_tokens", SendTemperature: true},
 	{Name: "anthropic", Endpoint: "https://api.anthropic.com/v1", APIKeyEnv: "ANTHROPIC_API_KEY", Context: 200000, MaxTokensField: "max_tokens", SendTemperature: true, Note: "OpenAI-compatible endpoint; auth header not verified"},
 }
@@ -57,4 +59,5 @@ func ApplyProvider(m *Model, p ProviderPreset) {
 	m.MaxTokensField = p.MaxTokensField
 	send := p.SendTemperature
 	m.SendTemperature = &send
+	m.ToolChoiceMode = p.ToolChoiceMode
 }
