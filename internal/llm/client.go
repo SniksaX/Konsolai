@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -83,6 +84,8 @@ type Progress struct {
 type HTTPError struct {
 	Status int
 	Body   string
+	// RetryAfter is the seconds from a Retry-After header, when present.
+	RetryAfter int
 }
 
 func (e *HTTPError) Error() string {
@@ -96,6 +99,8 @@ type Client struct {
 	http               *http.Client
 	idleTimeout        time.Duration
 	retryWait          time.Duration
+	rateWait           func(time.Duration)
+	onRateLimit        func(int)
 	mu                 sync.Mutex
 	contextWindow      int
 	windowReady        bool
@@ -183,6 +188,16 @@ func (c *Client) SetThinkingMode(mode string) {
 	default:
 		c.thinkingMode = ""
 	}
+}
+
+// SetRateLimitHandlers injects the wait and the notice for a 429 retry. The
+// wait defaults to time.Sleep; tests replace it so they never sleep.
+func (c *Client) SetRateLimitHandlers(wait func(time.Duration), notice func(int)) {
+	if c == nil {
+		return
+	}
+	c.rateWait = wait
+	c.onRateLimit = notice
 }
 
 // SetReasoningEffort sets the top-level reasoning_effort value: none,
@@ -896,6 +911,8 @@ func (c *Client) complete(ctx context.Context, msgs []Message, tools []ToolSpec,
 		// One slot for the reasoning_effort retry with tools.
 		extra++
 	}
+	// One slot for a short 429 retry-after.
+	extra++
 	var msg Message
 	var usage Usage
 	var err error
@@ -918,6 +935,25 @@ func (c *Client) complete(ctx context.Context, msgs []Message, tools []ToolSpec,
 		t0 := time.Now()
 		msg, usage, err, gotBytes = c.completeAttempt(ctx, msgs, tools, opts, onDelta)
 		c.observeCall(usage, time.Since(t0))
+		if err != nil {
+			if n, ok := rateLimitSeconds(err); ok {
+				if _, done := rateLimited.Load(toolChoiceKey(c.baseURL, c.ModelID())); !done && n <= 15 {
+					rateLimited.Store(toolChoiceKey(c.baseURL, c.ModelID()), struct{}{})
+					if c.onRateLimit != nil {
+						c.onRateLimit(n)
+					}
+					wait := c.rateWait
+					if wait == nil {
+						wait = time.Sleep
+					}
+					wait(time.Duration(n) * time.Second)
+					continue
+				}
+				if n > 15 {
+					return Message{}, Usage{}, fmt.Errorf("%w; the provider asked to retry in %ds, which is too long for this run; retry later or change the model", err, n)
+				}
+			}
+		}
 		if err != nil && isToolChoiceRejection(err) && strings.TrimSpace(opts.ToolChoice) != "" && strings.ToLower(opts.ToolChoice) != "auto" && attempt == 0 {
 			// The provider rejects any tool_choice in thinking mode. Switch this
 			// model to auto for the rest of the process and retry once.
@@ -945,6 +981,31 @@ func (c *Client) complete(ctx context.Context, msgs []Message, tools []ToolSpec,
 	}
 	c.observePrompt(msgs, usage)
 	return msg, usage, err
+}
+
+// rateLimited is process-wide: one short 429 wait per endpoint/model.
+var rateLimited sync.Map
+
+// rateLimitSeconds reads the Retry-After value from the error or its message.
+func rateLimitSeconds(err error) (int, bool) {
+	var he *HTTPError
+	if !errors.As(err, &he) || he.Status != http.StatusTooManyRequests {
+		return 0, false
+	}
+	if he.RetryAfter > 0 {
+		return he.RetryAfter, true
+	}
+	msg := strings.ToLower(he.Body)
+	for _, pat := range []string{"retry in ", "retry after ", "try again in "} {
+		if i := strings.Index(msg, pat); i >= 0 {
+			rest := msg[i+len(pat):]
+			var n int
+			if _, scan := fmt.Sscanf(rest, "%d", &n); scan == nil && n > 0 {
+				return n, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // forcedToolChoiceOff is process-wide: once a model rejects a forced
@@ -1462,5 +1523,11 @@ func httpErrorKey(resp *http.Response, key string) error {
 		body = strings.ReplaceAll(body, "Bearer "+key, "Bearer [REDACTED]")
 		body = strings.ReplaceAll(body, key, "[REDACTED]")
 	}
-	return &HTTPError{Status: resp.StatusCode, Body: body}
+	he := &HTTPError{Status: resp.StatusCode, Body: body}
+	if v := strings.TrimSpace(resp.Header.Get("Retry-After")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			he.RetryAfter = n
+		}
+	}
+	return he
 }
