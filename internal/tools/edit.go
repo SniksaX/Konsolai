@@ -63,6 +63,9 @@ func (t *editFileTool) Prepare(rawArgs string) (Action, error) {
 	if t.docsTask && !DocsPathAllowed(args.Path) {
 		return nil, errors.New(DocsSourceReject)
 	}
+	if suggestion, ok := safety.SuggestPath(args.Path, ""); ok {
+		return nil, fmt.Errorf("tools: edit_file: %s does not exist; did you mean %s?", args.Path, suggestion)
+	}
 	if args.OldStr == "" {
 		return nil, errors.New("tools: edit_file: old_str must be non-empty")
 	}
