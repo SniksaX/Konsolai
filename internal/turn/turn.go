@@ -183,6 +183,7 @@ func applyModelOptions(c *llm.Client, prof config.Profile, name string) {
 	c.SetMaxTokensField(m.TokensField())
 	c.SetSendTemperature(m.SendsTemperature())
 	c.SetRemoteProbeTimeout(prof.RemoteProbeTimeout())
+	c.SetThinkingMode(m.ChatThinking())
 }
 
 func (r *Runner) routerClient(ctx context.Context) *llm.Client {
