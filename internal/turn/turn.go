@@ -178,6 +178,7 @@ func applyModelOptions(c *llm.Client, prof config.Profile, name string) {
 		return
 	}
 	c.SetAPIKey(prof.APIKeyResolver(name))
+	c.SetModelName(name)
 	c.SetMaxTokensField(m.TokensField())
 	c.SetSendTemperature(m.SendsTemperature())
 	c.SetRemoteProbeTimeout(prof.RemoteProbeTimeout())
