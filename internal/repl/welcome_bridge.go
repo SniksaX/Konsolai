@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -214,6 +215,16 @@ func welcomeInput(env *commands.Env, info banner.Info) welcome.Input {
 	in.MemoryTimeout = env.Profile.MemoryQueryTimeout()
 	in.RateWindow = env.Profile.ModelRateWindow()
 	in.ModelSlow = env.Profile.ModelSlow()
+	in.APIKey = func(role string) (string, error) {
+		name := strings.TrimSpace(env.Profile.Roles.Main)
+		if role == "fast" {
+			name = strings.TrimSpace(env.Profile.Roles.Fast)
+		}
+		if name == "" {
+			name = "default"
+		}
+		return env.Profile.ModelAPIKey(name)
+	}
 	return in
 }
 
