@@ -50,6 +50,9 @@ func TestProbeSendsKeyAndListsIDs(t *testing.T) {
 	if strings.Join(res.IDs, ",") != "deepseek-flash,deepseek-reasoner" {
 		t.Fatalf("ids %v", res.IDs)
 	}
+	if !strings.Contains(string(res.Body), "deepseek-flash") {
+		t.Fatalf("body %q", res.Body)
+	}
 	if res.Endpoint != srv.URL+"/v1" {
 		t.Fatalf("endpoint %q", res.Endpoint)
 	}
