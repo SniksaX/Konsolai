@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/llm"
 	"github.com/SniksaX/Konsolai/internal/store"
 	"github.com/SniksaX/Konsolai/internal/ui"
 	"github.com/SniksaX/Konsolai/internal/ui/theme"
@@ -69,9 +70,9 @@ func doctorChecks(ctx context.Context, env *Env) []doctorCheck {
 	timeout := env.Profile.ProbeTimeout()
 	file, mode := checkConfigFile(env)
 	out := []doctorCheck{file, mode}
-	out = append(out, checkModels(ctx, "main endpoint", env.Profile.MainEndpoint(), "roles.main", timeout))
+	out = append(out, checkModels(ctx, env, "main endpoint", "main", env.Profile.MainEndpoint(), "roles.main", timeout))
 	if env.Profile.FastOn() {
-		out = append(out, checkModels(ctx, "fast endpoint", env.Profile.FastEndpoint(), "roles.fast", timeout))
+		out = append(out, checkModels(ctx, env, "fast endpoint", "fast", env.Profile.FastEndpoint(), "roles.fast", timeout))
 	}
 	out = append(out, checkRemoteModels(env)...)
 	if strings.TrimSpace(env.Profile.EmbedURL()) != "" {
@@ -125,18 +126,39 @@ func checkConfigFile(env *Env) (doctorCheck, doctorCheck) {
 	return file, mode
 }
 
-func checkModels(ctx context.Context, name, endpoint, fix string, timeout time.Duration) doctorCheck {
-	models, hit := probe(ctx, endpoint, "models", timeout)
-	if hit.mark != "✓" {
-		hit.name = name
-		hit.fix = fix
-		return hit
+func checkModels(ctx context.Context, env *Env, name, role, endpoint, fix string, timeout time.Duration) doctorCheck {
+	if strings.TrimSpace(endpoint) == "" {
+		return doctorCheck{mark: "✗", name: name, detail: "unreachable", fix: fix}
 	}
-	detail := "ok"
-	if len(models) > 0 {
-		detail = strings.Join(limitNames(models, 8), ", ")
+	if timeout <= 0 {
+		timeout = 300 * time.Millisecond
 	}
-	return doctorCheck{mark: "✓", name: name, detail: detail}
+	c := llm.New(endpoint, "")
+	c.SetAPIKey(env.Profile.APIKeyResolver(roleModelName(env.Profile, role)))
+	c.SetProbeTimeout(timeout)
+	c.SetRemoteProbeTimeout(env.Profile.RemoteProbeTimeout())
+	res := c.Probe(ctx)
+	switch res.Kind {
+	case llm.ProbeOK:
+		detail := "ok"
+		if len(res.IDs) > 0 {
+			detail = strings.Join(limitNames(res.IDs, 8), ", ")
+		}
+		return doctorCheck{mark: "✓", name: name, detail: detail}
+	case llm.ProbeAuthFailed:
+		keyFix := modelKeyFixFor(env.Profile, roleModelName(env.Profile, role))
+		return doctorCheck{mark: "!", name: name, detail: "auth failed", fix: keyFix}
+	case llm.ProbeHTTPError:
+		return doctorCheck{mark: "!", name: name, detail: fmt.Sprintf("http %d", res.Status), fix: fix}
+	case llm.ProbeSlow:
+		slowFix := "ui.probe_timeout_ms"
+		if config.URLIsRemote(endpoint) {
+			slowFix = "llm.remote_probe_timeout_ms"
+		}
+		return doctorCheck{mark: "!", name: name, detail: "slow", fix: slowFix}
+	default:
+		return doctorCheck{mark: "✗", name: name, detail: "unreachable", fix: fix}
+	}
 }
 
 func checkKind(ctx context.Context, name, endpoint, kind, fix string, timeout time.Duration) doctorCheck {
@@ -202,6 +224,14 @@ func modelKeyPresent(c config.Config, name string) bool {
 	return ok && strings.TrimSpace(key) != ""
 }
 
+func modelKeyFixFor(c config.Config, name string) string {
+	m, ok := c.Models[name]
+	if !ok {
+		return "/set key " + name
+	}
+	return modelKeyFix(m, name)
+}
+
 func modelKeyFix(m config.Model, name string) string {
 	if variable := strings.TrimSpace(m.APIKeyVariable()); variable != "" {
 		return "export " + variable + " or /set key " + name
@@ -221,7 +251,16 @@ func checkThinking(ctx context.Context, env *Env, timeout time.Duration) doctorC
 	if !env.Profile.MainThinking() {
 		return doctorCheck{mark: "✓", name: "thinking kwargs", detail: "off"}
 	}
-	code, err := probeThinking(ctx, env.Profile.MainEndpoint(), env.Profile.MainModelID(), timeout)
+	endpoint := env.Profile.MainEndpoint()
+	roleName := roleModelName(env.Profile, "main")
+	key, keyErr := env.Profile.ModelAPIKey(roleName)
+	if keyErr != nil {
+		return doctorCheck{mark: "!", name: "thinking kwargs", detail: "auth failed", fix: modelKeyFixFor(env.Profile, roleName)}
+	}
+	if key != "" && endpointScheme(endpoint) == "http" && config.URLIsRemote(endpoint) {
+		return doctorCheck{mark: "!", name: "thinking kwargs", detail: "key not sent over plain http", fix: "models." + env.Profile.Roles.Main + ".endpoint needs https"}
+	}
+	code, err := probeThinking(ctx, endpoint, env.Profile.MainModelID(), key, timeout)
 	if err != nil {
 		return doctorCheck{mark: "!", name: "thinking kwargs", detail: probeErr(err), fix: "models." + env.Profile.Roles.Main + ".thinking_kwargs"}
 	}
@@ -390,7 +429,7 @@ func probeRequest(ctx context.Context, endpoint, kind string) (*http.Request, er
 	}
 }
 
-func probeThinking(ctx context.Context, endpoint, model string, timeout time.Duration) (int, error) {
+func probeThinking(ctx context.Context, endpoint, model, key string, timeout time.Duration) (int, error) {
 	if timeout <= 0 {
 		timeout = 300 * time.Millisecond
 	}
@@ -406,6 +445,9 @@ func probeThinking(ctx context.Context, endpoint, model string, timeout time.Dur
 		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
 	resp, err := (&http.Client{Timeout: timeout}).Do(req)
 	if err != nil {
 		return 0, err
