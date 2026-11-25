@@ -77,6 +77,9 @@ type Model struct {
 	// ThinkingMode is DeepSeek's per-request thinking toggle: enabled or
 	// disabled. Empty sends no toggle, as before.
 	ThinkingMode string `yaml:"thinking_mode"`
+	// ReasoningEffort is the OpenAI reasoning_effort value: default, none,
+	// minimal, low, medium or high. Empty/default omits the field.
+	ReasoningEffort string `yaml:"reasoning_effort"`
 }
 
 // Roles selects named models and optional embed/rerank URLs.
@@ -98,6 +101,8 @@ type LLM struct {
 	RemoteProbeTimeoutMS int          `yaml:"remote_probe_timeout_ms"`
 	// ToolChoiceMode is the built-in mode when a model does not set its own.
 	ToolChoiceMode string `yaml:"tool_choice_mode"`
+	// ReasoningEffort is the built-in reasoning_effort when a model sets none.
+	ReasoningEffort string `yaml:"reasoning_effort"`
 }
 
 // Temperatures are sampling temperatures per intent.
