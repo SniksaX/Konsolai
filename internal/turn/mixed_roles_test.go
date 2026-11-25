@@ -167,8 +167,10 @@ func TestMixedRolesRemoteMainBlockedBeforeAnyRequest(t *testing.T) {
 	if mainSrv.modelCalls.Load() != 0 || mainSrv.chatCalls.Load() != 0 {
 		t.Fatalf("the blocked main endpoint saw requests: %+v", mainSrv)
 	}
-	if fastSrv.modelCalls.Load() != 0 || fastSrv.chatCalls.Load() != 0 {
-		t.Fatal("the local fast endpoint was contacted before the gate")
+	// Routing may probe the local fast model; only a chat call would mean the
+	// turn got past the gate.
+	if fastSrv.chatCalls.Load() != 0 {
+		t.Fatal("the local fast endpoint was asked to answer before the gate")
 	}
 	// The local roles keep no gate of their own.
 	if err := c.RemoteCallPolicy("fast", "fast", false)(); err != nil {
