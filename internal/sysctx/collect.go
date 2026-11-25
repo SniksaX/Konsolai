@@ -20,6 +20,71 @@ type Snapshot struct {
 	Truncated bool
 	GitRepo   bool
 	Pkg       PkgInfo
+	Model     ModelFacts
+}
+
+// ModelFacts is the chat model setup of the running session. It is the only
+// source the model may use for identity and setup questions.
+type ModelFacts struct {
+	MainName   string // configured main model name
+	MainID     string // configured main model id; empty means the server default
+	MainHost   string // main endpoint host
+	MainRemote bool
+	FastName   string
+	FastID     string
+	FastHost   string
+	FastRemote bool
+	HasFast    bool
+	Role       string // role answering the current call: main or fast
+}
+
+func (m ModelFacts) empty() bool {
+	return m.MainName == "" && m.MainID == "" && m.MainHost == "" &&
+		!m.HasFast && m.Role == ""
+}
+
+// String renders the model facts block. Empty facts render nothing.
+func (m ModelFacts) String() string {
+	if m.empty() {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("Model facts (the only source for identity and setup answers):\n")
+	b.WriteString("- Konsolai is a local coding agent. The chat model is served by the endpoint listed here.\n")
+	fmt.Fprintf(&b, "- main role: model %s, id %s, endpoint host %s, %s.\n",
+		factText(m.MainName), factID(m.MainID), factText(m.MainHost), factLocality(m.MainRemote))
+	if m.HasFast {
+		fmt.Fprintf(&b, "- fast role: model %s, id %s, endpoint host %s, %s.\n",
+			factText(m.FastName), factID(m.FastID), factText(m.FastHost), factLocality(m.FastRemote))
+	} else {
+		b.WriteString("- fast role: not configured; answers use main.\n")
+	}
+	if m.Role != "" {
+		fmt.Fprintf(&b, "- This call is answered by the %s role.\n", m.Role)
+	}
+	b.WriteString("Answer identity or setup questions only from these facts. If a fact is not listed, say \"I don't know\".")
+	return b.String()
+}
+
+func factText(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "not configured"
+	}
+	return s
+}
+
+func factID(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "server default"
+	}
+	return s
+}
+
+func factLocality(remote bool) string {
+	if remote {
+		return "remote"
+	}
+	return "local"
 }
 
 func LocationLine(cwd, root string) string {
@@ -87,6 +152,10 @@ func (s Snapshot) String() string {
 		if s.Truncated {
 			b.WriteString(" ...")
 		}
+	}
+	if facts := s.Model.String(); facts != "" {
+		b.WriteString("\n\n")
+		b.WriteString(facts)
 	}
 	return b.String()
 }
