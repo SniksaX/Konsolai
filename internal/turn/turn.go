@@ -126,6 +126,16 @@ func (r *Runner) errw() io.Writer {
 	return os.Stderr
 }
 
+// setRateLimitNotice prints the single 429 wait line on the turn's stderr.
+func (r *Runner) setRateLimitNotice(c *llm.Client) {
+	if c == nil {
+		return
+	}
+	c.SetRateLimitHandlers(nil, func(n int) {
+		fmt.Fprintf(r.errw(), "rate limited, retrying in %ds\n", n)
+	})
+}
+
 func (r *Runner) client() *llm.Client {
 	if r.Client == nil {
 		c := llm.New(r.Profile.MainEndpoint(), r.Profile.MainModelID())
@@ -136,6 +146,7 @@ func (r *Runner) client() *llm.Client {
 			c.PinContext(n)
 		}
 		c.SetRetry(r.Profile.LLM.Retries, time.Duration(r.Profile.LLM.RetryWaitMS)*time.Millisecond)
+		r.setRateLimitNotice(c)
 		r.Client = c
 	}
 	applyRemotePolicy(r.Client, r.Profile, "main", r.Profile.Roles.Main, r.remoteYes)
@@ -163,6 +174,7 @@ func (r *Runner) fastClient() *llm.Client {
 		c.PinContext(fm.Context)
 	}
 	c.SetRetry(r.Profile.LLM.Retries, time.Duration(r.Profile.LLM.RetryWaitMS)*time.Millisecond)
+	r.setRateLimitNotice(c)
 	r.FastClient = c
 	applyRemotePolicy(c, r.Profile, "fast", r.Profile.Roles.Fast, r.remoteYes)
 	r.attachStats(c)
