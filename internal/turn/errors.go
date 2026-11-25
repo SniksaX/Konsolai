@@ -2,6 +2,7 @@ package turn
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"net/url"
 	"strings"
@@ -17,6 +18,9 @@ func ModelErrorLine(endpoint string, err error, trace bool) string {
 		return "konsolai: " + err.Error()
 	}
 	host := EndpointHost(endpoint)
+	if probe, ok := llm.AsProbe(err); ok {
+		return probeErrorLine(host, probe)
+	}
 	if errors.Is(err, llm.ErrIdleTimeout) {
 		return "konsolai: the model server stopped responding (" + host + "). Try again, or check the server."
 	}
@@ -43,6 +47,29 @@ func ModelErrorLine(endpoint string, err error, trace bool) string {
 		return "konsolai: the model server returned an error (" + host + "). Try again."
 	}
 	return "konsolai: " + s
+}
+
+// probeErrorLine reports a failed model-list probe. A probe only says what the
+// endpoint answered: an HTTP status or a timeout never proves the host is down,
+// and a probe failure means the turn made no chat call. Only a failed chat call
+// may use the cannot-reach wording.
+func probeErrorLine(host string, probe *llm.ProbeError) string {
+	switch probe.Kind {
+	case llm.ProbeAuthFailed:
+		if probe.Status > 0 {
+			return fmt.Sprintf("konsolai: the model endpoint at %s answered HTTP %d; the host is reachable, so check the API key with /set key.", host, probe.Status)
+		}
+		return "konsolai: the model key for " + host + " could not be sent; check it with /set key."
+	case llm.ProbeHTTPError:
+		if probe.Status > 0 {
+			return fmt.Sprintf("konsolai: the model endpoint at %s answered HTTP %d; the host is reachable, but it did not list its models. Run /doctor.", host, probe.Status)
+		}
+		return "konsolai: the model endpoint at " + host + " did not list its models. Run /doctor."
+	case llm.ProbeSlow:
+		return "konsolai: the model endpoint at " + host + " did not answer a model probe in time; this turn made no chat call. Try again, or run /doctor."
+	default:
+		return "konsolai: a model probe could not reach " + host + "; this turn made no chat call. Run /doctor to check the endpoint."
+	}
 }
 
 func friendlyErrBody(s string) string {
