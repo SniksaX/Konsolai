@@ -45,12 +45,12 @@ func TestSetModelAddEachProviderPreset(t *testing.T) {
 					t.Fatalf("output %q is missing %q", text, want)
 				}
 			}
-			if provider == "anthropic" {
-				if p.Note == "" || !strings.Contains(text, "experimental: "+p.Note) {
-					t.Fatalf("the anthropic note is missing from %q", text)
+			if p.Note != "" {
+				if !strings.Contains(text, "experimental: "+p.Note) {
+					t.Fatalf("the %s note is missing from %q", provider, text)
 				}
 			} else if strings.Contains(text, "experimental") {
-				t.Fatalf("provider %q printed an experimental note: %q", provider, text)
+				t.Fatalf("provider %q printed a note without one: %q", provider, text)
 			}
 		})
 	}
