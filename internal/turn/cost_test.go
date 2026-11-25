@@ -52,9 +52,9 @@ func TestRunTurnPrintsTheRemoteCost(t *testing.T) {
 		want    string
 		unwants string
 	}{
-		{"remote priced", config.Model{Endpoint: "http://203.0.113.9/v1", PriceIn: 2.5, PriceOut: 10}, "$0.015", ""},
+		{"remote priced", config.Model{Endpoint: "http://203.0.113.9/v1", Model: "m", PriceIn: 2.5, PriceOut: 10}, "$0.015", ""},
 		{"local priced", config.Model{Endpoint: "http://127.0.0.1:9/v1", PriceIn: 2.5, PriceOut: 10}, "", "$"},
-		{"remote unpriced", config.Model{Endpoint: "http://203.0.113.9/v1"}, "", "$"},
+		{"remote unpriced", config.Model{Endpoint: "http://203.0.113.9/v1", Model: "m"}, "", "$"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
