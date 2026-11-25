@@ -615,8 +615,14 @@ func setModel(ctx context.Context, env *Env, args []string, session bool) int {
 			return 2
 		}
 		return setModelEndpoint(env, args[1], args[2], session)
+	case "id":
+		if len(args) != 3 {
+			fmt.Fprintln(env.errw(), "usage: /set model id <name> <model-id>")
+			return 2
+		}
+		return setModelID(env, args[1], args[2], session)
 	default:
-		fmt.Fprintln(env.errw(), "usage: /set model [main|fast|add|remove|endpoint|discover]")
+		fmt.Fprintln(env.errw(), "usage: /set model [main|fast|add|remove|endpoint|id|discover]")
 		return 2
 	}
 }
@@ -713,6 +719,41 @@ func setModelEndpoint(env *Env, name, endpoint string, session bool) int {
 		return 2
 	}
 	m.Endpoint = endpoint
+	c.Models[name] = m
+	if err := config.Validate(c); err != nil {
+		fmt.Fprintln(env.errw(), err)
+		return 2
+	}
+	env.Profile = c
+	if env.Runner != nil {
+		env.Runner.Profile = c
+		env.Runner.RebindNext = true
+	}
+	if !session {
+		if err := config.UpsertModel(configPath(env), name, m, false); err != nil {
+			fmt.Fprintln(env.errw(), err)
+			return 1
+		}
+	}
+	fmt.Fprintln(env.out(), "from the next turn")
+	return 0
+}
+
+// setModelID changes one model's server id, writing through the YAML node
+// writer so comments in the file survive.
+func setModelID(env *Env, name, id string, session bool) int {
+	c := env.Profile
+	m, ok := c.Models[name]
+	if !ok {
+		fmt.Fprintf(env.errw(), "no model %q; add it with /set model add %s <url>\n", name, name)
+		return 2
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		fmt.Fprintln(env.errw(), "the model id is empty")
+		return 2
+	}
+	m.Model = id
 	c.Models[name] = m
 	if err := config.Validate(c); err != nil {
 		fmt.Fprintln(env.errw(), err)
