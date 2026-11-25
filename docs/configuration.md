@@ -102,7 +102,7 @@ The `name` column is accepted by `/set` in place of a full key path. The `values
 
 Named models live under `models`. `roles.main` selects the chat model. `roles.fast` is a name or empty. An empty fast role uses the main model and says nothing. `roles.embed` and `roles.rerank` are URLs or empty. `chat_template_kwargs.enable_thinking` is sent only when that model's `thinking_kwargs` is true. A role change applies on the next turn.
 
-The built-in model is `default` at `http://localhost:8000/v1`, with an empty id and thinking off. Leave the id empty to use the first model from `<endpoint>/models`. When the fast role is set and reachable, the router uses it. An answer at effort `none` uses it too, unless the prompt is past `fast.context_guard_ratio` of that model's window. If that stream fails, the turn retries on main.
+The built-in model is `default` at `http://localhost:8000/v1`, with an empty id and thinking off. Leave the id empty only when the endpoint serves exactly one model; otherwise set the id, or Konsolai stops with the served list. When the fast role is set and reachable, the router uses it. A greeting, or an answer at effort `none` whose full prompt is under `router.answer_main_above_tokens` (default `200`), streams on fast unless the prompt is past `fast.context_guard_ratio` of that model's window. Every other answer streams on main, and if the fast stream fails the turn retries on main.
 
 ```sh
 konsolai /set model
