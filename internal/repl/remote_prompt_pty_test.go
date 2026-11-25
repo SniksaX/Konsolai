@@ -24,6 +24,17 @@ import (
 // The router reply is the assistant content, so its JSON is quoted once.
 const remoteRouterReply = `{"choices":[{"message":{"role":"assistant","content":"{\"intent\":\"answer\",\"language\":\"en\",\"reason\":\"test\",\"reasoning\":false,\"effort\":\"low\",\"task\":\"other\",\"continues_session\":0,\"needs_memory\":false}"}}],"usage":{"prompt_tokens":3,"completion_tokens":2}}`
 
+// remoteRouterReplyFor is the fake router decision for one intent; the PTY
+// per-intent tests set KONSOLAI_REMOTE_INTENT.
+func remoteRouterReplyFor(intent string) string {
+	content := `{"intent":"` + intent + `","language":"en","reason":"test","reasoning":false,"effort":"low","task":"other","continues_session":0,"needs_memory":false}`
+	quoted, _ := json.Marshal(content)
+	return `{"choices":[{"message":{"role":"assistant","content":` + string(quoted) + `}}],"usage":{"prompt_tokens":3,"completion_tokens":2}}`
+}
+
+// remoteFinishReply ends a lookup/act/build agent turn after the gate.
+const remoteFinishReply = `{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"1","type":"function","function":{"name":"finish","arguments":"{\"summary\":\"REMOTE_OK\"}"}}]}}],"usage":{"prompt_tokens":3,"completion_tokens":2}}`
+
 const remoteStreamReply = "data: {\"choices\":[{\"delta\":{\"content\":\"REMOTE_OK\"},\"index\":0}]}\n\n" +
 	"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n\n" +
 	"data: [DONE]\n\n"
@@ -62,9 +73,18 @@ func remoteConfirmChild() {
 			_, _ = io.WriteString(w, `{"data":[{"id":"fake-model","max_model_len":4096}]}`)
 			return
 		}
+		intent := os.Getenv("KONSOLAI_REMOTE_INTENT")
+		if intent == "" {
+			intent = "answer"
+		}
 		if strings.Contains(string(body), "Classify the user's request") {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, remoteRouterReply)
+			_, _ = io.WriteString(w, remoteRouterReplyFor(intent))
+			return
+		}
+		if intent != "answer" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, remoteFinishReply)
 			return
 		}
 		// The answer turn streams, so reply in SSE.
