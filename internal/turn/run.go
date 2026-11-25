@@ -36,6 +36,7 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 		}
 	}
 	r.escalated = false
+	r.remoteYes = req.Yes
 	// A remote model is gated before any request: policy, role list,
 	// confirmation and the session token cap all fail here.
 	for _, rm := range []struct{ role, name string }{
@@ -50,6 +51,8 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 			return Result{ExitCode: 1}
 		}
 	}
+	applyRemotePolicy(r.Client, r.Profile, "main", r.Profile.Roles.Main, req.Yes)
+	applyRemotePolicy(r.FastClient, r.Profile, "fast", r.Profile.Roles.Fast, req.Yes)
 	if r.RebindNext {
 		r.Client = nil
 		r.FastClient = nil
