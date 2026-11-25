@@ -75,17 +75,24 @@ func LoadCompacted(ctx context.Context, mem *memory.Guard, sessionID, profile, c
 					rest = append(rest, m)
 				}
 			}
-			return HistoryWithSummary(memory.ToLLM(rest), sess.CompactSummary, 0)
+			return repairHistory(HistoryWithSummary(memory.ToLLM(rest), sess.CompactSummary, 0))
 		}
-		return llmMsgs
+		return repairHistory(llmMsgs)
 	}
 	if sess, ok := memory.LoadLast(profile, cwd, 0); ok {
 		if sess.CompactSummary != "" && !hasSummaryNote(sess.Messages) {
-			return HistoryWithSummary(sess.Messages, sess.CompactSummary, sess.CompactedUpto)
+			return repairHistory(HistoryWithSummary(sess.Messages, sess.CompactSummary, sess.CompactedUpto))
 		}
-		return sess.Messages
+		return repairHistory(sess.Messages)
 	}
 	return nil
+}
+
+// repairHistory makes a history loaded from the store or the local last session
+// valid for a model request. An older interrupted run may have left an
+// assistant tool_calls message without all its replies.
+func repairHistory(msgs []llm.Message) []llm.Message {
+	return llm.RepairToolCalls(msgs)
 }
 
 func hasSummaryNote(msgs []llm.Message) bool {
@@ -118,7 +125,7 @@ func PersistCompact(ctx context.Context, mem *memory.Guard, sessionID, profile, 
 	if mem != nil && mem.Store() != nil && sessionID != "" {
 		uptoSeq := upto
 		if rows, err := mem.Store().LoadMessages(ctx, sessionID); err == nil && len(rows) > compactKeep {
-			uptoSeq = rows[len(rows)-compactKeep-1].Seq
+			uptoSeq = safeCompactSeq(rows, len(rows)-compactKeep-1)
 		}
 		if err := mem.Store().SetCompact(ctx, sessionID, uptoSeq, summary); err != nil {
 			mem.Fail(err)
@@ -140,4 +147,27 @@ func PrintCompacted(w io.Writer, n, beforeTok, afterTok, window int) {
 		ap = int(float64(afterTok) / float64(window) * 100)
 	}
 	fmt.Fprintln(w, ui.Current().Muted(fmt.Sprintf("compacted %d messages (ctx %d%% -> %d%%)", n, bp, ap)))
+}
+
+// safeCompactSeq moves a compact boundary back so the kept tail never starts
+// with tool replies whose assistant message would be summarized away. A tool
+// group is kept whole or dropped whole.
+func safeCompactSeq(rows []store.Message, cut int) int {
+	if len(rows) == 0 {
+		return 0
+	}
+	if cut < 0 {
+		cut = 0
+	}
+	if cut >= len(rows) {
+		return rows[len(rows)-1].Seq
+	}
+	for cut > 0 && rows[cut+1].Role == "tool" {
+		cut--
+	}
+	if cut == 0 && len(rows) > 1 && rows[1].Role == "tool" {
+		// The whole tail would be orphan tool replies: keep everything.
+		return 0
+	}
+	return rows[cut].Seq
 }
