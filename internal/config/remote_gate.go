@@ -16,6 +16,8 @@ var (
 	remoteAgreed bool
 	remoteTokens int
 	remotePrompt = askRemote
+	// remoteInteractive is the terminal check; tests and embedders override it.
+	remoteInteractive = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 )
 
 // ResetRemoteState forgets the process-wide remote decision and token total.
@@ -34,6 +36,17 @@ func SetRemotePrompt(fn func(host string) (bool, error)) {
 		remotePrompt = askRemote
 	} else {
 		remotePrompt = fn
+	}
+	remoteGate.Unlock()
+}
+
+// SetRemoteInteractive overrides the terminal check used by the confirmation.
+func SetRemoteInteractive(fn func() bool) {
+	remoteGate.Lock()
+	if fn == nil {
+		remoteInteractive = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+	} else {
+		remoteInteractive = fn
 	}
 	remoteGate.Unlock()
 }
@@ -91,7 +104,7 @@ func (c Config) remoteCallError(role, model string, assumeYes bool) error {
 	}
 	if remoteAsked {
 		remoteGate.Unlock()
-		return fmt.Errorf("config: remote use was declined for this process; model %q (%s) is refused", model, host)
+		return fmt.Errorf("config: remote use declined for this process; model %q (%s) is refused", model, host)
 	}
 	remoteGate.Unlock()
 
@@ -101,7 +114,10 @@ func (c Config) remoteCallError(role, model string, assumeYes bool) error {
 		remoteGate.Unlock()
 		return nil
 	}
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	remoteGate.Lock()
+	interactive := remoteInteractive
+	remoteGate.Unlock()
+	if !interactive() {
 		return fmt.Errorf("config: model %q is remote (%s); a non-interactive run refuses it without --yes", model, host)
 	}
 
