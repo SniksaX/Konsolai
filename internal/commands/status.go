@@ -24,7 +24,7 @@ func runStatus(ctx context.Context, env *Env, _ []string) int {
 	fmt.Fprintf(env.out(), "profile        %s\n", env.Profile.Name)
 	ep := env.Profile.MainEndpoint()
 	reach, probeModel := modelsProbe(ctx, ep)
-	fmt.Fprintf(env.out(), "endpoint       %s  %s\n", turn.EndpointHost(ep), reach)
+	fmt.Fprintf(env.out(), "endpoint       %s  %s\n", endpointHost(ep, env.Profile.ModelRemote(env.Profile.Roles.Main)), reach)
 	model := env.Profile.MainModelID()
 	win := 0
 	if env.Runner != nil && env.Runner.Client != nil {
@@ -66,7 +66,7 @@ func runStatus(ctx context.Context, env *Env, _ []string) int {
 		if fastModel == "" {
 			fastModel = "-"
 		}
-		fmt.Fprintf(env.out(), "fast_endpoint  %s  %s\n", turn.EndpointHost(fastEp), fastReach)
+		fmt.Fprintf(env.out(), "fast_endpoint  %s  %s\n", endpointHost(fastEp, env.Profile.ModelRemote(env.Profile.Roles.Fast)), fastReach)
 		fmt.Fprintf(env.out(), "fast_model     %s\n", fastModel)
 	}
 	routing := "main"
@@ -118,6 +118,16 @@ func runStatus(ctx context.Context, env *Env, _ []string) int {
 		fmt.Fprintln(env.out(), "rag            unavailable")
 	}
 	return 0
+}
+
+// endpointHost is the endpoint host plus the remote marker /set model appends
+// to a remote model's host.
+func endpointHost(endpoint string, remote bool) string {
+	host := turn.EndpointHost(endpoint)
+	if remote {
+		host += "  remote"
+	}
+	return host
 }
 
 func httpReach(ctx context.Context, endpoint string) string {
