@@ -32,7 +32,7 @@ func TestModelFactsHoldTheRealModels(t *testing.T) {
 func TestModelFactsNameTheServerDefaultID(t *testing.T) {
 	facts := ModelFacts{MainName: "home", MainHost: "127.0.0.1:8000", Role: "main"}
 	got := facts.String()
-	if !strings.Contains(got, "id server default") {
+	if !strings.Contains(got, "id not set") {
 		t.Fatalf("empty id is not named: %q", got)
 	}
 	if !strings.Contains(got, "fast role: not configured") {
