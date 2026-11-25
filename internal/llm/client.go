@@ -109,6 +109,7 @@ type Client struct {
 	onUsage            func(Usage)
 	probeTimeout       time.Duration
 	remoteProbeTimeout time.Duration
+	thinkingMode       string
 }
 
 func New(baseURL, model string) *Client {
@@ -163,6 +164,20 @@ func (c *Client) SetModelName(name string) {
 		return
 	}
 	c.modelName = strings.TrimSpace(name)
+}
+
+// SetThinkingMode sets DeepSeek's per-request thinking toggle: "enabled" or
+// "disabled". An empty value sends no toggle.
+func (c *Client) SetThinkingMode(mode string) {
+	if c == nil {
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "enabled", "disabled":
+		c.thinkingMode = strings.ToLower(strings.TrimSpace(mode))
+	default:
+		c.thinkingMode = ""
+	}
 }
 
 // SetAPIKey installs a call-time bearer-key resolver. It is read before each
@@ -660,6 +675,7 @@ type chatRequest struct {
 	TopP               float64             `json:"top_p,omitempty"`
 	MaxTokens          int                 `json:"max_tokens,omitempty"`
 	ChatTemplateKwargs *chatTemplateKwargs `json:"chat_template_kwargs,omitempty"`
+	Thinking           *thinkingToggle     `json:"thinking,omitempty"`
 	Tools              []ToolSpec          `json:"tools,omitempty"`
 	ToolChoice         json.RawMessage     `json:"tool_choice,omitempty"`
 	ResponseFormat     *responseFormat     `json:"response_format,omitempty"`
@@ -674,6 +690,10 @@ type completeResponse struct {
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
+}
+
+type thinkingToggle struct {
+	Type string `json:"type"`
 }
 
 type chatTemplateKwargs struct {
@@ -800,6 +820,9 @@ func (c *Client) chatPayload(r chatRequest) map[string]any {
 	if r.ChatTemplateKwargs != nil {
 		m["chat_template_kwargs"] = r.ChatTemplateKwargs
 	}
+	if r.Thinking != nil {
+		m["thinking"] = r.Thinking
+	}
 	if len(r.Tools) > 0 {
 		m["tools"] = r.Tools
 	}
@@ -824,6 +847,11 @@ func (c *Client) complete(ctx context.Context, msgs []Message, tools []ToolSpec,
 			extra = 0
 		}
 	}
+	// A forced tool_choice always keeps one slot for the single auto retry:
+	// providers that reject tool_choice in thinking mode cost a 400 first.
+	if strings.TrimSpace(opts.ToolChoice) != "" && strings.ToLower(opts.ToolChoice) != "auto" {
+		extra++
+	}
 	var msg Message
 	var usage Usage
 	var err error
@@ -846,6 +874,12 @@ func (c *Client) complete(ctx context.Context, msgs []Message, tools []ToolSpec,
 		t0 := time.Now()
 		msg, usage, err, gotBytes = c.completeAttempt(ctx, msgs, tools, opts, onDelta)
 		c.observeCall(usage, time.Since(t0))
+		if err != nil && isToolChoiceRejection(err) && strings.TrimSpace(opts.ToolChoice) != "" && strings.ToLower(opts.ToolChoice) != "auto" && attempt == 0 {
+			// The provider rejects any tool_choice in thinking mode. Switch this
+			// model to auto for the rest of the process and retry once.
+			forcedToolChoiceOff.Store(toolChoiceKey(c.baseURL, c.ModelID()), struct{}{})
+			continue
+		}
 		if c.onUsage != nil && (usage.PromptTokens > 0 || usage.CompletionTokens > 0) {
 			c.onUsage(usage)
 		}
@@ -856,6 +890,63 @@ func (c *Client) complete(ctx context.Context, msgs []Message, tools []ToolSpec,
 	}
 	c.observePrompt(msgs, usage)
 	return msg, usage, err
+}
+
+// forcedToolChoiceOff is process-wide: once a model rejects a forced
+// tool_choice, that endpoint/model never sends one again in this process.
+var forcedToolChoiceOff sync.Map
+
+func toolChoiceKey(baseURL, model string) string {
+	return strings.TrimRight(baseURL, "/") + "\x00" + model
+}
+
+// toolChoicePayload encodes the tool_choice field. "auto" (and a downgraded
+// model) request nothing, so a provider that rejects tool_choice is not hit
+// again. Empty keeps the historical "auto" field.
+func toolChoicePayload(choice string, downgraded bool) json.RawMessage {
+	switch strings.ToLower(strings.TrimSpace(choice)) {
+	case "auto", "none":
+		return nil
+	case "required":
+		if downgraded {
+			return nil
+		}
+		return json.RawMessage(`"required"`)
+	case "":
+		return encodeToolChoice("")
+	default:
+		if downgraded {
+			return nil
+		}
+		return encodeToolChoice(choice)
+	}
+}
+
+// forcedToolChoiceOff reports whether this endpoint/model rejected a forced
+// tool_choice earlier in the process.
+func (c *Client) forcedToolChoiceOff(model string) bool {
+	if c == nil || c.baseURL == "" {
+		return false
+	}
+	_, off := forcedToolChoiceOff.Load(toolChoiceKey(c.baseURL, model))
+	return off
+}
+
+// ForcedToolChoiceDisabled reports whether this endpoint/model rejected a
+// forced tool_choice earlier in the process and is now on auto.
+func (c *Client) ForcedToolChoiceDisabled() bool {
+	return c != nil && c.forcedToolChoiceOff(c.ModelID())
+}
+
+// isToolChoiceRejection reports the provider 400 about a named or required
+// tool_choice, which thinking-mode providers reject.
+func isToolChoiceRejection(err error) bool {
+	var he *HTTPError
+	if !errors.As(err, &he) || he.Status != http.StatusBadRequest {
+		return false
+	}
+	body := strings.ToLower(he.Body)
+	return strings.Contains(body, "tool_choice") || strings.Contains(body, "tool choice")
 }
 
 func encodeToolChoice(s string) json.RawMessage {
@@ -899,6 +990,13 @@ func (c *Client) completeAttempt(ctx context.Context, msgs []Message, tools []To
 		MaxTokens:     maxTok,
 		StreamOptions: &streamOptions{IncludeUsage: true},
 	}
+	if c.thinkingMode != "" {
+		reqBody.Thinking = &thinkingToggle{Type: c.thinkingMode}
+	}
+	choice := toolChoicePayload(opts.ToolChoice, c.forcedToolChoiceOff(c.ModelID()))
+	if len(tools) > 0 && choice != nil {
+		reqBody.ToolChoice = choice
+	}
 	if c.sendThinkKwargs {
 		kw := &chatTemplateKwargs{EnableThinking: opts.Thinking}
 		if opts.Thinking && opts.ThinkingBudget > 0 {
@@ -908,7 +1006,6 @@ func (c *Client) completeAttempt(ctx context.Context, msgs []Message, tools []To
 	}
 	if len(tools) > 0 {
 		reqBody.Tools = tools
-		reqBody.ToolChoice = encodeToolChoice(opts.ToolChoice)
 	}
 	if len(opts.ResponseSchema) > 0 {
 		reqBody.ResponseFormat = &responseFormat{
