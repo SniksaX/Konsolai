@@ -44,11 +44,52 @@ type welcomeSnap struct {
 
 type welcomeState struct {
 	mu            sync.Mutex
+	paintMu       sync.Mutex
 	snap          welcomeSnap
 	onPlaceholder func(string)
 	gatherLimit   time.Duration
 	freshFor      time.Duration
 	rows          int
+	w             io.Writer
+	frozen        bool
+}
+
+// freeze stops live probe updates from repainting over the session.
+func (s *welcomeState) freeze() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.frozen = true
+	s.mu.Unlock()
+}
+
+// update repaints the welcome with the latest probe snapshot when the layout
+// allows it: a TTY that still shows the welcome and has not taken input yet.
+func (s *welcomeState) update(d welcome.Data) {
+	if s == nil {
+		return
+	}
+	s.paintMu.Lock()
+	defer s.paintMu.Unlock()
+	s.mu.Lock()
+	if s.frozen || s.w == nil {
+		s.mu.Unlock()
+		return
+	}
+	rows := s.rows
+	s.snap.data = d
+	s.snap.at = time.Now()
+	w := s.w
+	s.mu.Unlock()
+	if rows > 0 {
+		fmt.Fprint(w, theme.CursorUp(rows))
+	}
+	fmt.Fprint(w, theme.ClearBelow)
+	n := writeWelcome(w, s.snapshot())
+	s.mu.Lock()
+	s.rows = n
+	s.mu.Unlock()
 }
 
 func (s *welcomeState) retarget(cwd, dir, branch string, projectID *int64) {
@@ -211,6 +252,7 @@ func welcomeInput(env *commands.Env, info banner.Info) welcome.Input {
 	in.Store = storeOf(env.Mem)
 	in.ProbeBudget = env.Profile.ProbeDeadline()
 	in.ProbeTimeout = env.Profile.ProbeTimeout()
+	in.RemoteProbeTimeout = env.Profile.RemoteProbeTimeout()
 	in.GitTimeout = env.Profile.GitQueryTimeout()
 	in.MemoryTimeout = env.Profile.MemoryQueryTimeout()
 	in.RateWindow = env.Profile.ModelRateWindow()
@@ -351,7 +393,19 @@ func openWelcome(ctx context.Context, w io.Writer, env *commands.Env, info banne
 		return st, nil
 	}
 
-	gctx, cancel := context.WithTimeout(ctx, st.gatherFor())
+	st.mu.Lock()
+	st.w = w
+	st.mu.Unlock()
+	// Probes may outlive the first paint; they report through OnUpdate so the
+	// rows repaint when they finish.
+	liveLimit := st.gatherFor()
+	if extra := in.RemoteProbeTimeout + in.ProbeTimeout + time.Second; extra > liveLimit {
+		liveLimit = extra
+	}
+	gctx, cancel := context.WithTimeout(ctx, liveLimit)
+	in.OnUpdate = func(d welcome.Data) {
+		st.update(mergeWelcome(d, info))
+	}
 	dataCh := make(chan welcome.Data, 1)
 	go func() {
 		defer cancel()
