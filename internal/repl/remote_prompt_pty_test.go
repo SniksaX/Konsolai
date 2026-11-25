@@ -77,7 +77,7 @@ func remoteConfirmChild() {
 	// remote endpoint. The REPL profile stays local (and silent) so the
 	// welcome probes never touch the fake server.
 	remote := config.Builtin()
-	remote.Models["vendor"] = config.Model{Endpoint: "http://203.0.113.9/v1"}
+	remote.Models["vendor"] = config.Model{Endpoint: "http://203.0.113.9/v1", Model: "fake-model"}
 	remote.Roles.Main = "vendor"
 	remote.Roles.Fast = ""
 	remote.Roles.Embed = ""
