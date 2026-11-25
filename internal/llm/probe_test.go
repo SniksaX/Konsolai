@@ -374,3 +374,32 @@ func TestTopLevelReasoningTokensFallback(t *testing.T) {
 		t.Fatalf("think tokens %d", usage.ReasoningTokens)
 	}
 }
+
+func TestPropsProbeSendsKey(t *testing.T) {
+	var propsAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/models"):
+			_, _ = io.WriteString(w, `{"data":[{"id":"local-model"}]}`)
+		case strings.HasSuffix(r.URL.Path, "/props"):
+			propsAuth = r.Header.Get("Authorization")
+			_, _ = io.WriteString(w, `{"default_generation_settings":{"n_ctx":4096}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	key := probeKey()
+	c := New(srv.URL+"/v1", "")
+	c.SetAPIKey(func() (string, error) { return key, nil })
+	id, err := c.ResolveModel(context.Background())
+	if err != nil || id != "local-model" {
+		t.Fatalf("id %q err %v", id, err)
+	}
+	if c.ContextWindow() != 4096 {
+		t.Fatalf("window %d", c.ContextWindow())
+	}
+	if propsAuth != "Bearer "+key {
+		t.Fatalf("the props probe did not send the key: %q", propsAuth)
+	}
+}
