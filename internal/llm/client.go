@@ -550,6 +550,9 @@ func (c *Client) propsNCtx(ctx context.Context) int {
 		if err != nil {
 			continue
 		}
+		if _, err := c.authorize(req); err != nil {
+			continue
+		}
 		resp, err := c.http.Do(req)
 		if err != nil {
 			continue
