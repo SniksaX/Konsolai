@@ -21,8 +21,8 @@
 The release binary is the shortest path. Download it with the published SHA256SUMS, verify it, then install it on your PATH.
 
 ```sh
-curl -fsSLO https://github.com/SniksaX/Konsolai/releases/download/v0.3.0/konsolai-linux-amd64
-curl -fsSLO https://github.com/SniksaX/Konsolai/releases/download/v0.3.0/SHA256SUMS
+curl -fsSLO https://github.com/SniksaX/Konsolai/releases/download/v0.4.0/konsolai-linux-amd64
+curl -fsSLO https://github.com/SniksaX/Konsolai/releases/download/v0.4.0/SHA256SUMS
 sha256sum -c SHA256SUMS --ignore-missing
 install -m 0755 konsolai-linux-amd64 ~/.local/bin/konsolai
 export PATH="$HOME/.local/bin:$PATH"
@@ -32,8 +32,8 @@ Other install paths:
 
 | Path | Command | Notes |
 | --- | --- | --- |
-| Docker image | `docker run --rm -it --user "$(id -u):$(id -g)" -v "$PWD":/work -v "$PWD/config.yaml":/config/config.yaml ghcr.io/sniksax/konsolai:v0.3.0` | Mount a config file before the first run. The `-full` tag adds Chromium for PDF export. |
-| Go install | `go install github.com/SniksaX/Konsolai/cmd/konsolai@v0.3.0` | Installs into `$(go env GOPATH)/bin`. |
+| Docker image | `docker run --rm -it --user "$(id -u):$(id -g)" -v "$PWD":/work -v "$PWD/config.yaml":/config/config.yaml ghcr.io/sniksax/konsolai:v0.4.0` | Mount a config file before the first run. The `-full` tag adds Chromium for PDF export. |
+| Go install | `go install github.com/SniksaX/Konsolai/cmd/konsolai@v0.4.0` | Installs into `$(go env GOPATH)/bin`. |
 | Source build | `git clone https://github.com/SniksaX/Konsolai.git && cd Konsolai && scripts/build.sh` | Needs the Go version in `go.mod`; writes `~/.local/bin/konsolai`. |
 
 ### 2. Point it at a model server
