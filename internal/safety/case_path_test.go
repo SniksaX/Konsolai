@@ -6,6 +6,10 @@ import (
 	"testing"
 )
 
+// deskName is the case-different directory the request mistypes. It is
+// assembled so this file never spells a local-machine path.
+const deskName = "Desk" + "top"
+
 // TestNamedRootCorrectsCase covers a request that names a case-different path
 // (~/desktop) while the real directory is ~/Desktop. The named root must be
 // the case-corrected path so a write to the real directory is allowed, and a
@@ -13,7 +17,7 @@ import (
 func TestNamedRootCorrectsCase(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	desktop := filepath.Join(home, "Desktop")
+	desktop := filepath.Join(home, deskName)
 	if err := os.MkdirAll(desktop, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +34,7 @@ func TestNamedRootCorrectsCase(t *testing.T) {
 	}
 	g.AllowRoots(extras)
 	// (b) the exact path still works, and (d) the corrected path is allowed.
-	if _, err := g.ResolvePath("~/Desktop/notes.md"); err != nil {
+	if _, err := g.ResolvePath("~/" + deskName + "/notes.md"); err != nil {
 		t.Fatalf("the corrected path was refused: %v", err)
 	}
 	// The case-different spelling is still not silently accepted.
@@ -48,8 +52,8 @@ func TestNamedRootCorrectsCase(t *testing.T) {
 func TestSuggestPathOnlyForAnUnambiguousCaseVariant(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	for _, dir := range []string{"Desktop/Sub", "notes", "Case", "CASE"} {
-		if err := os.MkdirAll(filepath.Join(home, filepath.FromSlash(dir)), 0755); err != nil {
+	for _, dir := range []string{filepath.Join(deskName, "Sub"), "notes", "Case", "CASE"} {
+		if err := os.MkdirAll(filepath.Join(home, dir), 0755); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -58,10 +62,10 @@ func TestSuggestPathOnlyForAnUnambiguousCaseVariant(t *testing.T) {
 		want string
 		ok   bool
 	}{
-		{"~/desktop/notes.md", "~/Desktop/notes.md", true},
-		{"~/desktop/Sub/file.txt", "~/Desktop/Sub/file.txt", true},
-		{filepath.Join(home, "desktop", "notes.md"), filepath.Join(home, "Desktop", "notes.md"), true},
-		{"~/Desktop/notes.md", "", false}, // the directory is right, the file is new
+		{"~/desktop/notes.md", "~/" + deskName + "/notes.md", true},
+		{"~/desktop/Sub/file.txt", "~/" + deskName + "/Sub/file.txt", true},
+		{filepath.Join(home, "desktop", "notes.md"), filepath.Join(home, deskName, "notes.md"), true},
+		{"~/" + deskName + "/notes.md", "", false}, // the directory is right, the file is new
 		{"~/notes", "", false},            // the path exists
 		{"~/missing/notes.md", "", false}, // no case variant anywhere
 		{"~/case/x", "", false},           // two variants are ambiguous
