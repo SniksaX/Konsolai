@@ -117,8 +117,8 @@ func TestGatherProbesDeadlineAndOffline(t *testing.T) {
 	if !strings.HasSuffix(byRole["main"].Stat, "ms") && !strings.Contains(byRole["main"].Stat, "tokens/s") {
 		t.Fatalf("main stat %q", byRole["main"].Stat)
 	}
-	if byRole["fast"].Status != StatusTimeout || byRole["fast"].Stat != "timeout" {
-		t.Fatalf("fast %+v", byRole["fast"])
+	if byRole["fast"].Status != StatusSlow || byRole["fast"].Stat != "slow" {
+		t.Fatalf("a probe timeout must read as slow: %+v", byRole["fast"])
 	}
 	if byRole["embed"].Status != StatusDown || !strings.Contains(byRole["embed"].Stat, "unreachable") {
 		t.Fatalf("embed %+v", byRole["embed"])
@@ -126,7 +126,8 @@ func TestGatherProbesDeadlineAndOffline(t *testing.T) {
 	if byRole["rerank"].Status != StatusUp || !strings.HasSuffix(byRole["rerank"].Stat, "ms") {
 		t.Fatalf("rerank %+v", byRole["rerank"])
 	}
-	if data.Up != 2 {
+	// main and rerank answer, and the slow fast probe counts as up.
+	if data.Up != 3 {
 		t.Fatalf("up %d", data.Up)
 	}
 	if data.Session.Memory != "memory offline" {
