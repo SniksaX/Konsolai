@@ -425,7 +425,8 @@ func aggressiveTrim(msgs []llm.Message, userIdx int) []llm.Message {
 }
 
 func (cfg Config) prepCall(msgs []llm.Message, tools []llm.ToolSpec, spans *[]readSpan, seen map[string]struct{}) (estimate, maxTokens int, elide ElideStats, err error) {
-	return prepareCall(cfg.Client, msgs, tools, cfg.Intent, spans, seen, cfg.tokenCap(), cfg.elideTrigger(), cfg.elideTarget())
+	est, maxTokens, elide, err := prepareCall(cfg.Client, msgs, tools, cfg.Intent, spans, seen, cfg.tokenCap(), cfg.elideTrigger(), cfg.elideTarget())
+	return est, maxTokens + cfg.ReasoningHeadroom, elide, err
 }
 
 func PrepareCall(client *llm.Client, msgs []llm.Message, tools []llm.ToolSpec, intent string) (estimate, maxTokens int, elide ElideStats, err error) {
