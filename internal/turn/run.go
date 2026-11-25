@@ -421,6 +421,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			HideStats:         !r.Profile.ShowStatsLine(),
 			Task:              string(dec.Task),
 			Stats:             &agent.Stats{},
+			Pricing:           r.turnPricing(true),
 			OnShell:           r.RememberShell,
 			Guard:             sg,
 			NamedRoots:        extras,
@@ -635,6 +636,7 @@ func (r *Runner) runAnswer(ctx context.Context, main, client *llm.Client, snap s
 		CompletionTokens: usage.CompletionTokens,
 		ReasoningTokens:  usage.ReasoningTokens,
 		RouterTime:       routerTime,
+		Pricing:          r.turnPricing(usedMain),
 	}
 	if req.Trace {
 		agent.PrintTrace(r.errw(), 1, think, modelTime, usage.PromptTokens, usage.CompletionTokens, usage.ReasoningTokens, main.ContextWindow(), nil)
