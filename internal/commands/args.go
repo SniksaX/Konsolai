@@ -98,6 +98,7 @@ var friendlyPaths = map[string]string{
 	"think":         "agent.think_mode",
 	"temperature":   "llm.temperature.answer",
 	"top_p":         "llm.top_p",
+	"tool_choice":   "llm.tool_choice_mode",
 	"approve":       "agent.approve",
 	"plan":          "agent.plan.act_low",
 	"trace":         "ui.trace",
