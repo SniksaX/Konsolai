@@ -115,6 +115,16 @@ func paintModelRow(pal ui.Palette, inner int, m Model, nameW, roleW int) string 
 		b.WriteString("  ")
 		b.WriteString(paintMetaErr(pal, stat))
 	}
+	if m.Remote {
+		marker := pal.Warn("remote")
+		// The marker goes after the stat and only when it fits with a space to
+		// spare. Every other column keeps its width, so a remote row never
+		// reflows the box.
+		if theme.DisplayWidth(b.String())+2+theme.DisplayWidth(marker) < inner {
+			b.WriteString("  ")
+			b.WriteString(marker)
+		}
+	}
 	return clip(b.String(), inner)
 }
 
