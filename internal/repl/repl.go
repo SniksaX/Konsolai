@@ -328,6 +328,8 @@ func Run(ctx context.Context, cfg Config) int {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
+		// The welcome is done: probe updates must not repaint over the session.
+		st.welcome.freeze()
 		line = st.pastes.Expand(line)
 		if fe, ok := rd.(interface{ EraseFrame(io.Writer, string) }); ok && tty {
 			fe.EraseFrame(origOut, line)
