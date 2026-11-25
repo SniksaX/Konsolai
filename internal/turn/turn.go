@@ -184,6 +184,7 @@ func applyModelOptions(c *llm.Client, prof config.Profile, name string) {
 	c.SetSendTemperature(m.SendsTemperature())
 	c.SetRemoteProbeTimeout(prof.RemoteProbeTimeout())
 	c.SetThinkingMode(m.ChatThinking())
+	c.SetReasoningEffort(m.ChatReasoningEffort())
 }
 
 func (r *Runner) routerClient(ctx context.Context) *llm.Client {
