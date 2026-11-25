@@ -371,3 +371,17 @@ func applyRemotePolicy(c *llm.Client, prof config.Profile, role, name string, ye
 	c.SetPolicy(prof.RemoteCallPolicy(role, name, yes))
 	c.SetUsageHook(func(u llm.Usage) { config.NoteRemoteUsage(u.PromptTokens + u.CompletionTokens) })
 }
+
+// turnPricing is the serving model's cost inputs. mainServed is false when a
+// fast answer carried the turn.
+func (r *Runner) turnPricing(mainServed bool) agent.Pricing {
+	name := strings.TrimSpace(r.Profile.Roles.Main)
+	if !mainServed {
+		name = strings.TrimSpace(r.Profile.Roles.Fast)
+	}
+	m, ok := r.Profile.Models[name]
+	if !ok || !m.Remote() {
+		return agent.Pricing{}
+	}
+	return agent.Pricing{Remote: true, PriceIn: m.PriceIn, PriceOut: m.PriceOut}
+}
