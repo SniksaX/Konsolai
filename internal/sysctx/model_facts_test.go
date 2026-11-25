@@ -12,14 +12,14 @@ func TestModelFactsHoldTheRealModels(t *testing.T) {
 			MainName: "deepseek-flash", MainID: "deepseek-chat",
 			MainHost: "api.deepseek.com", MainRemote: true,
 			FastName: "fast", FastID: "llama3.2:3b",
-			FastHost: "fatboy:11435", FastRemote: false, HasFast: true,
+			FastHost: "fastbox:8080", FastRemote: false, HasFast: true,
 			Role: "fast",
 		},
 	}
 	full := s.String()
 	for _, want := range []string{
 		"deepseek-flash", "deepseek-chat", "api.deepseek.com", "remote",
-		"fast", "llama3.2:3b", "fatboy:11435", "local",
+		"fast", "llama3.2:3b", "fastbox:8080", "local",
 		"answered by the fast role",
 		`say "I don't know"`,
 	} {
