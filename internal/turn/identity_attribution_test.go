@@ -406,3 +406,29 @@ func TestBuildContextCarriesTheModelFacts(t *testing.T) {
 		}
 	}
 }
+
+// TestIdentityAnswerNamesAnEmptyID: an unset model id reads as "id not set",
+// never as if the server default had been chosen.
+func TestIdentityAnswerNamesAnEmptyID(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	prof := config.Builtin()
+	prof.Models = map[string]config.Model{"home": {Endpoint: "http://127.0.0.1:9/v1"}}
+	prof.Roles.Main = "home"
+	var out, errb strings.Builder
+	r := &Runner{
+		Profile: prof, Mem: memory.NewGuard(nil, nil), Out: &out, Err: &errb,
+		OpenConfirm: func(bool) (agent.Confirmer, func(), error) {
+			return autoConfirm{}, func() {}, nil
+		},
+	}
+	res := r.RunTurn(context.Background(), Request{Text: "what model are you ?", Cwd: t.TempDir(), New: true})
+	if res.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", res.ExitCode, errb.String())
+	}
+	if !strings.Contains(res.Answer, "id not set") {
+		t.Fatalf("answer misses id not set:\n%s", res.Answer)
+	}
+	if strings.Contains(res.Answer, "server default") {
+		t.Fatalf("answer still claims a server default:\n%s", res.Answer)
+	}
+}
