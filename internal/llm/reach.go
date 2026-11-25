@@ -34,13 +34,14 @@ const (
 )
 
 // ProbeResult is one endpoint probe. Status is the HTTP status, zero when no
-// response arrived; IDs are the served model ids when the list was read.
+// response arrived; IDs and Body are the served model list when it was read.
 type ProbeResult struct {
 	Kind     ProbeKind
 	Status   int
 	Endpoint string
 	Latency  time.Duration
 	IDs      []string
+	Body     []byte
 	Err      error
 }
 
@@ -224,7 +225,9 @@ func (c *Client) Probe(ctx context.Context) ProbeResult {
 		res.Err = httpErrorKey(resp, key)
 	default:
 		res.Kind = ProbeOK
-		res.IDs = readModelIDs(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, probeBodyLimit))
+		res.Body = body
+		res.IDs = modelIDsFrom(body)
 	}
 	return res
 }
@@ -243,15 +246,15 @@ func probeTransportKind(ctx context.Context, err error) ProbeKind {
 	return ProbeUnreachable
 }
 
-// readModelIDs reads the served ids from a models payload and ignores a body
+// modelIDsFrom reads the served ids from a models payload and ignores a body
 // it cannot parse; the endpoint still answered.
-func readModelIDs(r io.Reader) []string {
+func modelIDsFrom(data []byte) []string {
 	var body struct {
 		Data []struct {
 			ID string `json:"id"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(io.LimitReader(r, probeBodyLimit)).Decode(&body); err != nil {
+	if err := json.Unmarshal(data, &body); err != nil {
 		return nil
 	}
 	out := make([]string, 0, len(body.Data))
