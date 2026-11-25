@@ -109,12 +109,13 @@ konsolai /set model
 konsolai /set model main default
 konsolai /set model fast off
 konsolai /set model add local http://localhost:8000/v1
+konsolai /set model id local deepseek-flash
 konsolai /set model discover
 konsolai /set embed off
 konsolai /set rerank off
 ```
 
-`/set model` prints name, roles, host, id, context, and status. The current main and fast rows are marked. `/set model discover` lists ids on each endpoint that are not configured yet, each with the `/set model add` line. Embed and rerank URLs are optional. The client appends `/embed` and `/rerank`. With `rag.enabled` false there is no ingestion, no recall tool, and no warning. `/status` prints `not configured` for a role that is off.
+`/set model id <name> <id>` changes one model's server id; like the endpoint command it writes through the YAML node writer, so comments survive. `/set model` prints name, roles, host, id, context, and status. The current main and fast rows are marked. `/set model discover` lists ids on each endpoint that are not configured yet, each with the `/set model add` line. Embed and rerank URLs are optional. The client appends `/embed` and `/rerank`. With `rag.enabled` false there is no ingestion, no recall tool, and no warning. `/status` prints `not configured` for a role that is off.
 
 ## Cloud models
 
