@@ -21,6 +21,9 @@ func HoldPrompt(on bool) {
 
 func promptOwned() bool { return promptHeld.Load() }
 
+// PromptOwned reports whether readline currently owns the terminal line.
+func PromptOwned() bool { return promptOwned() }
+
 // PauseLive clears a painted spinner line and blocks spinner paints while a
 // modal prompt owns the terminal.
 func PauseLive() {
