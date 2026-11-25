@@ -87,6 +87,9 @@ type Config struct {
 	IdenticalRejects  int
 	Pricing           Pricing
 	Serving           Model
+	// ToolChoiceMode is named, required or auto for a forced tool. Empty is
+	// named, the local-server default.
+	ToolChoiceMode string
 }
 
 // Pricing is the serving model's location and its prices per million tokens.
@@ -124,6 +127,7 @@ var (
 	ErrAborted         = errors.New("agent: aborted")
 	ErrMaxSteps        = errors.New("agent: max steps exceeded")
 	ErrNoAnswer        = errors.New("agent: no answer")
+	ErrNoPlan          = errors.New("agent: the model did not call propose_plan after the nudge")
 	ErrRejected        = errors.New("agent: the same rejected call was repeated")
 	ErrContextOverflow = errors.New("konsolai: the conversation no longer fits the model's context; start a new session with `new`.")
 )
@@ -162,6 +166,7 @@ type runState struct {
 	explore           int
 	noteSent          bool
 	forcePropose      bool
+	planNudged        bool
 	sawGateReject     bool
 	readonlyAfterNote int
 	sourceReads       int
@@ -183,6 +188,33 @@ type runState struct {
 	printedBlock      bool
 	consecFail        int
 	skipSummary       bool
+}
+
+// toolChoiceFor is the tool_choice value for a forced tool call. Auto mode
+// omits the field and relies on the prompt plus the plan nudge; required asks
+// for any tool; named asks for one function.
+func (cfg Config) toolChoiceFor(name string) string {
+	switch strings.ToLower(strings.TrimSpace(cfg.ToolChoiceMode)) {
+	case "auto":
+		return "auto"
+	case "required":
+		return "required"
+	}
+	if name == "" {
+		return "required"
+	}
+	return name
+}
+
+// planNudgeNeeded reports whether a forced plan has to be enforced by a
+// nudge: auto and required modes cannot name the tool, and a client that
+// rejected tool_choice has been downgraded to auto.
+func (cfg Config) planNudgeNeeded() bool {
+	switch strings.ToLower(strings.TrimSpace(cfg.ToolChoiceMode)) {
+	case "auto", "required":
+		return true
+	}
+	return cfg.Client != nil && cfg.Client.ForcedToolChoiceDisabled()
 }
 
 func Run(ctx context.Context, cfg Config, systemContext, task string) error {
@@ -276,19 +308,21 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			state.goneNoteAdded = true
 		}
 		stepSpecs := specs
+		planForced := false
 		if state.toolsGone {
 			if forcingPlan {
 				stepSpecs = planOnlySpecs(specs)
-				opts.ToolChoice = "propose_plan"
+				opts.ToolChoice = cfg.toolChoiceFor("propose_plan")
+				planForced = true
 			} else if !cfg.RequirePlan {
 				stepSpecs = nil
 			}
 		} else if state.forceExport && state.planApproved && !state.exportedDoc {
 			stepSpecs = exportOnlySpecs(specs)
-			opts.ToolChoice = "export_doc"
+			opts.ToolChoice = cfg.toolChoiceFor("export_doc")
 		} else if state.forceMutating && state.planApproved {
 			stepSpecs = mutatingSpecs(specs)
-			opts.ToolChoice = "required"
+			opts.ToolChoice = cfg.toolChoiceFor("")
 		}
 		if state.forcePropose && cfg.RequirePlan && !state.planApproved && !state.toolsGone {
 			state.forcePropose = false
@@ -296,7 +330,8 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			if len(stepSpecs) == 0 {
 				stepSpecs = specs
 			}
-			opts.ToolChoice = "propose_plan"
+			opts.ToolChoice = cfg.toolChoiceFor("propose_plan")
+			planForced = true
 			if cfg.ThinkingPolicy == ThinkPlanStep {
 				think = true
 				opts.Thinking = true
@@ -304,6 +339,16 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			}
 		} else if state.forcePropose {
 			state.forcePropose = false
+		}
+		if state.planNudged && cfg.RequirePlan && !state.planApproved {
+			// The nudge retry is still a forced plan step, so the same enforcement
+			// applies if the model ignores it again.
+			planForced = true
+			stepSpecs = planOnlySpecs(specs)
+			if len(stepSpecs) == 0 {
+				stepSpecs = specs
+			}
+			opts.ToolChoice = cfg.toolChoiceFor("propose_plan")
 		}
 		_, maxTok, elide, err := cfg.prepCall(msgs, stepSpecs, &state.readSpans, state.seenRead)
 		if err != nil {
@@ -348,6 +393,30 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		if err != nil {
 			return err
 		}
+		if planForced && cfg.planNudgeNeeded() && !hasProposePlan(msg) {
+			// A forced plan must actually arrive. Auto/required modes cannot use a
+			// named tool_choice, so ask once more and then fail clearly.
+			st.Steps++
+			st.noteModel(modelElapsed)
+			st.PromptTokens += usage.PromptTokens
+			st.CompletionTokens += usage.CompletionTokens
+			st.ReasoningTokens += usage.ReasoningTokens
+			msgs = append(msgs, msg)
+			_ = rec.Message(ctx, msg)
+			for _, call := range msg.ToolCalls {
+				tm := llm.Message{Role: llm.RoleTool, ToolCallID: call.ID, Content: "not executed: propose_plan must be called first"}
+				msgs = append(msgs, tm)
+				_ = rec.Message(ctx, tm)
+			}
+			if state.planNudged {
+				return ErrNoPlan
+			}
+			state.planNudged = true
+			nudge := llm.Message{Role: llm.RoleUser, Content: ForcedPlanNote}
+			msgs = append(msgs, nudge)
+			_ = rec.Message(ctx, nudge)
+			continue
+		}
 		if cfg.ThinkingPolicy == ThinkPlanStep && !think && !state.planApproved && hasProposePlan(msg) && (!proposePlanValid(cfg.Tools, msg) || planThinkAlways(cfg.PlanThink)) {
 			if cfg.Trace {
 				st.Steps++
@@ -372,7 +441,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			}
 			think = true
 			opts.Thinking = true
-			opts.ToolChoice = "propose_plan"
+			opts.ToolChoice = cfg.toolChoiceFor("propose_plan")
 			stepSpecs = planOnlySpecs(specs)
 			if len(stepSpecs) == 0 {
 				stepSpecs = specs
@@ -685,6 +754,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 						}
 						if kind == tools.Plan {
 							state.planApproved = true
+							state.planNudged = false
 							state.planRejected = false
 							state.planFiles = planFilesOf(action)
 							state.planCmds = planCmdsOf(action)
