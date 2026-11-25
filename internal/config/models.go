@@ -160,6 +160,16 @@ func applyModelFields(m *Model, n *yaml.Node, full string) error {
 				return fmt.Errorf("config: %s.notes must be a string (line %d)", full, vn.Line)
 			}
 			m.Notes = vn.Value
+		case "tool_choice_mode":
+			if vn.Kind != yaml.ScalarNode {
+				return fmt.Errorf("config: %s.tool_choice_mode must be a string (line %d)", full, vn.Line)
+			}
+			m.ToolChoiceMode = vn.Value
+		case "thinking_mode":
+			if vn.Kind != yaml.ScalarNode {
+				return fmt.Errorf("config: %s.thinking_mode must be a string (line %d)", full, vn.Line)
+			}
+			m.ThinkingMode = vn.Value
 		default:
 			return fmt.Errorf("unknown key %q at line %d", full+"."+kn.Value, kn.Line)
 		}
@@ -205,6 +215,16 @@ func validateModels(c Config) error {
 		return err
 	}
 	for name, m := range c.Models {
+		switch strings.ToLower(strings.TrimSpace(m.ToolChoiceMode)) {
+		case "", "named", "required", "auto":
+		default:
+			return fmt.Errorf("config: models.%s.tool_choice_mode must be named, required or auto, got %q", name, m.ToolChoiceMode)
+		}
+		switch strings.ToLower(strings.TrimSpace(m.ThinkingMode)) {
+		case "", "enabled", "disabled":
+		default:
+			return fmt.Errorf("config: models.%s.thinking_mode must be enabled or disabled, got %q", name, m.ThinkingMode)
+		}
 		switch m.TokensField() {
 		case "max_tokens", "max_completion_tokens":
 		default:
@@ -438,6 +458,8 @@ func writeModels(b *strings.Builder, c Config, indent int, mask bool) {
 		fmt.Fprintf(b, "%s    price_in: %s   # USD per million input tokens\n", pad, formatPrice(m.PriceIn))
 		fmt.Fprintf(b, "%s    price_out: %s   # USD per million output tokens\n", pad, formatPrice(m.PriceOut))
 		fmt.Fprintf(b, "%s    thinking_kwargs: %s   # send chat_template_kwargs.enable_thinking\n", pad, strconv.FormatBool(m.ThinkingKwargs))
+		fmt.Fprintf(b, "%s    tool_choice_mode: %s   # named, required or auto when a tool is forced\n", pad, yamlScalar(m.ToolChoiceMode))
+		fmt.Fprintf(b, "%s    thinking_mode: %s   # enabled or disabled (DeepSeek thinking toggle)\n", pad, yamlScalar(m.ThinkingMode))
 		fmt.Fprintf(b, "%s    context: %d   # 0 uses the server context window\n", pad, m.Context)
 		fmt.Fprintf(b, "%s    notes: %s   # optional note\n", pad, yamlScalar(m.Notes))
 	}
@@ -504,6 +526,8 @@ func writeModelDiff(b *strings.Builder, base, fileCfg, full Config) {
 		{"endpoint", func(m Model) string { return m.Endpoint }},
 		{"model", func(m Model) string { return m.Model }},
 		{"thinking_kwargs", func(m Model) string { return strconv.FormatBool(m.ThinkingKwargs) }},
+		{"tool_choice_mode", func(m Model) string { return m.ToolChoiceMode }},
+		{"thinking_mode", func(m Model) string { return m.ThinkingMode }},
 		{"context", func(m Model) string { return strconv.Itoa(m.Context) }},
 		{"notes", func(m Model) string { return m.Notes }},
 	}
