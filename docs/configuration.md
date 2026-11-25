@@ -118,9 +118,23 @@ konsolai /set rerank off
 
 ## Cloud models
 
-A model is remote when its endpoint host resolves outside loopback and the private address ranges. Remote models are supported: `/set model`, `/status` and the welcome models box mark a remote model, and the footer marks a remote main model; the privacy keys below gate it. `/doctor` prints one line per remote model with its host, whether a key is present (never the value), and a warning for plain HTTP.
+A model is remote when its endpoint host resolves outside loopback and the private address ranges. Remote models are supported: `/set model` and `/status` mark a remote endpoint, the welcome models box marks a remote row, and the footer marks the model that served the last call when that model is remote. `/doctor` prints one line per remote model with its host, whether a key is present (never the value), and a warning for plain HTTP. The privacy keys below gate all of it.
 
 The presets `openai`, `openrouter`, `groq`, `together`, `mistral`, `deepseek`, `gemini`, and `anthropic` fill the endpoint, context and request quirks for an API-key provider. They come from each provider's OpenAI-compatible documentation and were not exercised against live accounts here. The `anthropic` preset is experimental: its OpenAI-compatible endpoint accepts an auth header that has not been verified.
+
+### Probes
+
+Every model endpoint check sends the key the turn would send: the welcome, `/status`, `/doctor`, `/set model` and `/set model discover` all resolve `api_key_env` or the secrets file for their model, and a local model with no key sends no `Authorization` header. A probe reports only what the endpoint answered:
+
+| probe result | shown as |
+| --- | --- |
+| 2xx | `ok` with the latency; the welcome and `/set model` show `slow` past `ui.model_slow_ms` |
+| 401 or 403, or a key that could not be loaded | `auth failed` |
+| the probe deadline | `slow` |
+| any other non-2xx | `http N` |
+| a dial, DNS or refused connection | `unreachable` (`down` in `/set model`; the welcome shows the port as unreachable) |
+
+A failed probe never means the host is down: only a failed chat call can say the server cannot be reached, and a probe failure says the turn made no chat call. `llm.remote_probe_timeout_ms` (default `3000`) is the budget for one remote probe in `/status`, `/doctor`, the startup probe and the turn clients; local endpoints keep their short built-in budgets. The welcome probes a remote model with its short gather budget (`ui.probe_timeout_ms`, `ui.probe_deadline_ms`) instead, so a remote row can read `slow` on the welcome while `/status` reads `ok`.
 
 ### Privacy
 
@@ -148,12 +162,26 @@ A model entry can name the environment variable that holds its bearer key: `api_
 
 A model also accepts `max_tokens_field` (`max_tokens` or `max_completion_tokens`), `send_temperature` (default true; some providers reject the field), `context` (the window; `0` means the server reports it), and optional `price_in` / `price_out` in USD per million tokens.
 
+An empty model id resolves only when the endpoint advertises exactly one model. A configured id must appear in the served list. Otherwise Konsolai stops before the chat call with an error that lists the served ids, and `/status` shows `(server serves: ...)` or `(not served; server serves: ...)` instead of making up an id.
+
+The `deepseek` preset sends no temperature (`send_temperature` false) because the reasoner may reject it, and prints that note. DeepSeek's `reasoning_content` (or `reasoning`) is trace-only: it never enters the answer, and its length counts in the `think` tokens of the trace and stats lines when the server does not report `reasoning_tokens`.
+
 ```sh
 konsolai /set model add gpt --provider openai
 konsolai /set key gpt
 konsolai /set model main gpt
 ```
 
-With `price_in` or `price_out` set on a remote model, the end-of-turn stats line (`ui.stats`, on by default) ends with the turn cost, such as `$0.015`, and the `--trace` stats line adds `cost=$0.015 in=2.0k out=1.0k`. A local model, or a remote model with both prices at `0`, shows no cost.
+With `price_in` or `price_out` set on a remote model, the end-of-turn stats line (`ui.stats`, on by default) ends with the turn cost, such as `$0.015`, and the `--trace` stats line adds the model tag and `cost=$0.015 in=2.0k out=1.0k`. A local model, or a remote model with both prices at `0`, shows no cost.
+
+### Facts, identity and attribution
+
+Every system context carries the model facts: the configured main and fast model names, their ids, endpoint hosts, local or remote, and the role answering the call. A question that asks which model answers (`what model are you`, `which model is this`, `quel modèle es-tu`, `who are you`) is answered by Konsolai itself from those facts, without a model call, a probe or a remote confirmation; `--trace` prints `identity: answered from the configured model facts (no model call)`. Every other identity or setup question goes to the model, which is told to answer from the facts and to say "I don't know" when a fact is missing.
+
+The trace line, the end-of-turn stats line (`ui.stats`) and the footer name the model that served the call: the id the endpoint reports (or the configured name), the role `main` or `fast`, and `remote` for a remote endpoint, for example `model main-model (main) remote`. The footer shows that id on the left and the serving role on the right; after an answer built from the facts it says `facts` and `local`.
+
+### Fast answers
+
+The fast role answers only short greetings (such as `hi`, `hello`, `bonjour`, `merci`) and answer turns at effort `none` whose estimated full answer prompt is under `router.answer_main_above_tokens` (default `200`; `0` disables the token gate). The estimate counts the system context, the history and the question, not only the question, so a long history sends even a short question to main. Every other answer streams on main. The fast client is still the first router when it is reachable, and `fast.context_guard_ratio` still skips it when the answer prompt fills its window.
 
 Embedding endpoints must be loopback or private; a remote embed service is rejected, so RAG stays local.
