@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/turn"
 )
 
 // statusProbeKey assembles a secret-shaped literal at runtime.
@@ -157,5 +159,26 @@ func TestStatusResolvesOnlyOneServedModelWhenIDIsEmpty(t *testing.T) {
 	}
 	if strings.Contains(line, "server serves:") {
 		t.Fatalf("a single served model was reported ambiguous: %q", line)
+	}
+}
+
+func TestStatusNotesUnservedConfiguredIDWithARunner(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"id":"deepseek-flash"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	t.Setenv("HOME", t.TempDir())
+	env, out, _ := testEnv(t)
+	env.Profile = config.WithMain(srv.URL+"/v1", "deepseek")
+	c := llm.New(srv.URL+"/v1", "deepseek")
+	c.PinContext(4096)
+	env.Runner = &turn.Runner{Client: c}
+	if code := runStatus(context.Background(), env, nil); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	line := statusLine(t, out.String(), "model ")
+	if !strings.Contains(line, "deepseek") || !strings.Contains(line, "not served") || !strings.Contains(line, "deepseek-flash") {
+		t.Fatalf("unserved configured id line %q", line)
 	}
 }
