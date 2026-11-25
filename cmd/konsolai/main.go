@@ -263,6 +263,7 @@ func run() int {
 	projectID := upsertProject(ctx, mem, cwd)
 
 	client := llm.New(prof.MainEndpoint(), prof.MainModelID())
+	applyModelOptions(client, prof, prof.Roles.Main)
 	client.SetIdleTimeout(time.Duration(prof.LLM.IdleTimeoutSeconds) * time.Second)
 	client.SetThinkKwargs(prof.MainThinking())
 	if prof.Main().Context > 0 {
@@ -272,6 +273,7 @@ func run() int {
 	var fastClient *llm.Client
 	if prof.FastOn() {
 		fastClient = llm.NewFast(prof.FastEndpoint(), prof.FastModelID())
+		applyModelOptions(fastClient, prof, prof.Roles.Fast)
 		fastClient.SetIdleTimeout(time.Duration(prof.LLM.IdleTimeoutSeconds) * time.Second)
 		fastClient.SetThinkKwargs(prof.FastThinking())
 		if fm, ok := prof.FastModel(); ok && fm.Context > 0 {
@@ -452,4 +454,18 @@ func sanitizeAnswerHistory(hist []llm.Message) []llm.Message {
 
 func modelErrorLine(endpoint string, err error, trace bool) string {
 	return turn.ModelErrorLine(endpoint, err, trace)
+}
+
+// applyModelOptions copies one model's auth and request quirks onto a client.
+func applyModelOptions(c *llm.Client, prof config.Profile, name string) {
+	if c == nil {
+		return
+	}
+	m, ok := prof.Models[name]
+	if !ok {
+		return
+	}
+	c.SetAPIKey(prof.APIKeyResolver(name))
+	c.SetMaxTokensField(m.TokensField())
+	c.SetSendTemperature(m.SendsTemperature())
 }
