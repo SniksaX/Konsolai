@@ -32,6 +32,15 @@ func parseHTTPURL(raw string) (*url.URL, error) {
 	return u, nil
 }
 
+// URLHost is the endpoint host used in remote messages.
+func URLHost(raw string) string {
+	u, err := parseHTTPURL(raw)
+	if err != nil {
+		return strings.TrimSpace(raw)
+	}
+	return u.Host
+}
+
 // URLIsRemote classifies a URL's host. Empty or unparsable input is not remote.
 func URLIsRemote(raw string) bool {
 	raw = strings.TrimSpace(raw)
