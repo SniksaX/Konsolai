@@ -23,6 +23,7 @@ llm
   llm.top_p                    0
   llm.retries                  1
   llm.retry_wait_ms            2000
+  llm.remote_probe_timeout_ms  3000
 fast
   fast.context_guard_ratio     0.6
 database
@@ -132,6 +133,7 @@ safety
 router
   router.action_verbs          ["create", "write", "make", "add", "generate", "fix", "update", "edit", "change", "refactor", "rename", "delete", "remove", "install", "run", "build", "deploy", "commit", "move", "copy", "kill", "stop", "start", "restart", "test", "free", "close", "open", "launch", "crée", "créer", "écris", "écrire", "ajoute", "ajouter", "génère", "générer", "corrige", "corriger", "modifie", "modifier", "supprime", "supprimer", "installe", "installer", "lance", "lancer", "déplace", "renomme", "tue", "tuer", "arrête", "arrete", "arrêter", "arreter", "démarre", "demarre", "relance", "teste", "libère", "libere", "ferme"]
   router.targets               ["file", "folder", "directory", "project", "repo", "branch", "readme", "test", "function", "endpoint", "fichier", "dossier", "projet", "branche", "process", "pid", "port", "server", "container", "service", "processus", "serveur", "conteneur"]
+  router.answer_main_above_tokens 200
 privacy
   privacy.allow_remote         true
   privacy.remote_roles         ["main", "fast"]
