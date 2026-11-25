@@ -86,6 +86,7 @@ type Config struct {
 	ElideTarget       float64
 	IdenticalRejects  int
 	Pricing           Pricing
+	Serving           Model
 }
 
 // Pricing is the serving model's location and its prices per million tokens.
@@ -109,6 +110,7 @@ type Stats struct {
 	OutsidePlan      int
 	MaxStep          time.Duration
 	Pricing          Pricing
+	Serving          Model
 }
 
 func (s *Stats) noteModel(d time.Duration) {
@@ -219,7 +221,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	if state.planApproved && cfg.Guard != nil {
 		cfg.Guard.AllowPlanFiles(state.planFiles)
 	}
-	st := Stats{Pricing: cfg.Pricing}
+	st := Stats{Pricing: cfg.Pricing, Serving: cfg.Serving}
 	st.RouterTime = cfg.RouterTime
 	defer func() {
 		if cfg.Stats != nil {
@@ -352,7 +354,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					st.LastPromptTokens = usage.PromptTokens
 				}
 				dumpTrace(cfg.SessionID, st.Steps, msg)
-				PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, usage.ReasoningTokens, cfg.Client.ContextWindow(), FormatTraceCalls(msg.ToolCalls))
+				PrintTraceServing(cfg.Err, cfg.Serving, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, usage.ReasoningTokens, cfg.Client.ContextWindow(), FormatTraceCalls(msg.ToolCalls))
 			} else {
 				st.Steps++
 				st.noteModel(modelElapsed)
@@ -428,7 +430,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		}
 		if cfg.Trace {
 			dumpTrace(cfg.SessionID, st.Steps, msg)
-			PrintTrace(cfg.Err, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, usage.ReasoningTokens, cfg.Client.ContextWindow(), FormatTraceCalls(msg.ToolCalls))
+			PrintTraceServing(cfg.Err, cfg.Serving, st.Steps, think, modelElapsed, usage.PromptTokens, usage.CompletionTokens, usage.ReasoningTokens, cfg.Client.ContextWindow(), FormatTraceCalls(msg.ToolCalls))
 		}
 		narration := trimLeadingBlanks(msg.Content)
 		if strings.TrimSpace(narration) != "" && len(msg.ToolCalls) > 0 && !hasFinishCall(msg) {
