@@ -33,7 +33,7 @@ func menuRows(c config.Config) []setRow {
 	}
 	section := "ui"
 	for _, k := range config.Keys() {
-		if seen[k.Path] {
+		if seen[k.Path] || k.Hidden {
 			continue
 		}
 		sec := k.Path
