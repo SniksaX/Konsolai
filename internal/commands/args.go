@@ -552,6 +552,7 @@ func modelLevel(env *Env) []Choice {
 		{Value: "add", Description: "add a named model", Next: addModelChoices()},
 		{Value: "remove", Description: "remove a model no role uses", Dynamic: func() []Choice { return removableChoices(env) }},
 		{Value: "endpoint", Description: "change a model's URL", Dynamic: func() []Choice { return endpointChoices(env) }},
+		{Value: "id", Description: "change a model's server id", Dynamic: func() []Choice { return modelIDChoices(env) }},
 		{Value: "discover", Description: "suggest names from each server", Terminal: true},
 	}
 }
@@ -565,6 +566,24 @@ func endpointChoices(env *Env) []Choice {
 			Value:       name,
 			Description: p.Models[name].Endpoint,
 			FreeText:    &FreeText{Placeholder: "https://host/v1", Validate: nonEmpty},
+		})
+	}
+	return out
+}
+
+// modelIDChoices offers each configured model, then a free-text id.
+func modelIDChoices(env *Env) []Choice {
+	p := envProfile(env)
+	var out []Choice
+	for _, name := range p.ModelNames() {
+		current := p.Models[name].Model
+		if current == "" {
+			current = "server default"
+		}
+		out = append(out, Choice{
+			Value:       name,
+			Description: current,
+			FreeText:    &FreeText{Placeholder: "deepseek-flash", Validate: nonEmpty},
 		})
 	}
 	return out
