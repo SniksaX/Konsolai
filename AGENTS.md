@@ -88,7 +88,7 @@ Accessors are the only `<= 0` means default logic (`nonzero` and the ratio acces
 - `run_shell` is not a sandbox: substitutions can reach anything the user can. Literal redirects inside an interpreter command are checked against the write roots; the plan gate and the confirm prompt are the write barrier.
 - Prompt size starts as characters times `tokensPerChar`, then that ratio is updated from real `usage.prompt_tokens`. Elision starts above `elide_trigger` (0.60) and stops at `elide_target` (0.40).
 - `llm.Normalize` runs before each chat request: merge consecutive user messages, drop empty assistants, drop orphan tool results.
-- The fast client is preferred when reachable. If an answer stream fails on it, the turn retries on main. Fast is skipped when the prompt passes `context_guard_ratio`.
+- The fast client is the first router when reachable. It answers only greetings and effort-`none` answers whose full prompt is under `router.answer_main_above_tokens` (default 200), and it is skipped when the prompt passes `context_guard_ratio`; every other answer streams on main. If the fast stream fails, the turn retries on main.
 - Reply language comes from the user message (`intent.Detect` / `ResolveLanguage`, en and fr), then the previous user line, then a router hint that is in the profile list.
 - `export_doc` accepts only `html` and `pdf`. Shell PDF and HTML printers are refused. A docs plan that asks for PDF or HTML must name `export_doc`.
 - Tests that need external binaries skip when they are missing; CI installs them.
