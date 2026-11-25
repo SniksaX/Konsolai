@@ -170,6 +170,11 @@ func applyModelFields(m *Model, n *yaml.Node, full string) error {
 				return fmt.Errorf("config: %s.thinking_mode must be a string (line %d)", full, vn.Line)
 			}
 			m.ThinkingMode = vn.Value
+		case "reasoning_effort":
+			if vn.Kind != yaml.ScalarNode {
+				return fmt.Errorf("config: %s.reasoning_effort must be a string (line %d)", full, vn.Line)
+			}
+			m.ReasoningEffort = vn.Value
 		default:
 			return fmt.Errorf("unknown key %q at line %d", full+"."+kn.Value, kn.Line)
 		}
@@ -224,6 +229,11 @@ func validateModels(c Config) error {
 		case "", "enabled", "disabled":
 		default:
 			return fmt.Errorf("config: models.%s.thinking_mode must be enabled or disabled, got %q", name, m.ThinkingMode)
+		}
+		switch strings.ToLower(strings.TrimSpace(m.ReasoningEffort)) {
+		case "", "default", "none", "minimal", "low", "medium", "high":
+		default:
+			return fmt.Errorf("config: models.%s.reasoning_effort must be default, none, minimal, low, medium or high, got %q", name, m.ReasoningEffort)
 		}
 		switch m.TokensField() {
 		case "max_tokens", "max_completion_tokens":
@@ -460,6 +470,7 @@ func writeModels(b *strings.Builder, c Config, indent int, mask bool) {
 		fmt.Fprintf(b, "%s    thinking_kwargs: %s   # send chat_template_kwargs.enable_thinking\n", pad, strconv.FormatBool(m.ThinkingKwargs))
 		fmt.Fprintf(b, "%s    tool_choice_mode: %s   # named, required or auto when a tool is forced\n", pad, yamlScalar(m.ToolChoiceMode))
 		fmt.Fprintf(b, "%s    thinking_mode: %s   # enabled or disabled (DeepSeek thinking toggle)\n", pad, yamlScalar(m.ThinkingMode))
+		fmt.Fprintf(b, "%s    reasoning_effort: %s   # default, none, minimal, low, medium or high\n", pad, yamlScalar(m.ReasoningEffort))
 		fmt.Fprintf(b, "%s    context: %d   # 0 uses the server context window\n", pad, m.Context)
 		fmt.Fprintf(b, "%s    notes: %s   # optional note\n", pad, yamlScalar(m.Notes))
 	}
@@ -528,6 +539,7 @@ func writeModelDiff(b *strings.Builder, base, fileCfg, full Config) {
 		{"thinking_kwargs", func(m Model) string { return strconv.FormatBool(m.ThinkingKwargs) }},
 		{"tool_choice_mode", func(m Model) string { return m.ToolChoiceMode }},
 		{"thinking_mode", func(m Model) string { return m.ThinkingMode }},
+		{"reasoning_effort", func(m Model) string { return m.ReasoningEffort }},
 		{"context", func(m Model) string { return strconv.Itoa(m.Context) }},
 		{"notes", func(m Model) string { return m.Notes }},
 	}
