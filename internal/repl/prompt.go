@@ -133,6 +133,7 @@ type footerInfo struct {
 	ShowCtx   bool
 	Down      bool
 	Shell     bool
+	Remote    bool
 	GitQuery  time.Duration
 	CtxWarn   int
 	CtxHot    int
@@ -209,6 +210,10 @@ func formatFooter(f footerInfo) string {
 		modelWord = f.Mode
 	}
 	model := theme.Style(theme.Muted, modelWord)
+	if f.Remote && !f.Shell && f.Mode == "" {
+		// The same marker /set model and the welcome append to a remote row.
+		model += " " + theme.Style(theme.Warn, "remote")
+	}
 	ctx := ""
 	if f.ShowCtx {
 		ctx = paintMeter(f.CtxPct, width, meterStyle{
