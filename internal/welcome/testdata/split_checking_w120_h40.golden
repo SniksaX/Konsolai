@@ -1,0 +1,20 @@
+
+  ▀▄     █  ▄▀ ▄▀▀▀▄ █▄  █ ▄▀▀▀▀ ▄▀▀▀▄ █     ▄▀▀▀▄ ▀▀█▀▀ █████      ╭─ gpu-box ─────────────────────────────── 1/4 up ─╮
+    ▀▄   █▄▀   █   █ █ ▀▄█ ▀▄▄▄  █   █ █     █▄▄▄█   █   █████      │ ○ main-model    main    checking  remote         │
+   ▄▀    █ ▀▄  █   █ █   █     █ █   █ █     █   █   █   █████      │ ○ fast-model    fast    checking                 │
+  ▀      ▀   ▀  ▀▀▀  ▀   ▀ ▀▀▀▀   ▀▀▀  ▀▀▀▀▀ ▀   ▀ ▀▀▀▀▀ ▀▀▀▀▀      │ ○ embed-model   embed   checking                 │
+         your terminal agent, on your own models                    │ ○ rerank-model  rerank  checking                 │
+                                                                    ╰──────────────────────────────────────────────────╯
+
+  ╭─ session ─────────────────────────────────────────────╮  ╭─ recent ──────────────────────────────────── /resume ─╮
+  │ dir      ~/projects/demo                              │  │ › fix the welcome screen before theme pr... build  5m │
+  │ branch   main*                                        │  │ › lookup theme roles                       lookup  2h │
+  │ changed  3                                            │  │ › answer a short question                  answer  1d │
+  │ ahead    1                                            │  │ › wire the footer meter                       act  3w │
+  │ behind   2                                            │  ╰───────────────────────────────────────────────────────╯
+  │ build    v0.1.0  ab12cd3                              │
+  │ memory   checking                                     │
+  ╰───────────────────────────────────────────────────────╯
+
+    / commands   ! shell   @ files   ? help                                       tip /undo reverts the last file change
+
