@@ -21,6 +21,21 @@ func HoldPrompt(on bool) {
 
 func promptOwned() bool { return promptHeld.Load() }
 
+// PauseLive clears a painted spinner line and blocks spinner paints while a
+// modal prompt owns the terminal.
+func PauseLive() {
+	if !hookTTY() {
+		return
+	}
+	HoldPrompt(true)
+	fmt.Fprint(hookWriter(), clearLine+showCursor)
+}
+
+// ResumeLive lets the spinner paint again after a modal prompt.
+func ResumeLive() {
+	HoldPrompt(false)
+}
+
 var braille = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 const (
@@ -197,6 +212,10 @@ func (s *spinner) loop() {
 }
 
 func (s *spinner) paint() {
+	// A modal prompt (the remote confirmation) owns the line; never paint over it.
+	if promptOwned() {
+		return
+	}
 	elapsed := hookNow().Sub(s.start)
 	s.mu.Lock()
 	label := s.label
