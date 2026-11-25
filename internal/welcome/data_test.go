@@ -235,3 +235,33 @@ func TestGatherGitBranch(t *testing.T) {
 		t.Fatalf("mem %q recent %d", data.Session.Memory, len(data.Recent))
 	}
 }
+
+func TestGatherMarksRemoteModels(t *testing.T) {
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer local.Close()
+
+	data, err := Gather(context.Background(), Input{
+		Endpoint:     "http://203.0.113.9/v1",
+		Model:        "main-model",
+		FastEndpoint: local.URL + "/v1",
+		FastModel:    "mini",
+		CWD:          t.TempDir(),
+		ProbeBudget:  200 * time.Millisecond,
+		ProbeTimeout: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byRole := map[string]Model{}
+	for _, m := range data.Models {
+		byRole[m.Role] = m
+	}
+	if !byRole["main"].Remote {
+		t.Fatalf("main not marked remote: %+v", byRole["main"])
+	}
+	if byRole["fast"].Remote {
+		t.Fatalf("local fast marked remote: %+v", byRole["fast"])
+	}
+}
