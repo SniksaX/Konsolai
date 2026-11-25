@@ -86,10 +86,11 @@ func TestDoctorSlowAndDown(t *testing.T) {
 	env, out, home := doctorEnv(t, slow.URL+"/v1")
 	doctorHome = func() (string, error) { return home, nil }
 	env.Profile.UI.ProbeTimeoutMS = 40
-	if code := runDoctor(context.Background(), env, nil); code != 1 {
+	// A slow endpoint warned about, not a failure: the host did not say no.
+	if code := runDoctor(context.Background(), env, nil); code != 0 {
 		t.Fatalf("slow exit %d\n%s", code, out.String())
 	}
-	if !strings.Contains(out.String(), "timeout") || !strings.Contains(out.String(), "fix: roles.main") {
+	if !strings.Contains(out.String(), "slow") || !strings.Contains(out.String(), "fix: ui.probe_timeout_ms") {
 		t.Fatalf("slow\n%s", out.String())
 	}
 
