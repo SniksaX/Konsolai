@@ -343,12 +343,10 @@ func longerText(a, b string) string {
 // it and the terminal has room; otherwise it renders exactly as before.
 func writeFinalAnswer(cfg Config, w io.Writer, text string, plain bool) {
 	if cfg.AnswerPanel && !plain {
-		if width, height, ok := ui.AnswerPanelAllowed(w, 0); ok {
-			panel := ui.AnswerPanel("Done", text, width, cfg.JSONMaxLines)
-			if rows := strings.Count(panel, "\n"); height >= rows+3 {
-				fmt.Fprint(w, panel)
-				return
-			}
+		if width, _, ok := ui.AnswerPanelAllowed(w, 0); ok {
+			// A panel taller than the screen is fine here: the terminal scrolls.
+			fmt.Fprint(w, ui.AnswerPanel("Done", text, width, cfg.JSONMaxLines))
+			return
 		}
 	}
 	writeAnswer(w, text, plain)
