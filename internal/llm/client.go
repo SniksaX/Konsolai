@@ -86,6 +86,7 @@ func (e *HTTPError) Error() string {
 type Client struct {
 	baseURL            string
 	model              string
+	modelName          string
 	http               *http.Client
 	idleTimeout        time.Duration
 	retryWait          time.Duration
@@ -150,6 +151,15 @@ func (c *Client) SetThinkKwargs(on bool) {
 		return
 	}
 	c.sendThinkKwargs = on
+}
+
+// SetModelName records the config name used in fix-it hints. It never changes
+// the id sent to the server.
+func (c *Client) SetModelName(name string) {
+	if c == nil {
+		return
+	}
+	c.modelName = strings.TrimSpace(name)
 }
 
 // SetAPIKey installs a call-time bearer-key resolver. It is read before each
@@ -489,7 +499,15 @@ func (c *Client) ResolveModel(ctx context.Context) (string, error) {
 	chosen := body.Data[0]
 	if want == "" {
 		if len(body.Data) != 1 {
-			return "", fmt.Errorf("llm: server at %s serves %d models; set the model id to one of: %s", c.baseURL, len(body.Data), servedIDList(served))
+			name := c.modelName
+			if name == "" {
+				name = "<name>"
+			}
+			example := "<model-id>"
+			if len(served) > 0 {
+				example = served[0]
+			}
+			return "", fmt.Errorf("llm: server at %s serves %d models: %s; set the model id: run: /set model id %s %s", c.baseURL, len(body.Data), servedIDList(served), name, example)
 		}
 	} else {
 		found := false
