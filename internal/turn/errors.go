@@ -29,6 +29,9 @@ func ModelErrorLine(endpoint string, err error, trace bool) string {
 	if errors.Is(err, llm.ErrTruncated) {
 		return "konsolai: the model's answer was cut off; try a narrower request."
 	}
+	if errors.Is(err, llm.ErrReasoningTruncated) {
+		return "konsolai: the model spent its whole output budget on reasoning before writing an answer; raise llm.max_tokens or set reasoning_effort to none."
+	}
 	var he *llm.HTTPError
 	if errors.As(err, &he) {
 		return httpErrorLine(host, he)
