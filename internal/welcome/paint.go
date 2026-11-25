@@ -353,7 +353,7 @@ func paintRecentPlain(pal ui.Palette, plain string) string {
 	return pal.Muted(plain)
 }
 
-var errWords = []string{"unreachable", "offline", "timeout"}
+var errWords = []string{"unreachable", "offline", "timeout", "auth failed"}
 
 func paintMetaErr(pal ui.Palette, s string) string {
 	if s == "" {
