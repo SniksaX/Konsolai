@@ -297,6 +297,12 @@ func Default() *Registry {
 		Command{Name: "cmd", Usage: "cmd [clear|forget]", Summary: "Toggle shell mode",
 			Args: []Arg{{Name: "clear", Help: "clear the screen"}, {Name: "forget", Help: "drop the shell context"}},
 			Tree: cmdTree, Example: "/cmd", ReplOnly: true, Run: runCmd},
+		Command{Name: "remote", Usage: "remote allow", Summary: "Forget a declined remote confirmation",
+			Args: []Arg{{Name: "action", Help: "allow", Required: true}},
+			Tree: func(*Env) []Choice {
+				return []Choice{{Value: "allow", Description: "forget a declined remote confirmation"}}
+			},
+			Example: "/remote allow", ReplOnly: true, Run: runRemote},
 		Command{Name: "yes", Usage: "yes on|off", Summary: "Auto-approve for this REPL session",
 			Args: []Arg{{Name: "mode", Help: "on or off", Required: true}}, Tree: onOffTree("Auto-approve for this session", "Ask before mutating actions"), Example: "/yes on", ReplOnly: true, Run: runYes},
 		Command{Name: "trace", Usage: "trace on|off", Summary: "Toggle per-call traces",
