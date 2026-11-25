@@ -79,6 +79,22 @@ func offline() Data {
 	return d
 }
 
+// checking is the first paint: probes still running, no error color yet.
+func checking() Data {
+	d := allUp()
+	d.Up = 1
+	d.Models[0].Status = StatusChecking
+	d.Models[0].Stat = "checking"
+	d.Models[1].Status = StatusChecking
+	d.Models[1].Stat = "checking"
+	d.Models[2].Status = StatusChecking
+	d.Models[2].Stat = "checking"
+	d.Models[3].Status = StatusChecking
+	d.Models[3].Stat = "checking"
+	d.Session.Memory = "checking"
+	return d
+}
+
 func dbOffline() Data {
 	d := allUp()
 	d.Session.Memory = "memory offline"
@@ -113,6 +129,7 @@ func fixtures() []struct {
 		data Data
 	}{
 		{"allup", allUp()},
+		{"checking", checking()},
 		{"offline", offline()},
 		{"dboffline", dbOffline()},
 		{"nogit", noGit()},
