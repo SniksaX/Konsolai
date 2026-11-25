@@ -339,6 +339,21 @@ func longerText(a, b string) string {
 	return b
 }
 
+// writeFinalAnswer frames the final answer in a panel when the caller allows
+// it and the terminal has room; otherwise it renders exactly as before.
+func writeFinalAnswer(cfg Config, w io.Writer, text string, plain bool) {
+	if cfg.AnswerPanel && !plain {
+		if width, height, ok := ui.AnswerPanelAllowed(w, 0); ok {
+			panel := ui.AnswerPanel("Done", text, width, cfg.JSONMaxLines)
+			if rows := strings.Count(panel, "\n"); height >= rows+3 {
+				fmt.Fprint(w, panel)
+				return
+			}
+		}
+	}
+	writeAnswer(w, text, plain)
+}
+
 func writeAnswer(w io.Writer, text string, plain bool) {
 	ui.BeforeOutput()
 	text = ui.CollapseBlankLines(text)
