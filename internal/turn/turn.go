@@ -16,6 +16,7 @@ import (
 	"github.com/SniksaX/Konsolai/internal/llm"
 	"github.com/SniksaX/Konsolai/internal/memory"
 	"github.com/SniksaX/Konsolai/internal/rag"
+	"github.com/SniksaX/Konsolai/internal/sysctx"
 	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
@@ -47,6 +48,7 @@ type Runner struct {
 	ThinkMode        ThinkMode
 	RouterSource     string
 	RouterModel      string
+	Serving          agent.Model
 	Mem              *memory.Guard
 	Out              io.Writer
 	Err              io.Writer
@@ -384,4 +386,62 @@ func (r *Runner) turnPricing(mainServed bool) agent.Pricing {
 		return agent.Pricing{}
 	}
 	return agent.Pricing{Remote: true, PriceIn: m.PriceIn, PriceOut: m.PriceOut}
+}
+
+// modelFacts describes the configured models and the role answering this call.
+// It is the single source of the identity block in every system context.
+func (r *Runner) modelFacts(role string) sysctx.ModelFacts {
+	c := r.Profile
+	mainName := strings.TrimSpace(c.Roles.Main)
+	if mainName == "" {
+		mainName = "default"
+	}
+	facts := sysctx.ModelFacts{
+		MainName:   mainName,
+		MainID:     c.MainModelID(),
+		MainHost:   EndpointHost(c.MainEndpoint()),
+		MainRemote: c.ModelRemote(mainName),
+		Role:       role,
+	}
+	if c.FastOn() {
+		fastName := strings.TrimSpace(c.Roles.Fast)
+		facts.FastName = fastName
+		facts.FastID = c.FastModelID()
+		facts.FastHost = EndpointHost(c.FastEndpoint())
+		facts.FastRemote = c.ModelRemote(fastName)
+		facts.HasFast = true
+	}
+	return facts
+}
+
+// servingModel is the attribution of one call: the configured model name, the
+// id the client resolved (else its configured id), the role, and its locality.
+// role is main, fast, or local for an answer built from the configured facts.
+func (r *Runner) servingModel(ctx context.Context, client *llm.Client, role string) agent.Model {
+	c := r.Profile
+	name := strings.TrimSpace(c.Roles.Main)
+	switch role {
+	case "fast":
+		name = strings.TrimSpace(c.Roles.Fast)
+	case "local":
+		return agent.Model{Name: "facts", Role: "local"}
+	}
+	if name == "" {
+		name = "default"
+	}
+	id := ""
+	if client != nil {
+		if got, err := client.ResolveModel(ctx); err == nil {
+			id = got
+		}
+		if id == "" {
+			id = client.ModelID()
+		}
+	}
+	if id == "" {
+		if m, ok := c.Models[name]; ok {
+			id = m.Model
+		}
+	}
+	return agent.Model{Name: name, ID: id, Role: role, Remote: c.ModelRemote(name)}
 }
