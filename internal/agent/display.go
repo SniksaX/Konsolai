@@ -38,9 +38,51 @@ func ProgressLabel(base string, p llm.Progress) string {
 	return base
 }
 
+// Model identifies the model that served one call: the configured model name,
+// the id the endpoint reports, the role, and whether the endpoint is remote.
+// It is the attribution tag of traces, stats lines and the REPL footer.
+type Model struct {
+	Name   string // configured model name
+	ID     string // id the endpoint reports; empty means the server default
+	Role   string // main or fast
+	Remote bool
+}
+
+// Valid reports whether the attribution names a model.
+func (m Model) Valid() bool {
+	return strings.TrimSpace(m.Name) != "" || strings.TrimSpace(m.ID) != ""
+}
+
+// Display is the id the endpoint reports, else the configured name.
+func (m Model) Display() string {
+	if id := strings.TrimSpace(m.ID); id != "" {
+		return id
+	}
+	if name := strings.TrimSpace(m.Name); name != "" {
+		return name
+	}
+	return "-"
+}
+
+// Label is the attribution tag: name (role), then a remote marker.
+func (m Model) Label() string {
+	role := strings.TrimSpace(m.Role)
+	if role == "" {
+		role = "main"
+	}
+	out := m.Display() + " (" + role + ")"
+	if m.Remote {
+		out += " remote"
+	}
+	return out
+}
+
 func FormatSummary(intent string, s Stats) string {
 	total := s.ModelTime + s.ToolTime
 	var parts []string
+	if s.Serving.Valid() {
+		parts = append(parts, "model "+s.Serving.Label())
+	}
 	if intent != "answer" && intent != "lookup" && s.Steps > 0 {
 		if s.Steps == 1 {
 			parts = append(parts, "1 step")
@@ -207,6 +249,9 @@ func FormatStatsLine(s Stats) string {
 	line := fmt.Sprintf("stats: steps=%d rejects=%d outside_plan=%d think_tokens=%d max_step_s=%s",
 		s.Steps, s.Rejects, s.OutsidePlan, s.ReasoningTokens,
 		strconv.FormatFloat(s.MaxStep.Seconds(), 'f', 3, 64))
+	if s.Serving.Valid() {
+		line += " model=" + s.Serving.Label()
+	}
 	if cost, ok := turnCost(s); ok {
 		line += fmt.Sprintf(" cost=%s in=%s out=%s", formatUSD(cost), formatTok(s.PromptTokens), formatTok(s.CompletionTokens))
 	}
@@ -218,6 +263,23 @@ func PrintTrace(w io.Writer, step int, think bool, d time.Duration, in, out, thi
 		return
 	}
 	fmt.Fprintln(w, FormatTrace(step, think, d, in, out, thinkTok, window, names))
+}
+
+// FormatTraceServing names the model that served the call before the trace
+// fields. An empty Model keeps the plain trace line.
+func FormatTraceServing(m Model, step int, think bool, d time.Duration, in, out, thinkTok, window int, names []string) string {
+	line := FormatTrace(step, think, d, in, out, thinkTok, window, names)
+	if !m.Valid() {
+		return line
+	}
+	return "  model " + m.Label() + " " + strings.TrimPrefix(line, "  ")
+}
+
+func PrintTraceServing(w io.Writer, m Model, step int, think bool, d time.Duration, in, out, thinkTok, window int, names []string) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintln(w, FormatTraceServing(m, step, think, d, in, out, thinkTok, window, names))
 }
 
 func ShortModel(id string) string {
