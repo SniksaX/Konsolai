@@ -14,6 +14,7 @@ import (
 
 	"github.com/SniksaX/Konsolai/internal/config"
 	"github.com/SniksaX/Konsolai/internal/docrender"
+	"github.com/SniksaX/Konsolai/internal/llm"
 	"github.com/SniksaX/Konsolai/internal/turn"
 	"github.com/SniksaX/Konsolai/internal/ui"
 	"github.com/SniksaX/Konsolai/internal/ui/theme"
@@ -955,7 +956,7 @@ func formatModelTable(ctx context.Context, env *Env) string {
 		if role == "" {
 			role = "-"
 		}
-		status, body := welcome.Probe(ctx, m.Endpoint, "main", "models", timeout, slow)
+		status, body := probeModelRow(ctx, c, name, m.Endpoint, timeout, slow)
 		env.noteServer(m.Endpoint, body)
 		id, idServer, nctx, ctxServer := modelIdentity(env, m)
 		host := turn.EndpointHost(m.Endpoint)
@@ -1122,6 +1123,51 @@ func parseModelItems(body []byte) []modelItem {
 	return items
 }
 
+// probeModelRow checks one configured model's endpoint with the key the turn
+// would send. The body feeds the context display; a 401/403 reads as auth
+// failed and only a failed connection reads as down.
+func probeModelRow(ctx context.Context, prof config.Profile, name, endpoint string, timeout, slow time.Duration) (string, []byte) {
+	if strings.TrimSpace(endpoint) == "" {
+		return string(welcome.StatusDown), nil
+	}
+	if timeout <= 0 {
+		timeout = prof.ProbeTimeout()
+	}
+	c := llm.New(endpoint, "")
+	if name != "" {
+		c.SetAPIKey(prof.APIKeyResolver(name))
+	}
+	c.SetProbeTimeout(timeout)
+	c.SetRemoteProbeTimeout(prof.RemoteProbeTimeout())
+	res := c.Probe(ctx)
+	switch res.Kind {
+	case llm.ProbeOK:
+		if slow > 0 && res.Latency >= slow {
+			return string(welcome.StatusSlow), res.Body
+		}
+		return string(welcome.StatusUp), res.Body
+	case llm.ProbeSlow:
+		return string(welcome.StatusSlow), nil
+	case llm.ProbeAuthFailed:
+		return "auth failed", nil
+	case llm.ProbeHTTPError:
+		return fmt.Sprintf("http %d", res.Status), nil
+	default:
+		return string(welcome.StatusDown), nil
+	}
+}
+
+// modelNameAt names the first configured model that points at an endpoint.
+func modelNameAt(c config.Config, endpoint string) string {
+	endpoint = strings.TrimRight(strings.TrimSpace(endpoint), "/")
+	for _, name := range c.ModelNames() {
+		if strings.TrimRight(strings.TrimSpace(c.Models[name].Endpoint), "/") == endpoint {
+			return name
+		}
+	}
+	return ""
+}
+
 func discoverModels(ctx context.Context, c config.Config) string {
 	seen := map[string]bool{}
 	var endpoints []string
@@ -1143,7 +1189,7 @@ func discoverModels(ctx context.Context, c config.Config) string {
 	}
 	var b strings.Builder
 	for _, ep := range endpoints {
-		_, body := welcome.Probe(ctx, ep, "main", "models", timeout, c.ModelSlow())
+		_, body := probeModelRow(ctx, c, modelNameAt(c, ep), ep, timeout, c.ModelSlow())
 		for _, item := range parseModelItems(body) {
 			if item.ID == "" {
 				continue
