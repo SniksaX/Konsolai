@@ -125,6 +125,7 @@ func (r *Runner) errw() io.Writer {
 func (r *Runner) client() *llm.Client {
 	if r.Client == nil {
 		c := llm.New(r.Profile.MainEndpoint(), r.Profile.MainModelID())
+		applyModelOptions(c, r.Profile, r.Profile.Roles.Main)
 		c.SetIdleTimeout(time.Duration(r.Profile.LLM.IdleTimeoutSeconds) * time.Second)
 		c.SetThinkKwargs(r.Profile.MainThinking())
 		if n := r.Profile.Main().Context; n > 0 {
@@ -150,6 +151,7 @@ func (r *Runner) fastClient() *llm.Client {
 		return nil
 	}
 	c := llm.NewFast(ep, r.Profile.FastModelID())
+	applyModelOptions(c, r.Profile, r.Profile.Roles.Fast)
 	c.SetIdleTimeout(time.Duration(r.Profile.LLM.IdleTimeoutSeconds) * time.Second)
 	c.SetThinkKwargs(r.Profile.FastThinking())
 	if fm, ok := r.Profile.FastModel(); ok && fm.Context > 0 {
@@ -159,6 +161,20 @@ func (r *Runner) fastClient() *llm.Client {
 	r.FastClient = c
 	r.attachStats(c)
 	return c
+}
+
+// applyModelOptions copies one model's auth and request quirks onto a client.
+func applyModelOptions(c *llm.Client, prof config.Profile, name string) {
+	if c == nil {
+		return
+	}
+	m, ok := prof.Models[name]
+	if !ok {
+		return
+	}
+	c.SetAPIKey(prof.APIKeyResolver(name))
+	c.SetMaxTokensField(m.TokensField())
+	c.SetSendTemperature(m.SendsTemperature())
 }
 
 func (r *Runner) routerClient(ctx context.Context) *llm.Client {
