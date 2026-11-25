@@ -621,8 +621,14 @@ func setModel(ctx context.Context, env *Env, args []string, session bool) int {
 			return 2
 		}
 		return setModelID(env, args[1], args[2], session)
+	case "reasoning", "reasoning_effort":
+		if len(args) != 3 {
+			fmt.Fprintln(env.errw(), "usage: /set model reasoning <name> default|none|minimal|low|medium|high")
+			return 2
+		}
+		return setModelReasoning(env, args[1], args[2], session)
 	default:
-		fmt.Fprintln(env.errw(), "usage: /set model [main|fast|add|remove|endpoint|id|discover]")
+		fmt.Fprintln(env.errw(), "usage: /set model [main|fast|add|remove|endpoint|id|reasoning|discover]")
 		return 2
 	}
 }
@@ -754,6 +760,45 @@ func setModelID(env *Env, name, id string, session bool) int {
 		return 2
 	}
 	m.Model = id
+	c.Models[name] = m
+	if err := config.Validate(c); err != nil {
+		fmt.Fprintln(env.errw(), err)
+		return 2
+	}
+	env.Profile = c
+	if env.Runner != nil {
+		env.Runner.Profile = c
+		env.Runner.RebindNext = true
+	}
+	if !session {
+		if err := config.UpsertModel(configPath(env), name, m, false); err != nil {
+			fmt.Fprintln(env.errw(), err)
+			return 1
+		}
+	}
+	fmt.Fprintln(env.out(), "from the next turn")
+	return 0
+}
+
+// setModelReasoning stores one model's reasoning_effort value.
+func setModelReasoning(env *Env, name, value string, session bool) int {
+	c := env.Profile
+	m, ok := c.Models[name]
+	if !ok {
+		fmt.Fprintf(env.errw(), "no model %q; add it with /set model add %s <url>\n", name, name)
+		return 2
+	}
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch value {
+	case "default", "none", "minimal", "low", "medium", "high":
+	default:
+		fmt.Fprintln(env.errw(), "reasoning_effort must be default, none, minimal, low, medium or high")
+		return 2
+	}
+	if value == "default" {
+		value = ""
+	}
+	m.ReasoningEffort = value
 	c.Models[name] = m
 	if err := config.Validate(c); err != nil {
 		fmt.Fprintln(env.errw(), err)
@@ -1008,7 +1053,11 @@ func formatModelTable(ctx context.Context, env *Env) string {
 		if mark == "› " {
 			head = p.Accent(head)
 		}
-		fmt.Fprintf(&b, "%s%s  %s  %s\n", head, paintServer(id, idServer), paintServer(fmt.Sprintf("ctx %d", nctx), ctxServer), status)
+		effort := ""
+		if m.ChatReasoningEffort() != "" {
+			effort = "  effort " + m.ChatReasoningEffort()
+		}
+		fmt.Fprintf(&b, "%s%s  %s%s  %s\n", head, paintServer(id, idServer), paintServer(fmt.Sprintf("ctx %d", nctx), ctxServer), effort, status)
 	}
 	if c.EmbedURL() == "" {
 		fmt.Fprintln(&b, "  embed  "+p.Muted("not configured"))
