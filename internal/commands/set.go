@@ -691,6 +691,9 @@ func addModelProvider(env *Env, name, provider string, session bool) int {
 		}
 	}
 	fmt.Fprintf(env.out(), "%s: %s, ctx %d, key from %s\n", name, p.Endpoint, p.Context, p.APIKeyEnv)
+	if p.Note != "" {
+		fmt.Fprintf(env.out(), "experimental: %s\n", p.Note)
+	}
 	fmt.Fprintf(env.out(), "from the next turn; store the key with /set key %s\n", name)
 	return 0
 }
