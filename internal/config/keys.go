@@ -190,6 +190,8 @@ var keyTable = []Key{
 		func(c *Config, v int) { c.LLM.RetryWaitMS = v }, func(c Config) int { return c.LLM.RetryWaitMS }).when(ApplyNext),
 	km("llm.remote_probe_timeout_ms", "timeout for one remote model probe", 3000,
 		func(c *Config, v int) { c.LLM.RemoteProbeTimeoutMS = v }, func(c Config) int { return c.LLM.RemoteProbeTimeoutMS }).when(ApplyNext),
+	ks("llm.tool_choice_mode", "how a forced tool is requested: named, required or auto", "", "named",
+		func(c *Config, v string) { c.LLM.ToolChoiceMode = v }, func(c Config) string { return c.LLM.ToolChoiceMode }).allowed("named", "required", "auto").when(ApplyNext),
 
 	kf("fast.context_guard_ratio", "skip fast when the prompt fills past this fraction of its window", 0.60,
 		func(c *Config, v float64) { c.Fast.ContextGuardRatio = v }, func(c Config) float64 { return c.Fast.ContextGuardRatio }),
