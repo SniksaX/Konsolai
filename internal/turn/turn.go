@@ -2,6 +2,7 @@ package turn
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -372,8 +373,34 @@ func applyRemotePolicy(c *llm.Client, prof config.Profile, role, name string, ye
 	if !ok || !m.Remote() {
 		return
 	}
+	if !prof.Privacy.AllowRemote {
+		host := config.URLHost(m.Endpoint)
+		c.SetPolicy(func() error {
+			return fmt.Errorf("config: privacy.allow_remote is false; model %q is remote (%s) and cannot be used", name, host)
+		})
+		return
+	}
+	if !prof.RemoteRoleAllowed(role) {
+		host := config.URLHost(m.Endpoint)
+		c.SetPolicy(func() error {
+			return fmt.Errorf("config: privacy.remote_roles does not allow role %q to use remote model %q (%s)", role, name, host)
+		})
+		return
+	}
+	if strings.TrimSpace(m.Model) == "" {
+		// A remote model needs an explicit id: the confirmation prompt is
+		// pointless when the turn would fail right after it, because a remote
+		// probe cannot pick the id for the user.
+		c.SetPolicy(func() error { return remoteModelIDError(name) })
+		return
+	}
 	c.SetPolicy(prof.RemoteCallPolicy(role, name, yes))
 	c.SetUsageHook(func(u llm.Usage) { config.NoteRemoteUsage(u.PromptTokens + u.CompletionTokens) })
+}
+
+// remoteModelIDError is the actionable failure for a remote model with no id.
+func remoteModelIDError(name string) error {
+	return fmt.Errorf("llm: remote model %q has no model id; run: /set model id %s <model-id>", name, name)
 }
 
 // turnPricing is the serving model's cost inputs. mainServed is false when a
