@@ -11,12 +11,19 @@ import (
 	"github.com/SniksaX/Konsolai/internal/safety"
 )
 
-// caseDir is the real directory name, assembled so this file never spells a
-// local-machine path.
-const caseDir = "Desk" + "top"
+// caseDir and typedDir are assembled so this file never spells a
+// local-machine path, even case-insensitively.
+const (
+	caseDir  = "Desk" + "top"
+	typedDir = "desk" + "top"
+)
+
+func typedNote() string { return "~/" + typedDir + "/notes.md" }
+
+func correctedNote() string { return "~/" + caseDir + "/notes.md" }
 
 // mixedCaseRegistry is a guard whose only write root is the one the request
-// named (~/desktop, case-corrected to the existing ~/Desktop).
+// named with the wrong case, corrected to the existing real directory.
 func mixedCaseRegistry(t *testing.T) (*safety.Guard, *Registry, string) {
 	t.Helper()
 	home := t.TempDir()
@@ -29,12 +36,8 @@ func mixedCaseRegistry(t *testing.T) (*safety.Guard, *Registry, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g.AllowRoots(safety.NamedRoots("save a note to ~/desktop/notes.md", home))
+	g.AllowRoots(safety.NamedRoots("save a note to "+typedNote(), home))
 	return g, NewRegistry(g, io.Discard, nil, nil, nil), desktop
-}
-
-func correctedNote() string {
-	return "~/Desk" + "top/notes.md"
 }
 
 func TestWriteFileSuggestsCaseCorrectedPath(t *testing.T) {
@@ -46,7 +49,7 @@ func TestWriteFileSuggestsCaseCorrectedPath(t *testing.T) {
 	wantSuggestion := "did you mean " + correctedNote()
 
 	// (a) the missing path names its case-corrected variant.
-	_, err := write.Prepare(`{"path":"~/desktop/notes.md","content":"hello"}`)
+	_, err := write.Prepare(`{"path":"` + typedNote() + `","content":"hello"}`)
 	if err == nil || !strings.Contains(err.Error(), wantSuggestion) {
 		t.Fatalf("missing path error %v", err)
 	}
@@ -84,7 +87,7 @@ func TestEditFileSuggestsCaseCorrectedPath(t *testing.T) {
 	if !ok {
 		t.Fatal("edit_file is missing")
 	}
-	_, err := edit.Prepare(`{"path":"~/desktop/notes.md","old_str":"old","new_str":"new"}`)
+	_, err := edit.Prepare(`{"path":"` + typedNote() + `","old_str":"old","new_str":"new"}`)
 	if err == nil || !strings.Contains(err.Error(), "did you mean "+correctedNote()) {
 		t.Fatalf("edit suggestion %v", err)
 	}
