@@ -98,21 +98,26 @@ type Client struct {
 	windowPinned    bool
 	retries         int
 	onCall          func(CallInfo)
+	apiKey          func() (string, error)
+	maxTokensField  string
+	sendTemperature bool
 }
 
 func New(baseURL, model string) *Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.DialContext = (&net.Dialer{Timeout: 5 * time.Second}).DialContext
 	return &Client{
-		baseURL:        strings.TrimRight(baseURL, "/"),
-		model:          model,
-		http:           &http.Client{Transport: tr},
-		idleTimeout:    defaultIdleTimeout,
-		retryWait:      defaultRetryWait,
-		retries:        1,
-		contextWindow:  defaultContextWindow,
-		tokensPerChar:  defaultTokensPerChar,
-		fallbackWindow: defaultContextWindow,
+		baseURL:         strings.TrimRight(baseURL, "/"),
+		model:           model,
+		http:            &http.Client{Transport: tr},
+		idleTimeout:     defaultIdleTimeout,
+		retryWait:       defaultRetryWait,
+		retries:         1,
+		contextWindow:   defaultContextWindow,
+		tokensPerChar:   defaultTokensPerChar,
+		fallbackWindow:  defaultContextWindow,
+		maxTokensField:  "max_tokens",
+		sendTemperature: true,
 	}
 }
 
@@ -132,6 +137,57 @@ func (c *Client) SetThinkKwargs(on bool) {
 		return
 	}
 	c.sendThinkKwargs = on
+}
+
+// SetAPIKey installs a call-time bearer-key resolver. It is read before each
+// request, so a rotated key applies without a new client.
+func (c *Client) SetAPIKey(fn func() (string, error)) {
+	if c == nil {
+		return
+	}
+	c.apiKey = fn
+}
+
+// SetMaxTokensField chooses the output-cap field sent in the request body.
+func (c *Client) SetMaxTokensField(field string) {
+	if c == nil {
+		return
+	}
+	field = strings.TrimSpace(field)
+	if field == "" {
+		field = "max_tokens"
+	}
+	c.maxTokensField = field
+}
+
+// SetSendTemperature controls whether the temperature field is sent.
+func (c *Client) SetSendTemperature(on bool) {
+	if c == nil {
+		return
+	}
+	c.sendTemperature = on
+}
+
+func (c *Client) tokensField() string {
+	if c.maxTokensField == "" {
+		return "max_tokens"
+	}
+	return c.maxTokensField
+}
+
+// authorize adds the bearer header. An empty key leaves the request unauthenticated.
+func (c *Client) authorize(req *http.Request) error {
+	if c.apiKey == nil {
+		return nil
+	}
+	key, err := c.apiKey()
+	if err != nil {
+		return err
+	}
+	if key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+	return nil
 }
 
 // PinContext keeps the context window at n and skips the server probe.
@@ -315,6 +371,7 @@ func (c *Client) ResolveModel(ctx context.Context) (string, error) {
 		}
 		return "", fmt.Errorf("llm: build models request: %w", err)
 	}
+	_ = c.authorize(req)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		if want != "" {
@@ -570,6 +627,41 @@ func (c *Client) StreamTools(ctx context.Context, msgs []Message, tools []ToolSp
 	return c.complete(ctx, msgs, tools, opts, onDelta)
 }
 
+// chatPayload builds the request body, omitting temperature when the provider
+// rejects it and naming the output cap with the model's field.
+func (c *Client) chatPayload(r chatRequest) map[string]any {
+	m := map[string]any{
+		"model":    r.Model,
+		"messages": r.Messages,
+		"stream":   r.Stream,
+	}
+	if c.sendTemperature {
+		m["temperature"] = r.Temperature
+	}
+	if r.TopP != 0 {
+		m["top_p"] = r.TopP
+	}
+	if r.MaxTokens > 0 {
+		m[c.tokensField()] = r.MaxTokens
+	}
+	if r.ChatTemplateKwargs != nil {
+		m["chat_template_kwargs"] = r.ChatTemplateKwargs
+	}
+	if len(r.Tools) > 0 {
+		m["tools"] = r.Tools
+	}
+	if len(r.ToolChoice) > 0 {
+		m["tool_choice"] = r.ToolChoice
+	}
+	if r.ResponseFormat != nil {
+		m["response_format"] = r.ResponseFormat
+	}
+	if r.StreamOptions != nil {
+		m["stream_options"] = r.StreamOptions
+	}
+	return m
+}
+
 func (c *Client) complete(ctx context.Context, msgs []Message, tools []ToolSpec, opts ChatOptions, onDelta func(string) error) (Message, Usage, error) {
 	msgs = Normalize(msgs)
 	extra := 1
@@ -667,7 +759,7 @@ func (c *Client) completeAttempt(ctx context.Context, msgs []Message, tools []To
 			},
 		}
 	}
-	payload, err := json.Marshal(reqBody)
+	payload, err := json.Marshal(c.chatPayload(reqBody))
 	if err != nil {
 		return Message{}, Usage{}, fmt.Errorf("llm: encode request: %w", err), false
 	}
@@ -693,6 +785,9 @@ func (c *Client) completeAttempt(ctx context.Context, msgs []Message, tools []To
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
+	if err := c.authorize(req); err != nil {
+		return Message{}, Usage{}, err, false
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
