@@ -255,12 +255,12 @@ func TestRemoteConfirmDeclinesOnPTY(t *testing.T) {
 	r := startRemoteConfirmPTY(t, "TestRemoteConfirmDeclinesOnPTY", "remote-decline")
 	r.ask(t, "hi there\r")
 	r.noRequests(t, " before the answer")
-	r.v.typeKeys("n\r", screenHas("remote use declined;"))
+	r.v.typeKeys("n\r", screenHas("remote use declined"))
 	r.noRequests(t, " after a typed n")
 	// Take the mark after the first decline: no new confirmation prompt may
 	// appear for the rest of the process.
 	mark := len(r.v.raw())
-	r.v.typeKeys("again\r", screenHas("remote use was declined for this process"))
+	r.v.typeKeys("again\r", screenHas("remote use declined for this process"))
 	if tail := string(r.v.raw()[mark:]); strings.Contains(tail, remoteRemotePrompt) {
 		failScreen(t, "the declined decision was not remembered (prompt shown again)", r.v.shot(), r.v.raw())
 	}
@@ -279,7 +279,7 @@ func TestRemoteConfirmCtrlCIsNoOnPTY(t *testing.T) {
 	r := startRemoteConfirmPTY(t, "TestRemoteConfirmCtrlCIsNoOnPTY", "remote-ctrlc")
 	r.ask(t, "hi there\r")
 	r.noRequests(t, " before the answer")
-	r.v.typeKeys("\x03", screenHas("remote use declined;"))
+	r.v.typeKeys("\x03", screenHas("remote use declined"))
 	if dump := r.v.shot().dump(); strings.Contains(dump, "remote confirmation:") {
 		failScreen(t, "Ctrl+C was reported as a read error instead of n", r.v.shot(), r.v.raw())
 	}
