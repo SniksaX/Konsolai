@@ -38,6 +38,7 @@ type Model struct {
 	Role   string // main, fast, embed, rerank
 	Status Status
 	Stat   string // already formatted for the stat column
+	Remote bool   // the endpoint host is outside loopback and the private ranges
 }
 
 type Session struct {
@@ -259,7 +260,8 @@ func configuredProbes(in Input) ([]Model, []probeSpec) {
 }
 
 func probeModel(ctx context.Context, in Input, role, name, endpoint, kind string) Model {
-	m := Model{Name: name, Role: role, Status: StatusTimeout, Stat: "timeout"}
+	m := Model{Name: name, Role: role, Status: StatusTimeout, Stat: "timeout",
+		Remote: config.URLIsRemote(endpoint)}
 	if strings.TrimSpace(endpoint) == "" {
 		m.Status = StatusDown
 		m.Stat = "n/a"
