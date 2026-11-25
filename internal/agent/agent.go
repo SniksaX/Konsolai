@@ -90,6 +90,9 @@ type Config struct {
 	// ToolChoiceMode is named, required or auto for a forced tool. Empty is
 	// named, the local-server default.
 	ToolChoiceMode string
+	// ReasoningHeadroom is added to the output cap for a reasoning model, so
+	// its reasoning tokens do not consume the whole answer budget.
+	ReasoningHeadroom int
 }
 
 // Pricing is the serving model's location and its prices per million tokens.
@@ -351,6 +354,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			opts.ToolChoice = cfg.toolChoiceFor("propose_plan")
 		}
 		_, maxTok, elide, err := cfg.prepCall(msgs, stepSpecs, &state.readSpans, state.seenRead)
+		maxTok += cfg.ReasoningHeadroom
 		if err != nil {
 			return err
 		}
@@ -367,6 +371,9 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		msg, usage, err := cfg.Client.Complete(ctx, msgs, stepSpecs, opts)
 		modelElapsed := time.Since(t0)
 		live.Stop()
+		if cfg.Trace && cfg.Client != nil && cfg.Client.LastReasoningFallback() != "" {
+			fmt.Fprintf(cfg.Err, "reasoning_effort not supported with tools; using %s for this model (retried once)\n", cfg.Client.LastReasoningFallback())
+		}
 		if errors.Is(err, llm.ErrTruncated) {
 			msgs = aggressiveTrim(msgs, userIdx)
 			userIdx = lastUserTask(msgs, task)
@@ -448,6 +455,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			}
 			label = "thinking"
 			_, maxTok, elide, err = cfg.prepCall(msgs, stepSpecs, &state.readSpans, state.seenRead)
+			maxTok += cfg.ReasoningHeadroom
 			if err != nil {
 				return err
 			}
