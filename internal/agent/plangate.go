@@ -80,6 +80,24 @@ func docsPlannedWriteNote(files []string) string {
 	return "Write the planned Markdown file with write_file now."
 }
 
+// prePlanSpecs is what the model may call before the plan is approved: the
+// read-only explorers plus propose_plan. A mutating tool is not offered, so a
+// build turn cannot waste its first call on "call propose_plan first".
+func prePlanSpecs(specs []llm.ToolSpec) []llm.ToolSpec {
+	keep := map[string]bool{
+		"propose_plan": true,
+		"read_file":    true, "list_dir": true, "find_files": true,
+		"outline": true, "recall": true, "web_fetch": true,
+	}
+	out := make([]llm.ToolSpec, 0, len(keep))
+	for _, s := range specs {
+		if keep[s.Function.Name] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 func planOnlySpecs(specs []llm.ToolSpec) []llm.ToolSpec {
 	for _, s := range specs {
 		if s.Function.Name == "propose_plan" {
