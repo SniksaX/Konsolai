@@ -209,6 +209,11 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 	msgs = append(msgs, userMsg)
 	userIdx := len(msgs) - 1
 	_ = rec.Message(ctx, userMsg)
+	// If the step ends early (interrupt, abort, rejected, final call), the last
+	// assistant tool_calls message may not have all its replies. Record them so
+	// the stored history stays valid for a resume. The closure reads the final
+	// msgs value, which grows as the loop appends.
+	defer func() { RecordMissingToolReplies(ctx, rec, msgs) }()
 	specs := cfg.Tools.Specs()
 	state := &runState{
 		seenFail:     make(map[string]struct{}),
