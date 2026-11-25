@@ -119,6 +119,7 @@ func TestSetTreeEnumsMatchAllowed(t *testing.T) {
 		"ui.welcome":           {"welcome"},
 		"ui.clear_header":      {"clear"},
 		"language.mode":        {"language"},
+		"llm.tool_choice_mode": {"tool_choice"},
 	}
 	for _, k := range config.Keys() {
 		if len(k.Allowed) == 0 {
