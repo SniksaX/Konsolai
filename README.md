@@ -14,6 +14,8 @@
   <img alt="models" src="https://img.shields.io/badge/models-OpenAI--compatible-orange">
 </p>
 
+**Latest release: [v0.4.0](https://github.com/SniksaX/Konsolai/releases/tag/v0.4.0)** · [Release notes and downloads](https://github.com/SniksaX/Konsolai/releases/latest) · [Changelog](CHANGELOG.md)
+
 ## Quick start
 
 ### 1. Install
