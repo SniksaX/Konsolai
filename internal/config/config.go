@@ -82,13 +82,14 @@ type Roles struct {
 }
 
 type LLM struct {
-	IdleTimeoutSeconds int          `yaml:"idle_timeout_seconds"`
-	MaxTokens          MaxTokens    `yaml:"max_tokens"`
-	ThinkingMaxTokens  int          `yaml:"thinking_max_tokens"`
-	Temperature        Temperatures `yaml:"temperature"`
-	TopP               float64      `yaml:"top_p"`
-	Retries            int          `yaml:"retries"`
-	RetryWaitMS        int          `yaml:"retry_wait_ms"`
+	IdleTimeoutSeconds   int          `yaml:"idle_timeout_seconds"`
+	MaxTokens            MaxTokens    `yaml:"max_tokens"`
+	ThinkingMaxTokens    int          `yaml:"thinking_max_tokens"`
+	Temperature          Temperatures `yaml:"temperature"`
+	TopP                 float64      `yaml:"top_p"`
+	Retries              int          `yaml:"retries"`
+	RetryWaitMS          int          `yaml:"retry_wait_ms"`
+	RemoteProbeTimeoutMS int          `yaml:"remote_probe_timeout_ms"`
 }
 
 // Temperatures are sampling temperatures per intent.
@@ -253,8 +254,9 @@ type Safety struct {
 }
 
 type Router struct {
-	ActionVerbs []string `yaml:"action_verbs"`
-	Targets     []string `yaml:"targets"`
+	ActionVerbs           []string `yaml:"action_verbs"`
+	Targets               []string `yaml:"targets"`
+	AnswerMainAboveTokens int      `yaml:"answer_main_above_tokens"`
 }
 
 type Tools struct {
@@ -705,6 +707,13 @@ func (c Config) ProbeDeadline() time.Duration {
 // ProbeTimeout is one welcome endpoint probe. Omitted config keeps 300ms.
 func (c Config) ProbeTimeout() time.Duration {
 	return time.Duration(nonzero(c.UI.ProbeTimeoutMS, 300)) * time.Millisecond
+}
+
+// RemoteProbeTimeout is one probe of a remote model endpoint. A remote host
+// answers slower than a local one, so it keeps its own budget. Omitted config
+// keeps 3s.
+func (c Config) RemoteProbeTimeout() time.Duration {
+	return time.Duration(nonzero(c.LLM.RemoteProbeTimeoutMS, 3000)) * time.Millisecond
 }
 
 // EscTimeout is the gap allowed between bytes of one escape sequence.
