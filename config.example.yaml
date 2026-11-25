@@ -9,6 +9,11 @@ defaults:
     default:
       endpoint: http://localhost:8000/v1   # OpenAI-compatible API base
       model: ""   # empty uses the server default
+      api_key_env: ""   # environment variable holding the bearer key
+      max_tokens_field: ""   # max_tokens or max_completion_tokens
+      send_temperature: true   # some providers reject temperature
+      price_in: 0   # USD per million input tokens
+      price_out: 0   # USD per million output tokens
       thinking_kwargs: false   # send chat_template_kwargs.enable_thinking
       context: 0   # 0 uses the server context window
       notes: ""   # optional note
@@ -156,6 +161,10 @@ defaults:
   router:
     action_verbs: ["create", "write", "make", "add", "generate", "fix", "update", "edit", "change", "refactor", "rename", "delete", "remove", "install", "run", "build", "deploy", "commit", "move", "copy", "kill", "stop", "start", "restart", "test", "free", "close", "open", "launch", "crée", "créer", "écris", "écrire", "ajoute", "ajouter", "génère", "générer", "corrige", "corriger", "modifie", "modifier", "supprime", "supprimer", "installe", "installer", "lance", "lancer", "déplace", "renomme", "tue", "tuer", "arrête", "arrete", "arrêter", "arreter", "démarre", "demarre", "relance", "teste", "libère", "libere", "ferme"]   # verbs that suggest an act or build turn
     targets: ["file", "folder", "directory", "project", "repo", "branch", "readme", "test", "function", "endpoint", "fichier", "dossier", "projet", "branche", "process", "pid", "port", "server", "container", "service", "processus", "serveur", "conteneur"]   # nouns that suggest a project target
+  privacy:
+    allow_remote: true   # allow prompts to be sent to a remote model
+    remote_roles: ["main", "fast"]   # roles that may point at a remote model
+    session_token_cap: 0   # stop remote calls after this many tokens; 0 = off
 
 profiles:
   home: {}
