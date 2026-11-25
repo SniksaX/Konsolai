@@ -116,11 +116,37 @@ konsolai /set rerank off
 
 `/set model` prints name, roles, host, id, context, and status. The current main and fast rows are marked. `/set model discover` lists ids on each endpoint that are not configured yet, each with the `/set model add` line. Embed and rerank URLs are optional. The client appends `/embed` and `/rerank`. With `rag.enabled` false there is no ingestion, no recall tool, and no warning. `/status` prints `not configured` for a role that is off.
 
-### API-key models and request quirks
+## Cloud models
+
+A model is remote when its endpoint host resolves outside loopback and the private address ranges. Remote models are supported: `/set model`, `/status` and the welcome models box mark a remote model, and the footer marks a remote main model; the privacy keys below gate it. `/doctor` prints one line per remote model with its host, whether a key is present (never the value), and a warning for plain HTTP.
+
+The presets `openai`, `openrouter`, `groq`, `together`, `mistral`, `deepseek`, `gemini`, and `anthropic` fill the endpoint, context and request quirks for an API-key provider. They come from each provider's OpenAI-compatible documentation and were not exercised against live accounts here. The `anthropic` preset is experimental: its OpenAI-compatible endpoint accepts an auth header that has not been verified.
+
+### Privacy
+
+Remote use is allowed by default and gated by three keys:
+
+| key | default | meaning |
+| --- | --- | --- |
+| `privacy.allow_remote` | `true` | allow prompts to be sent to a remote model |
+| `privacy.remote_roles` | `main`, `fast` | roles that may point at a remote model; empty means no restriction |
+| `privacy.session_token_cap` | `0` | stop remote calls after this many tokens; `0` = off |
+
+The first remote call in a process asks once on the terminal:
+
+```
+this sends your prompts and file contents to api.openai.com [y/N]:
+```
+
+In the REPL the question opens in the normal editor, so history, arrows and paste work; Ctrl+C and Ctrl+D count as no. A one-shot run reads the answer from stdin, and a non-interactive run without `--yes` refuses the remote model before sending anything; `--yes` skips the question. Only `y` or `yes` agrees, and the answer is remembered for the rest of the process: an agreed remote model is not asked again, and a decline refuses every remote model until the process exits. The cap adds the token usage each remote call reports; once the total passes it, the next remote call stops with a `privacy.session_token_cap` error.
+
+What leaves the machine is the prompts and the file contents a turn attaches, plus the model's replies. `config.yaml` stays local, and the key goes only into the `Authorization` header for that host. A key over plain HTTP to a non-local host is refused; use HTTPS.
+
+### Keys and request quirks
 
 A model entry can name the environment variable that holds its bearer key: `api_key_env`. The key is read at call time; when the variable is unset the client falls back to `~/.config/konsolai/secrets` (mode `0600`, directory `0700`, never in the repository or in `config.yaml`). `/set key <model>` reads a key with hidden input and writes that file. `/set` refuses keys as plain arguments.
 
-A model also accepts `max_tokens_field` (`max_tokens` or `max_completion_tokens`), `send_temperature` (default true; some providers reject the field), `context` (required for a remote provider), and optional `price_in` / `price_out` in USD per million tokens.
+A model also accepts `max_tokens_field` (`max_tokens` or `max_completion_tokens`), `send_temperature` (default true; some providers reject the field), `context` (the window; `0` means the server reports it), and optional `price_in` / `price_out` in USD per million tokens.
 
 ```sh
 konsolai /set model add gpt --provider openai
@@ -128,6 +154,6 @@ konsolai /set key gpt
 konsolai /set model main gpt
 ```
 
-The presets `openai`, `openrouter`, `groq`, `together`, `mistral`, `deepseek`, `gemini`, and `anthropic` fill the endpoint, context and quirks. They come from each provider's OpenAI-compatible documentation and were not exercised against live accounts here. The `anthropic` preset is experimental: its OpenAI-compatible endpoint accepts an auth header that has not been verified.
+With `price_in` or `price_out` set on a remote model, the end-of-turn stats line (`ui.stats`, on by default) ends with the turn cost, such as `$0.015`, and the `--trace` stats line adds `cost=$0.015 in=2.0k out=1.0k`. A local model, or a remote model with both prices at `0`, shows no cost.
 
-A model whose host resolves to a public address is marked `remote` in `/set model`. Embedding endpoints must be loopback or private; a remote embed service is rejected. The `privacy.allow_remote`, `privacy.remote_roles`, and `privacy.session_token_cap` keys are defined; the remote-use prompt, role enforcement, cost line and token cap are not wired yet.
+Embedding endpoints must be loopback or private; a remote embed service is rejected, so RAG stays local.
