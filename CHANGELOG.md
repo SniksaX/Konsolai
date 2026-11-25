@@ -1,221 +1,64 @@
-## Unreleased
+## v0.4.0
 
 ### Added
-- [ADD|MINOR] Offer an optional command source for an input mode
-- [ADD|MINOR] Let an input mode supply the @ menu rows
-- [ADD|MINOR] Let an input mode claim a slash line
-- [ADD|MINOR] Record the config show golden
-- [ADD|MEDIUM] Set a model endpoint
-- [ADD|MINOR] Allow reading a line through the editor
-- [ADD|MINOR] Add a registry for alternate input modes
-- [ADD|MINOR] Allow build-tagged extra commands
-- [ADD|MINOR] Print the machine-readable trace stats line
-- [ADD|MINOR] Register agent.plan_think
-- [ADD|MINOR] Add the plan thinking mode
-- [ADD|MINOR] Store reasoning tokens on turn stats
-- [ADD|MINOR] Register llm.thinking_max_tokens
-- [ADD|MINOR] Add the thinking token cap setting
-- [ADD|MEDIUM] Keep a truncated thinking plan in the turn
-- [ADD|MEDIUM] Finish the turn when the shell cwd is missing
-- [ADD|MAJOR] Check shell paths against the working directory
-- [ADD|MINOR] Fail command tests that write escapes to stdout
-- [ADD|MINOR] Fail repl tests that write escapes to stdout
-- [ADD|MINOR] Register docs.render_timeout_ms
-- [ADD|MINOR] Add the docs render timeout setting
-- [ADD|MAJOR] Flag finish claims without matching tools
-- [ADD|MINOR] Detect contradictions of claimed actions
-- [ADD|MEDIUM] Define the answer escalate tool
-- [ADD|MINOR] Stream chat completions with tools
-- [ADD|MINOR] Check the badge word is bold
-- [ADD|MEDIUM] Check the confirm summary color
-- [ADD|MINOR] Check heading bold and plain emphasis
-- [ADD|MEDIUM] Check the echo is heading without bold
-- [ADD|MAJOR] Exercise clear and the pinned header on a real terminal
-- [ADD|MINOR] Declare clear header and pinned header
-- [ADD|MINOR] Read the clear-header and pin settings
-- [ADD|MINOR] Add scroll-region sequences
-- [ADD|MEDIUM] Show the new branch in the footer
-- [ADD|MEDIUM] Resume the first session from another project
-- [ADD|MINOR] Check recent numbers and the other-project dir
-- [ADD|MEDIUM] Match welcome rows to the numbered list
-- [ADD|MAJOR] Number sessions with the current project first
-- [ADD|MAJOR] Drive the @ menu from a real terminal
-- [ADD|MAJOR] List files from an @ menu
-- [ADD|MAJOR] Exercise editing keys on a real terminal
-- [ADD|MEDIUM] Check escape parsing and emacs bindings
-- [ADD|MINOR] Treat Esc as lone when polling is unavailable
-- [ADD|MEDIUM] Poll stdin for the rest of an escape sequence
-- [ADD|MAJOR] Read a full escape sequence after Esc
+- [ADD|MINOR] Price the turn from the serving model
+- [ADD|MINOR] Carry the serving model's pricing in agent stats
+- [ADD|MAJOR] Report remote models in /doctor
+- [ADD|MEDIUM] Check every provider preset field
+- [ADD|MINOR] Mark remote models in the welcome data
+- [ADD|MEDIUM] Read remote confirmation through the REPL editor
+- [ADD|MEDIUM] Gate remote calls on the privacy settings
+- [ADD|MAJOR] Add /set key and provider presets
+- [ADD|MEDIUM] Send the bearer key and model quirks
+- [ADD|MINOR] Add the privacy settings to the key table
+- [ADD|MEDIUM] Add API-key provider presets
+- [ADD|MEDIUM] Store API keys outside the config file
+- [ADD|MEDIUM] Classify local and remote model hosts
+- [ADD|MINOR] Add per-model auth, quirks and privacy settings
+- [ADD|MINOR] Document the safety model in its own page
+- [ADD|MAJOR] Check the command page slash table
+- [ADD|MAJOR] Document commands in their own page
+- [ADD|MEDIUM] Check the configuration page tables
+- [ADD|MAJOR] Document configuration in its own page
 
 ### Changed
-- [UPDATE|MINOR] Document the shell environment and output rules
-- [UPDATE|MEDIUM] Redact the remaining persisted secret fields
-- [UPDATE|MEDIUM] Scrub the shell environment and mask its output
-- [UPDATE|MEDIUM] Deny sensitive reads in read-only shell commands
-- [UPDATE|MINOR] Run the Docker tests in CI
-- [UPDATE|MINOR] Reuse the Docker gate in the user test
-- [UPDATE|MINOR] Gate the Docker tests behind an opt-in
-- [UPDATE|MINOR] Draw a mode rows in the slash menu
-- [UPDATE|MINOR] Submit a listed line to the mode instead of the registry
-- [UPDATE|MINOR] Install the mention source in the editor
-- [UPDATE|MEDIUM] Take @ menu rows from a mention source
-- [UPDATE|MINOR] Offer slash lines to the active mode
-- [UPDATE|MINOR] Expect the endpoint row in the model menu
-- [UPDATE|MINOR] Expect the endpoint level in the set tree
-- [UPDATE|MINOR] Offer model endpoints in the set tree
-- [UPDATE|MINOR] Show the models before the other keys
-- [UPDATE|MEDIUM] Print and mask the models block
-- [UPDATE|MINOR] Pass the mode to the prompt test
-- [UPDATE|MEDIUM] Route lines to an active input mode
-- [UPDATE|MINOR] Show an input mode in the prompt and footer
-- [UPDATE|MINOR] Pass build tags through the build script
-- [UPDATE|MINOR] Record the exit codes and the rejected exit
-- [UPDATE|MINOR] Document the one-shot exit codes
-- [UPDATE|MINOR] Expect ErrRejected from identical plan rejects
-- [UPDATE|MINOR] Name the MIT license
-- [UPDATE|MINOR] Correct the guard, screenshot, and license notes
-- [UPDATE|MINOR] Drop the stale guard note from the embed service
-- [UPDATE|MINOR] Drop model ids from the changelog name filter
-- [UPDATE|MEDIUM] Deny only machine and personal names
-- [UPDATE|MINOR] Expect the answer trace stats line
-- [UPDATE|MINOR] Print answer trace stats
-- [UPDATE|MEDIUM] Count rejects, outside-plan prompts, and the slowest step
-- [UPDATE|MAJOR] Accept step commands and plan variants
-- [UPDATE|MINOR] Match a command written in the plan steps
-- [UPDATE|MINOR] Pass plan thinking into the agent
-- [UPDATE|MINOR] Default plan thinking to on reject
-- [UPDATE|MINOR] Complete plan thinking values
-- [UPDATE|MINOR] Show plan thinking in the set menu
-- [UPDATE|MINOR] Set plan thinking from the think command
-- [UPDATE|MINOR] Map plan thinking into the set tree
-- [UPDATE|MINOR] Offer plan thinking in the set menu
-- [UPDATE|MINOR] Recognize always plan thinking
-- [UPDATE|MINOR] Keep a valid plan proposed without thinking
-- [UPDATE|MINOR] Document the plan thinking mode
-- [UPDATE|MINOR] Document plan thinking in the set table
-- [UPDATE|MINOR] Expect the reasoning-token schema version
-- [UPDATE|MEDIUM] Accept real creates and edits as verified claims
-- [UPDATE|MEDIUM] Send the thinking cap and count reasoning tokens
-- [UPDATE|MINOR] Persist reasoning tokens from each model call
-- [UPDATE|MEDIUM] Show reasoning tokens in the stats table
-- [UPDATE|MINOR] Sum reasoning tokens in the stats report
-- [UPDATE|MINOR] Record reasoning tokens with each turn stat
-- [UPDATE|MINOR] Show the thinking token cap in the set menu
-- [UPDATE|MINOR] Document the thinking token cap
-- [UPDATE|MEDIUM] Keep a partial plan when the thinking cap is hit
-- [UPDATE|MEDIUM] Apply the thinking token cap on thinking steps
-- [UPDATE|MINOR] Show reasoning tokens on the trace and stats line
-- [UPDATE|MEDIUM] Count reasoning tokens and cap thinking requests
-- [UPDATE|MINOR] Repeat a shell failure inside the project
-- [UPDATE|MINOR] Keep the turn alive when a tool run fails
-- [UPDATE|MEDIUM] Rewrite a leading cd and report a missing cwd
-- [UPDATE|MINOR] Reject a shell cwd outside the project
-- [UPDATE|MINOR] Keep editing-key readline off the real stdout
-- [UPDATE|MINOR] Keep in-process readline off the real stdout
-- [UPDATE|MEDIUM] Wait for rendered text after each e2e key
-- [UPDATE|MINOR] Wait for applied now and the prompt row
-- [UPDATE|MEDIUM] Wait for rendered text after each PTY key
-- [UPDATE|MINOR] Show the docs render timeout in the set menu
-- [UPDATE|MINOR] Apply the docs render timeout from /set
-- [UPDATE|MINOR] Apply the docs render timeout at startup
-- [UPDATE|MINOR] Document the docs render timeout
-- [UPDATE|MEDIUM] Wait for Mermaid with the scaled render timeout
-- [UPDATE|MAJOR] Filter Chrome noise and honor the render timeout
-- [UPDATE|MINOR] Quiet Chrome first-run and browser checks
-- [UPDATE|MINOR] Require the pinned welcome to survive the first prompt
-- [UPDATE|MINOR] Align slash menu summaries in one column
-- [UPDATE|MINOR] Name the host in the endpoint probe warning
-- [UPDATE|MINOR] Expect the /doctor hint on dial errors
-- [UPDATE|MINOR] Point unreachable model errors at /doctor
-- [UPDATE|MAJOR] Ask once per confirm and echo the decision
-- [UPDATE|MEDIUM] Align /help and list each command's arguments
-- [UPDATE|MEDIUM] Align /history columns and colour status
-- [UPDATE|MINOR] Expect the blocked-or-failed honesty wording
-- [UPDATE|MINOR] Expect the honesty prompt lines
-- [UPDATE|MAJOR] Warn when finish claims are unverified
-- [UPDATE|MAJOR] Require observed results in agent prompts
-- [UPDATE|MINOR] Show expanded router verbs in the set menu
-- [UPDATE|MINOR] Attach prior exchange on contradiction
-- [UPDATE|MINOR] Route contradictions to act
-- [UPDATE|MINOR] Pass prior context into the action floor
-- [UPDATE|MINOR] Document the expanded router verbs
-- [UPDATE|MEDIUM] Expand router verb and target defaults
-- [UPDATE|MAJOR] Floor kill and pronoun follow-ups
-- [UPDATE|MAJOR] Retract answer claims and escalate
-- [UPDATE|MAJOR] Detect claimed actions in answer text
-- [UPDATE|MAJOR] Offer escalate on main-model answers
-- [UPDATE|MINOR] Expect the answer escalate rule
-- [UPDATE|MAJOR] Tell answer mode to escalate, not invent
-- [UPDATE|MINOR] Expect the echo in the heading color
-- [UPDATE|MINOR] Describe the echo as heading color
-- [UPDATE|MAJOR] Bold the intent badge in the heading color
-- [UPDATE|MAJOR] Keep bold on markdown headings only
-- [UPDATE|MAJOR] Paint confirm summaries in the heading color
-- [UPDATE|MAJOR] Paint the echo in the heading color
-- [UPDATE|MAJOR] Drop bold from the selection color
-- [UPDATE|MAJOR] Paint bold text in the heading color
-- [UPDATE|MAJOR] Redraw the welcome after a clear
-- [UPDATE|MEDIUM] Count the rows a welcome paint uses
-- [UPDATE|MINOR] Reset the scroll region before Ctrl-L
-- [UPDATE|MINOR] Clear the screen from shell clear
-- [UPDATE|MINOR] Clear the screen from /cmd clear
-- [UPDATE|MINOR] Map the clear header into the set tree
-- [UPDATE|MEDIUM] Offer clear and forget under /cmd
-- [UPDATE|MINOR] Point /cmd clear at the screen
-- [UPDATE|MINOR] Show clear header in the set menu
-- [UPDATE|MINOR] Document the clear header and scroll region
-- [UPDATE|MINOR] Name clear and pinned header
-- [UPDATE|MINOR] Document clear header and pinned header
-- [UPDATE|MAJOR] Rebind the project when the directory changes
-- [UPDATE|MINOR] Point the welcome data at the new directory
-- [UPDATE|MINOR] Hand a shell cd to the caller
-- [UPDATE|MINOR] Document the shared session numbers
-- [UPDATE|MINOR] Document /history --here
-- [UPDATE|MAJOR] List every project and mute the other dirs
-- [UPDATE|MAJOR] Load history from the shared session list
-- [UPDATE|MEDIUM] Show another project's directory on recent rows
-- [UPDATE|MAJOR] Number recent rows and mark another project
-- [UPDATE|MAJOR] Fill the recent panel from the numbered list
-- [UPDATE|MINOR] Show the escape timeout in the set menu
-- [UPDATE|MINOR] Allow a menu result to set the cursor
-- [UPDATE|MAJOR] Retire readline tab cycling for @
-- [UPDATE|MINOR] Feed the live timeout and working directory to the prompt
-- [UPDATE|MINOR] Publish the escape timeout default
-- [UPDATE|MINOR] Expect the escape timeout in factory YAML
-- [UPDATE|MINOR] Declare ui.esc_timeout_ms
-- [UPDATE|MINOR] Store the escape-sequence byte gap
-- [UPDATE|MINOR] Scale test timeouts in CI
-- [UPDATE|MINOR] Keep container tests from starting together
-- [UPDATE|MEDIUM] Bind compose tests to a free host port
-- [UPDATE|MAJOR] Parse cursor shapes in the e2e screen
-- [UPDATE|MAJOR] Drive end-to-end turns from the screen
-- [UPDATE|MEDIUM] Wait for highlighted input on the screen
-- [UPDATE|MEDIUM] Wait for the slash row before the next key
-- [UPDATE|MAJOR] Wait for set menus before the next key
-- [UPDATE|MEDIUM] Wait for the theme picker before keys
-- [UPDATE|MAJOR] Step argument menus on the virtual screen
-- [UPDATE|MAJOR] Wait on the rendered PTY screen
+- [UPDATE|MINOR] Record the remote model limitations
+- [UPDATE|MEDIUM] Add a cloud models section to the README
+- [UPDATE|MEDIUM] Document cloud models in the configuration guide
+- [UPDATE|MINOR] Feed the turn pricing into the stats lines
+- [UPDATE|MEDIUM] Add the remote turn cost to the stats lines
+- [UPDATE|MINOR] Feed the footer the remote main model
+- [UPDATE|MINOR] Mark a remote model in the footer
+- [UPDATE|MINOR] Mark remote endpoints in /status
+- [UPDATE|MEDIUM] Mark the remote model in the welcome goldens
+- [UPDATE|MINOR] Paint the remote marker on welcome models
+- [UPDATE|MINOR] Wire the REPL remote prompt in Run
+- [UPDATE|MAJOR] Cap the set menu to the terminal height
+- [UPDATE|MINOR] Record the privacy rows in the set menu
+- [UPDATE|MINOR] Drop the hidden-key menu filter
+- [UPDATE|MINOR] Show the privacy keys in the set menu
+- [UPDATE|MINOR] Mark the Anthropic preset experimental
+- [UPDATE|MINOR] Print the Anthropic preset warning
+- [UPDATE|MINOR] Remember the run --yes for remote gating
+- [UPDATE|MEDIUM] Gate remote clients and feed the token cap
+- [UPDATE|MINOR] Gate the reach probe like the client
+- [UPDATE|MEDIUM] Refuse plain-HTTP keys and mask echoed keys
+- [UPDATE|MEDIUM] Refuse a remote model before any request
+- [UPDATE|MINOR] Expose the endpoint host for messages
+- [UPDATE|MINOR] Document API-key providers
+- [UPDATE|MEDIUM] Document API-key models
+- [UPDATE|MEDIUM] Regenerate the sample config
+- [UPDATE|MINOR] Record the privacy keys in config show
+- [UPDATE|MINOR] Keep hidden settings out of the menu
+- [UPDATE|MEDIUM] Apply model auth and quirks at startup
+- [UPDATE|MEDIUM] Apply model auth and quirks to clients
+- [UPDATE|MINOR] Send the bearer key on the probe
+- [UPDATE|MINOR] Persist the new model fields with /set
+- [UPDATE|MEDIUM] Read and write the new model fields
+- [UPDATE|MINOR] Keep only the version, license, Go and models badges
+- [UPDATE|MAJOR] Rewrite the README for 0.3.0
+- [UPDATE|MAJOR] Keep the README image check on local images
 
 ### Fixed
-- [FIX|MINOR] Import os in the config show test
-- [FIX|MINOR] Let continue resume a rejected turn
-- [FIX|MAJOR] Exit 5 with one clear line on a rejected turn
-- [FIX|MAJOR] Return ErrRejected when identical rejects stop a turn
-- [FIX|MINOR] Stop inventing a.txt in the plan error example
-- [FIX|MINOR] Home the cursor on DECSTBM in the PTY test screen
-- [FIX|MINOR] Keep the cursor in place when setting the scroll region
-- [FIX|MINOR] Report a model resolve failure with ModelErrorLine
-- [FIX|MINOR] Paint diff file headers as headings, not changes
-- [FIX|MINOR] Pad stats cells by display width
-- [FIX|MINOR] Count fuser as a verified kill command
-- [FIX|MINOR] Match user rejected in the e2e mock only
-- [FIX|MINOR] Avoid the word rejected in honesty prompts
-- [FIX|MINOR] Wait from the key's own screen mark
-- [FIX|MINOR] Remember the screen before a key is sent
-- [FIX|MINOR] Read the escape fallback from config
-- [FIX|MINOR] Read the escape fallback from config
-- [FIX|MAJOR] Stop arrow keys from being typed as text
-
-### Removed
-- [DELETE|MINOR] Drop unused e2e stream waits
+- [FIX|MINOR] Size the set-menu test to the menu height
 
