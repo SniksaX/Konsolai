@@ -93,6 +93,9 @@ type Config struct {
 	// ReasoningHeadroom is added to the output cap for a reasoning model, so
 	// its reasoning tokens do not consume the whole answer budget.
 	ReasoningHeadroom int
+	// AnswerPanel frames the final answer on a TTY; JSONMaxLines caps JSON.
+	AnswerPanel  bool
+	JSONMaxLines int
 }
 
 // Pricing is the serving model's location and its prices per million tokens.
@@ -552,7 +555,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			if state.printedBlock {
 				fmt.Fprintln(cfg.Out)
 			}
-			writeAnswer(cfg.Out, text, cfg.Plain)
+			writeFinalAnswer(cfg, cfg.Out, text, cfg.Plain)
 			for _, claim := range UnverifiedClaims(text, state.verified) {
 				fmt.Fprintln(cfg.Out, ui.Current().Warn("· not verified: "+claim))
 			}
@@ -889,7 +892,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				if state.printedBlock {
 					fmt.Fprintln(cfg.Out)
 				}
-				writeAnswer(cfg.Out, text, cfg.Plain)
+				writeFinalAnswer(cfg, cfg.Out, text, cfg.Plain)
 				for _, claim := range UnverifiedClaims(text, state.verified) {
 					fmt.Fprintln(cfg.Out, ui.Current().Warn("· not verified: "+claim))
 				}
@@ -1032,7 +1035,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			if state.printedBlock {
 				fmt.Fprintln(cfg.Out)
 			}
-			writeAnswer(cfg.Out, text, cfg.Plain)
+			writeFinalAnswer(cfg, cfg.Out, text, cfg.Plain)
 		}
 	}
 	return ErrMaxSteps
