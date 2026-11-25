@@ -27,7 +27,7 @@ type Snapshot struct {
 // source the model may use for identity and setup questions.
 type ModelFacts struct {
 	MainName   string // configured main model name
-	MainID     string // configured main model id; empty means the server default
+	MainID     string // configured main model id; empty means the server default is not chosen
 	MainHost   string // main endpoint host
 	MainRemote bool
 	FastName   string
@@ -75,7 +75,7 @@ func factText(s string) string {
 
 func factID(s string) string {
 	if strings.TrimSpace(s) == "" {
-		return "server default"
+		return "id not set"
 	}
 	return s
 }
