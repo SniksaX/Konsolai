@@ -33,6 +33,9 @@ const (
 	StatusAuth    Status = "auth failed" // the endpoint answered 401 or 403
 	StatusDown    Status = "down"        // error
 	StatusTimeout Status = "timeout"     // deadline hit
+	// StatusChecking is a probe that has not answered yet; the rows repaint
+	// when it does, so it is not an error.
+	StatusChecking Status = "checking"
 )
 
 type Model struct {
@@ -99,12 +102,16 @@ type Input struct {
 	Version        string
 	Now            func() time.Time
 	// Zero durations and RateWindow keep the built-in welcome budgets.
-	ProbeBudget   time.Duration
-	ProbeTimeout  time.Duration
-	GitTimeout    time.Duration
-	MemoryTimeout time.Duration
-	RateWindow    int
-	ModelSlow     time.Duration
+	ProbeBudget        time.Duration
+	ProbeTimeout       time.Duration
+	RemoteProbeTimeout time.Duration
+	GitTimeout         time.Duration
+	MemoryTimeout      time.Duration
+	RateWindow         int
+	ModelSlow          time.Duration
+	// OnUpdate receives a snapshot after every probe result, including after
+	// Gather returned. A nil hook keeps the one-shot behavior.
+	OnUpdate func(Data)
 	// APIKey resolves the bearer key for a role ("main" or "fast") at probe
 	// time. A nil hook sends no key.
 	APIKey func(role string) (string, error)
@@ -119,6 +126,9 @@ func resolveInput(in Input) Input {
 	}
 	if in.ProbeTimeout <= 0 {
 		in.ProbeTimeout = b.ProbeTimeout()
+	}
+	if in.RemoteProbeTimeout <= 0 {
+		in.RemoteProbeTimeout = b.RemoteProbeTimeout()
 	}
 	if in.GitTimeout <= 0 {
 		in.GitTimeout = b.GitQueryTimeout()
@@ -144,8 +154,6 @@ func Gather(ctx context.Context, in Input) (Data, error) {
 		ctx = context.Background()
 	}
 	in = resolveInput(in)
-	ctx, cancel := context.WithTimeout(ctx, in.ProbeBudget)
-	defer cancel()
 
 	nowFn := in.Now
 	if nowFn == nil {
@@ -154,20 +162,30 @@ func Gather(ctx context.Context, in Input) (Data, error) {
 	now := nowFn()
 
 	models, specs := configuredProbes(in)
-	g := &gate{d: Data{
-		Host:        banner.HostOf(in.Endpoint),
-		Version:     in.Version,
-		Placeholder: "ask anything",
-		Tip:         tipFor(now),
-		Session: Session{
-			Dir:    shortDir(in.CWD),
-			Build:  banner.ParseBuild(in.Version),
-			Memory: "memory offline",
+	memory := "memory offline"
+	if in.Store != nil {
+		memory = "checking"
+	}
+	g := &gate{
+		d: Data{
+			Host:        banner.HostOf(in.Endpoint),
+			Version:     in.Version,
+			Placeholder: "ask anything",
+			Tip:         tipFor(now),
+			Session: Session{
+				Dir:    shortDir(in.CWD),
+				Build:  banner.ParseBuild(in.Version),
+				Memory: memory,
+			},
+			Models: models,
+			Total:  len(models),
 		},
-		Models: models,
-		Total:  len(models),
-	}}
-
+		onUpdate: in.OnUpdate,
+	}
+	// Probes keep their own budgets and keep running after Gather returns: a
+	// late row repaints through OnUpdate instead of being dropped. The caller's
+	// cancellation still stops them.
+	probeCtx := context.WithoutCancel(ctx)
 	var wg sync.WaitGroup
 	run := func(fn func()) {
 		wg.Add(1)
@@ -180,35 +198,33 @@ func Gather(ctx context.Context, in Input) (Data, error) {
 	for _, sp := range specs {
 		sp := sp
 		run(func() {
-			g.setModel(sp.i, probeModel(ctx, in, sp.role, sp.name, sp.ep, sp.kind))
+			g.setModel(sp.i, probeModel(probeCtx, in, sp.role, sp.name, sp.ep, sp.kind))
 		})
 	}
-	run(func() { loadGit(ctx, in.CWD, g, in.GitTimeout) })
-	run(func() { loadMemory(ctx, in, g, now) })
+	run(func() { loadGit(probeCtx, in.CWD, g, in.GitTimeout) })
+	run(func() { loadMemory(probeCtx, in, g, now) })
 
 	done := make(chan struct{})
 	go func() {
 		wg.Wait()
 		close(done)
 	}()
+	timer := time.NewTimer(in.ProbeBudget)
+	defer timer.Stop()
 	select {
 	case <-done:
-	case <-ctx.Done():
+	case <-timer.C:
 	}
 
 	g.mu.Lock()
-	g.closed = true
-	d := g.d
+	d := g.snapshotLocked()
 	g.mu.Unlock()
+	return finalizeData(d, now), nil
+}
 
+// finalizeData fills the fallbacks a snapshot always needs.
+func finalizeData(d Data, now time.Time) Data {
 	d.Total = len(d.Models)
-	d.Up = 0
-	// slow counts as up: a slow server answered.
-	for _, m := range d.Models {
-		if m.Status == StatusUp || m.Status == StatusSlow {
-			d.Up++
-		}
-	}
 	if d.Placeholder == "" {
 		d.Placeholder = "ask anything"
 	}
@@ -218,13 +234,13 @@ func Gather(ctx context.Context, in Input) (Data, error) {
 	if d.Tip == "" {
 		d.Tip = tipFor(now)
 	}
-	return d, nil
+	return d
 }
 
 type gate struct {
-	mu     sync.Mutex
-	closed bool
-	d      Data
+	mu       sync.Mutex
+	d        Data
+	onUpdate func(Data)
 }
 
 func (g *gate) setModel(i int, m Model) {
@@ -232,11 +248,33 @@ func (g *gate) setModel(i int, m Model) {
 		return
 	}
 	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.closed || i < 0 || i >= len(g.d.Models) {
+	if i < 0 || i >= len(g.d.Models) {
+		g.mu.Unlock()
 		return
 	}
 	g.d.Models[i] = m
+	snap := g.snapshotLocked()
+	g.mu.Unlock()
+	g.publish(snap)
+}
+
+// snapshotLocked fills the derived counters. The caller holds g.mu.
+func (g *gate) snapshotLocked() Data {
+	d := g.d
+	d.Total = len(d.Models)
+	d.Up = 0
+	for _, m := range d.Models {
+		if m.Status == StatusUp || m.Status == StatusSlow {
+			d.Up++
+		}
+	}
+	return d
+}
+
+func (g *gate) publish(d Data) {
+	if g != nil && g.onUpdate != nil {
+		g.onUpdate(finalizeData(d, time.Now()))
+	}
 }
 
 type probeSpec struct {
@@ -255,7 +293,10 @@ func configuredProbes(in Input) ([]Model, []probeSpec) {
 			return
 		}
 		specs = append(specs, probeSpec{i: len(models), role: role, name: name, ep: ep, kind: kind})
-		models = append(models, Model{Name: name, Role: role, Status: StatusTimeout, Stat: "timeout"})
+		models = append(models, Model{
+			Name: name, Role: role, Status: StatusChecking, Stat: "checking",
+			Remote: hostIsRemote(ep),
+		})
 	}
 	add("main", in.Model, in.Endpoint, "models")
 	add("fast", in.FastModel, in.FastEndpoint, "models")
@@ -264,9 +305,12 @@ func configuredProbes(in Input) ([]Model, []probeSpec) {
 	return models, specs
 }
 
+// hostIsRemote is a seam for tests: the real classifier resolves the host.
+var hostIsRemote = config.URLIsRemote
+
 func probeModel(ctx context.Context, in Input, role, name, endpoint, kind string) Model {
-	m := Model{Name: name, Role: role, Status: StatusTimeout, Stat: "timeout",
-		Remote: config.URLIsRemote(endpoint)}
+	remote := hostIsRemote(endpoint)
+	m := Model{Name: name, Role: role, Status: StatusTimeout, Stat: "timeout", Remote: remote}
 	if strings.TrimSpace(endpoint) == "" {
 		m.Status = StatusDown
 		m.Stat = "n/a"
@@ -276,11 +320,17 @@ func probeModel(ctx context.Context, in Input, role, name, endpoint, kind string
 		return probeLocalModel(ctx, in, m, kind, endpoint)
 	}
 	c := llm.New(endpoint, "")
-	// The welcome cannot wait for the remote probe budget: a late result is
-	// dropped at the gather deadline anyway, so a remote probe keeps the
-	// short welcome timeout and a timeout reads as slow.
-	c.SetProbeTimeout(in.ProbeTimeout)
-	c.SetRemoteProbeTimeout(in.ProbeTimeout)
+	// A remote host answers slower than a local one; the late result still
+	// repaints its row, so it gets the full remote probe budget.
+	// The client classifies the endpoint on its own, so both budgets are set:
+	// a welcome-remote row keeps the longer remote budget either way.
+	if remote {
+		c.SetProbeTimeout(in.RemoteProbeTimeout)
+		c.SetRemoteProbeTimeout(in.RemoteProbeTimeout)
+	} else {
+		c.SetProbeTimeout(in.ProbeTimeout)
+		c.SetRemoteProbeTimeout(in.ProbeTimeout)
+	}
 	if in.APIKey != nil {
 		c.SetAPIKey(func() (string, error) { return in.APIKey(role) })
 	}
@@ -490,19 +540,18 @@ func loadGit(ctx context.Context, cwd string, g *gate, timeout time.Duration) {
 		return
 	}
 	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.closed {
-		return
-	}
 	if notRepo {
 		g.d.Session.Branch = "not a git repo"
-		return
+	} else {
+		g.d.Session.Branch = branch
+		g.d.Session.Dirty = dirty
+		g.d.Session.Changed = changed
+		g.d.Session.Ahead = ahead
+		g.d.Session.Behind = behind
 	}
-	g.d.Session.Branch = branch
-	g.d.Session.Dirty = dirty
-	g.d.Session.Changed = changed
-	g.d.Session.Ahead = ahead
-	g.d.Session.Behind = behind
+	snap := g.snapshotLocked()
+	g.mu.Unlock()
+	g.publish(snap)
 }
 
 func gitStatus(ctx context.Context, cwd string, timeout time.Duration) (branch string, dirty bool, changed, ahead, behind int, notRepo bool) {
@@ -570,16 +619,14 @@ func loadMemory(ctx context.Context, in Input, g *gate, now time.Time) {
 	mem := fmt.Sprintf("%d facts · %d sessions", facts, sessions)
 	rows, latest, ok, rerr := in.Store.WelcomeRecent(cctx, in.Profile, in.ProjectID, in.CWD, 4)
 	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.closed {
-		return
-	}
 	g.d.Session.Memory = mem
-	if rerr != nil {
-		return
+	if rerr == nil {
+		g.d.Recent = recentFrom(rows, now)
+		g.d.Placeholder = resumePlaceholder(latest, ok, in.CWD, now)
 	}
-	g.d.Recent = recentFrom(rows, now)
-	g.d.Placeholder = resumePlaceholder(latest, ok, in.CWD, now)
+	snap := g.snapshotLocked()
+	g.mu.Unlock()
+	g.publish(snap)
 }
 
 func recentFrom(rows []store.WelcomeRow, now time.Time) []Recent {
