@@ -101,15 +101,25 @@ type Client struct {
 	apiKey          func() (string, error)
 	maxTokensField  string
 	sendTemperature bool
+	policy          func() error
+	onUsage         func(Usage)
 }
 
 func New(baseURL, model string) *Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.DialContext = (&net.Dialer{Timeout: 5 * time.Second}).DialContext
 	return &Client{
-		baseURL:         strings.TrimRight(baseURL, "/"),
-		model:           model,
-		http:            &http.Client{Transport: tr},
+		baseURL: strings.TrimRight(baseURL, "/"),
+		model:   model,
+		http: &http.Client{
+			Transport: tr,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) > 0 && req.URL.Host != via[0].URL.Host {
+					req.Header.Del("Authorization")
+				}
+				return nil
+			},
+		},
 		idleTimeout:     defaultIdleTimeout,
 		retryWait:       defaultRetryWait,
 		retries:         1,
@@ -175,19 +185,65 @@ func (c *Client) tokensField() string {
 	return c.maxTokensField
 }
 
+// SetPolicy installs a pre-request gate; an error stops the call before it is sent.
+func (c *Client) SetPolicy(fn func() error) {
+	if c == nil {
+		return
+	}
+	c.policy = fn
+}
+
+// SetUsageHook observes token usage after each attempt.
+func (c *Client) SetUsageHook(fn func(Usage)) {
+	if c == nil {
+		return
+	}
+	c.onUsage = fn
+}
+
+var errPlainHTTPKey = errors.New("llm: refusing to send an API key over plain HTTP to a non-local host; use https")
+
+func localPlainHost(host string) bool {
+	h := strings.ToLower(strings.TrimSuffix(host, "."))
+	if h == "localhost" || strings.HasSuffix(h, ".localhost") {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ipLocal(ip)
+	}
+	ips, err := net.LookupIP(h)
+	if err != nil || len(ips) == 0 {
+		return false
+	}
+	for _, ip := range ips {
+		if !ipLocal(ip) {
+			return false
+		}
+	}
+	return true
+}
+
+func ipLocal(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+}
+
 // authorize adds the bearer header. An empty key leaves the request unauthenticated.
-func (c *Client) authorize(req *http.Request) error {
+func (c *Client) authorize(req *http.Request) (string, error) {
 	if c.apiKey == nil {
-		return nil
+		return "", nil
 	}
 	key, err := c.apiKey()
 	if err != nil {
-		return err
+		return "", err
 	}
-	if key != "" {
-		req.Header.Set("Authorization", "Bearer "+key)
+	if key == "" {
+		return "", nil
 	}
-	return nil
+	if req.URL.Scheme == "http" && !localPlainHost(req.URL.Hostname()) {
+		return "", fmt.Errorf("%w (%s)", errPlainHTTPKey, req.URL.Hostname())
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	return key, nil
 }
 
 // PinContext keeps the context window at n and skips the server probe.
@@ -371,7 +427,7 @@ func (c *Client) ResolveModel(ctx context.Context) (string, error) {
 		}
 		return "", fmt.Errorf("llm: build models request: %w", err)
 	}
-	_ = c.authorize(req)
+	key, _ := c.authorize(req)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		if want != "" {
@@ -386,7 +442,7 @@ func (c *Client) ResolveModel(ctx context.Context) (string, error) {
 			c.setWindow(defaultContextWindow)
 			return want, nil
 		}
-		return "", httpError(resp)
+		return "", httpErrorKey(resp, key)
 	}
 	var body struct {
 		Data []struct {
@@ -693,6 +749,9 @@ func (c *Client) complete(ctx context.Context, msgs []Message, tools []ToolSpec,
 		t0 := time.Now()
 		msg, usage, err, gotBytes = c.completeAttempt(ctx, msgs, tools, opts, onDelta)
 		c.observeCall(usage, time.Since(t0))
+		if c.onUsage != nil && (usage.PromptTokens > 0 || usage.CompletionTokens > 0) {
+			c.onUsage(usage)
+		}
 		if err == nil || !shouldRetry(err, gotBytes) {
 			c.observePrompt(msgs, usage)
 			return msg, usage, err
@@ -721,6 +780,11 @@ func encodeToolChoice(s string) json.RawMessage {
 }
 
 func (c *Client) completeAttempt(ctx context.Context, msgs []Message, tools []ToolSpec, opts ChatOptions, onDelta func(string) error) (Message, Usage, error, bool) {
+	if c.policy != nil {
+		if err := c.policy(); err != nil {
+			return Message{}, Usage{}, err, false
+		}
+	}
 	model, err := c.ResolveModel(ctx)
 	if err != nil {
 		return Message{}, Usage{}, err, false
@@ -785,7 +849,8 @@ func (c *Client) completeAttempt(ctx context.Context, msgs []Message, tools []To
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
-	if err := c.authorize(req); err != nil {
+	key, err := c.authorize(req)
+	if err != nil {
 		return Message{}, Usage{}, err, false
 	}
 
@@ -796,7 +861,7 @@ func (c *Client) completeAttempt(ctx context.Context, msgs []Message, tools []To
 	defer resp.Body.Close()
 	gotBytes := true
 	if resp.StatusCode != http.StatusOK {
-		return Message{}, Usage{}, httpError(resp), true
+		return Message{}, Usage{}, httpErrorKey(resp, key), true
 	}
 
 	body := &touchReader{r: resp.Body, touch: touch}
@@ -1067,6 +1132,16 @@ func isRefusedOrReset(err error) bool {
 }
 
 func httpError(resp *http.Response) error {
+	return httpErrorKey(resp, "")
+}
+
+// httpErrorKey masks the bearer key if a server echoes it in the body.
+func httpErrorKey(resp *http.Response, key string) error {
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	return &HTTPError{Status: resp.StatusCode, Body: string(b)}
+	body := string(b)
+	if key != "" {
+		body = strings.ReplaceAll(body, "Bearer "+key, "Bearer [REDACTED]")
+		body = strings.ReplaceAll(body, key, "[REDACTED]")
+	}
+	return &HTTPError{Status: resp.StatusCode, Body: body}
 }
