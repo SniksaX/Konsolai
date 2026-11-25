@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/SniksaX/Konsolai/internal/agent"
+	"github.com/SniksaX/Konsolai/internal/config"
 	"github.com/SniksaX/Konsolai/internal/intent"
 	"github.com/SniksaX/Konsolai/internal/llm"
 	"github.com/SniksaX/Konsolai/internal/memory"
@@ -38,6 +39,8 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	}
 	r.escalated = false
 	r.remoteYes = req.Yes
+	// The one-shot confirmation prompt must pause a running spinner too.
+	config.SetRemoteGateHooks(ui.PauseLive, ui.ResumeLive)
 	// An identity question is answered from the configured model facts: it makes
 	// no model call, so it needs no client and no remote confirmation.
 	if identityFloor(req.Text) {
