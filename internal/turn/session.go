@@ -305,9 +305,9 @@ func identityModel(name, id, host string, remote bool, lang string) string {
 	}
 	if strings.TrimSpace(id) == "" {
 		if fr {
-			id = "par défaut du serveur"
+			id = "id non définie"
 		} else {
-			id = "server default"
+			id = "id not set"
 		}
 	}
 	if strings.TrimSpace(host) == "" {
