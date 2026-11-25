@@ -50,7 +50,7 @@ func remoteGreetingRunner(t *testing.T) (*Runner, *remoteCounters, *remoteCounte
 	fastSrv := countingModelServer(t, fastC)
 
 	c := config.Builtin()
-	c.Models["remote-main"] = config.Model{Endpoint: "http://203.0.113.9/v1"}
+	c.Models["remote-main"] = config.Model{Endpoint: "http://203.0.113.9/v1", Model: "m"}
 	c.Models["local-fast"] = config.Model{Endpoint: fastSrv.URL + "/v1"}
 	c.Roles.Main, c.Roles.Fast = "remote-main", "local-fast"
 	c.Privacy.AllowRemote = true
