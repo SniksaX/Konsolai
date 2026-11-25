@@ -92,10 +92,13 @@ func TestFastJinjaRetriesMain(t *testing.T) {
 	}
 }
 
-func TestModelErrorLineHidesJSON(t *testing.T) {
+func TestModelErrorLineNamesStatusAndProviderMessage(t *testing.T) {
 	err := &llm.HTTPError{Status: 500, Body: `{"error":"jinja boom"}`}
 	s := ModelErrorLine("http://gpu-box:8000/v1", err, false)
-	if strings.Contains(s, "{") || strings.Contains(s, "jinja") {
-		t.Fatalf("%q", s)
+	if !strings.Contains(s, "HTTP 500") || !strings.Contains(s, "jinja boom") {
+		t.Fatalf("status and provider message missing: %q", s)
+	}
+	if strings.Contains(s, "{") || strings.Contains(s, `"error"`) {
+		t.Fatalf("raw json leaked: %q", s)
 	}
 }
