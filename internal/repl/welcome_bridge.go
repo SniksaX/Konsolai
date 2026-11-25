@@ -47,6 +47,7 @@ type welcomeState struct {
 	paintMu       sync.Mutex
 	snap          welcomeSnap
 	onPlaceholder func(string)
+	onRepaint     func()
 	gatherLimit   time.Duration
 	freshFor      time.Duration
 	rows          int
@@ -89,7 +90,13 @@ func (s *welcomeState) update(d welcome.Data) {
 	n := writeWelcome(w, s.snapshot())
 	s.mu.Lock()
 	s.rows = n
+	repaint := s.onRepaint
 	s.mu.Unlock()
+	// The welcome was just redrawn over the prompt rows; when readline owns an
+	// active prompt, ask it to draw the prompt line again.
+	if repaint != nil && ui.PromptOwned() {
+		repaint()
+	}
 }
 
 func (s *welcomeState) retarget(cwd, dir, branch string, projectID *int64) {
@@ -526,4 +533,9 @@ func bindWelcome(st *welcomeState, rd LineReader) {
 	st.mu.Lock()
 	st.onPlaceholder = setPH
 	st.mu.Unlock()
+	if rp, ok := rd.(interface{ Repaint() }); ok {
+		st.mu.Lock()
+		st.onRepaint = rp.Repaint
+		st.mu.Unlock()
+	}
 }
