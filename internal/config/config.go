@@ -236,6 +236,8 @@ type UI struct {
 	WelcomeCacheSeconds int      `yaml:"welcome_cache_seconds"`
 	ModelRateCalls      int      `yaml:"model_rate_calls"`
 	ModelSlowMS         int      `yaml:"model_slow_ms"`
+	AnswerPanel         bool     `yaml:"answer_panel"`
+	JSONMaxLines        int      `yaml:"json_max_lines"`
 	CtxWarnPct          int      `yaml:"ctx_warn_pct"`
 	CtxHotPct           int      `yaml:"ctx_hot_pct"`
 	CtxCells            int      `yaml:"ctx_cells"`
@@ -798,6 +800,18 @@ func (c Config) IsolatedTimeout() time.Duration {
 // StatsInsertTimeout bounds a turn-stat insert. Omitted config keeps 2s.
 func (c Config) StatsInsertTimeout() time.Duration {
 	return time.Duration(nonzero(c.Stats.InsertTimeoutMS, 2000)) * time.Millisecond
+}
+
+// AnswerPanelOn reports whether the final answer is framed in a panel.
+func (c Config) AnswerPanelOn() bool { return c.UI.AnswerPanel }
+
+// JSONMaxLines is the answer-panel JSON cap; a non-positive value keeps 40.
+func (c Config) JSONMaxLines() int {
+	v := c.UI.JSONMaxLines
+	if v <= 0 {
+		return 40
+	}
+	return v
 }
 
 func (c Config) CtxWarnPct() int { return nonzero(c.UI.CtxWarnPct, 60) }
