@@ -87,6 +87,8 @@ ui
   ui.cursor_color              true
   ui.banner                    true
   ui.code_highlight            true
+  ui.answer_panel              true
+  ui.json_max_lines            40
   ui.clear_on_start            true
   ui.clear_header              full
   ui.pinned_header             false

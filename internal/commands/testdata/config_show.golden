@@ -124,6 +124,8 @@ ui:
   banner: true   # draw the wordmark at startup
   welcome: split   # split | frame | minimal
   code_highlight: true   # highlight fenced code
+  answer_panel: true   # render the final answer inside a titled panel on a TTY
+  json_max_lines: 40   # JSON lines kept in the answer panel before ... n more; 0 keeps 40
   clear_on_start: true   # clear the terminal when the REPL starts
   clear_header: full   # full redraws the welcome after a clear; compact keeps one line; none leaves the screen blank
   pinned_header: false   # pin the welcome; lines scrolled inside the region may not enter scrollback
