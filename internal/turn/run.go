@@ -705,6 +705,9 @@ func SanitizeAnswerHistory(hist []llm.Message) []llm.Message {
 			if strings.TrimSpace(m.Content) == "" && len(m.ToolCalls) > 0 {
 				continue
 			}
+			// Tool replies are dropped from an answer history, so the calls they
+			// answered must go too or the provider rejects the list.
+			m.ToolCalls = nil
 			keep = append(keep, m)
 		case llm.RoleUser:
 			keep = append(keep, m)
