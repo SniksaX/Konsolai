@@ -498,8 +498,14 @@ func TestUnreachableModelPrintsFriendlyLine(t *testing.T) {
 		t.Fatalf("exit %d", res.ExitCode)
 	}
 	got := errb.String()
-	if !strings.Contains(got, "cannot reach the model server") || strings.Contains(got, "llm: list models") {
+	// The id is empty, so the model-list probe decides the turn. That probe can
+	// never claim the host is down: it says what was checked and that no chat
+	// call was made.
+	if !strings.Contains(got, "a model probe could not reach") || !strings.Contains(got, "made no chat call") {
 		t.Fatalf("%q", got)
+	}
+	if strings.Contains(got, "llm: list models") || strings.Contains(got, "cannot reach the model server") {
+		t.Fatalf("probe wording claims the host is down: %q", got)
 	}
 }
 
