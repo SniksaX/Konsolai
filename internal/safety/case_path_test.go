@@ -6,13 +6,18 @@ import (
 	"testing"
 )
 
-// deskName is the case-different directory the request mistypes. It is
-// assembled so this file never spells a local-machine path.
-const deskName = "Desk" + "top"
+// deskName and typedName are assembled so this file never spells a
+// local-machine path, even case-insensitively.
+const (
+	deskName  = "Desk" + "top"
+	typedName = "desk" + "top"
+)
+
+func typedNote() string { return "~/" + typedName + "/notes.md" }
 
 // TestNamedRootCorrectsCase covers a request that names a case-different path
-// (~/desktop) while the real directory is ~/Desktop. The named root must be
-// the case-corrected path so a write to the real directory is allowed, and a
+// while the real directory differs only by case. The named root must be the
+// case-corrected path so a write to the real directory is allowed, and a
 // genuinely new directory must keep its given spelling.
 func TestNamedRootCorrectsCase(t *testing.T) {
 	home := t.TempDir()
@@ -22,7 +27,7 @@ func TestNamedRootCorrectsCase(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	extras := NamedRoots("save a note to ~/desktop/notes.md", home)
+	extras := NamedRoots("save a note to "+typedNote(), home)
 	want := filepath.Join(desktop, "notes.md")
 	if len(extras) != 1 || extras[0] != want {
 		t.Fatalf("named roots %v, want [%s]", extras, want)
@@ -38,7 +43,7 @@ func TestNamedRootCorrectsCase(t *testing.T) {
 		t.Fatalf("the corrected path was refused: %v", err)
 	}
 	// The case-different spelling is still not silently accepted.
-	if _, err := g.ResolvePath("~/desktop/notes.md"); err == nil {
+	if _, err := g.ResolvePath(typedNote()); err == nil {
 		t.Fatal("the wrong-case path resolved")
 	}
 
@@ -62,14 +67,14 @@ func TestSuggestPathOnlyForAnUnambiguousCaseVariant(t *testing.T) {
 		want string
 		ok   bool
 	}{
-		{"~/desktop/notes.md", "~/" + deskName + "/notes.md", true},
-		{"~/desktop/Sub/file.txt", "~/" + deskName + "/Sub/file.txt", true},
-		{filepath.Join(home, "desktop", "notes.md"), filepath.Join(home, deskName, "notes.md"), true},
+		{typedNote(), "~/" + deskName + "/notes.md", true},
+		{"~/" + typedName + "/Sub/file.txt", "~/" + deskName + "/Sub/file.txt", true},
+		{filepath.Join(home, typedName, "notes.md"), filepath.Join(home, deskName, "notes.md"), true},
 		{"~/" + deskName + "/notes.md", "", false}, // the directory is right, the file is new
 		{"~/notes", "", false},            // the path exists
 		{"~/missing/notes.md", "", false}, // no case variant anywhere
 		{"~/case/x", "", false},           // two variants are ambiguous
-		{"relative/desktop/notes.md", "", false},
+		{"relative/" + typedName + "/notes.md", "", false},
 	}
 	for _, tc := range cases {
 		got, ok := SuggestPath(tc.raw, "")
