@@ -56,13 +56,15 @@ func maskValue(k config.Key, c config.Config) string {
 	return k.Present(c)
 }
 
-func formatSetMenu(rows []setRow, sel int, detail bool) string {
-	var b strings.Builder
+// setMenuLines renders every row once. The second result is the first line of
+// the selected row, so the window can keep it on screen.
+func setMenuLines(rows []setRow, sel int, detail bool) ([]string, int) {
 	p := ui.Current()
-	n := 0
+	lines := make([]string, 0, len(rows))
+	selLine := 0
 	for i, row := range rows {
 		if row.Header {
-			fmt.Fprintf(&b, "%s\n", p.Muted(row.Value))
+			lines = append(lines, p.Muted(row.Value))
 			continue
 		}
 		name := row.Key.Path
@@ -71,15 +73,84 @@ func formatSetMenu(rows []setRow, sel int, detail bool) string {
 		}
 		line := fmt.Sprintf("  %-28s %s", name, row.Value)
 		if i == sel {
+			selLine = len(lines)
 			line = p.Accent("› ") + fmt.Sprintf("%-28s %s", name, row.Value)
 		}
-		fmt.Fprintln(&b, line)
-		n++
+		lines = append(lines, line)
 		if detail && i == sel {
-			fmt.Fprintf(&b, "    %s\n", p.Muted(row.Key.Doc))
+			lines = append(lines, "    "+p.Muted(row.Key.Doc))
 		}
 	}
-	_ = n
+	return lines, selLine
+}
+
+func joinSetMenuLines(lines []string) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func formatSetMenu(rows []setRow, sel int, detail bool) string {
+	lines, _ := setMenuLines(rows, sel, detail)
+	return joinSetMenuLines(lines)
+}
+
+// setMenuHeight is the number of screen rows the picker may paint. One row is
+// left for the prompt line above the menu.
+func setMenuHeight() int {
+	_, h := defaultTermSize()
+	h--
+	if h < 4 {
+		h = 4
+	}
+	return h
+}
+
+// formatSetMenuWindow paints at most height rows, scrolled to keep the
+// selected row visible. The "n more" markers match the slash menu.
+func formatSetMenuWindow(rows []setRow, sel int, detail bool, height int) string {
+	lines, selLine := setMenuLines(rows, sel, detail)
+	if height <= 0 || len(lines) <= height {
+		return joinSetMenuLines(lines)
+	}
+	if height < 4 {
+		height = 4
+	}
+	content := height - 2 // one marker line above and below
+	if content < 1 {
+		content = 1
+	}
+	selEnd := selLine + 1
+	if detail {
+		selEnd++
+	}
+	top := selEnd - content
+	if top < 0 {
+		top = 0
+	}
+	if top > selLine {
+		top = selLine
+	}
+	if maxTop := len(lines) - content; top > maxTop {
+		top = maxTop
+	}
+	to := top + content
+	if to > len(lines) {
+		to = len(lines)
+	}
+	width := theme.TermWidth()
+	var b strings.Builder
+	if top > 0 {
+		fmt.Fprintf(&b, "%s\n", ui.Current().Muted(fmt.Sprintf("↑ %d more", top)))
+	}
+	for _, line := range lines[top:to] {
+		b.WriteString(theme.TruncateChrome(line, width))
+		b.WriteByte('\n')
+	}
+	if to < len(lines) {
+		fmt.Fprintf(&b, "%s\n", ui.Current().Muted(fmt.Sprintf("↓ %d more", len(lines)-to)))
+	}
 	return b.String()
 }
 
@@ -104,14 +175,22 @@ func runSetMenu(ctx context.Context, env *Env, session bool) int {
 	pos := 0
 	detail := false
 	painted := 0
+	erase := func() {
+		if painted > 0 {
+			fmt.Fprint(env.out(), theme.CursorUp(painted))
+			fmt.Fprint(env.out(), theme.ClearBelow)
+			painted = 0
+		}
+	}
 	paint := func() {
 		w := env.out()
 		if painted > 0 {
 			fmt.Fprint(w, theme.CursorUp(painted))
 		}
-		text := formatSetMenu(rows, idx[pos], detail)
+		text := formatSetMenuWindow(rows, idx[pos], detail, setMenuHeight())
 		painted = strings.Count(text, "\n")
 		fmt.Fprint(w, text)
+		fmt.Fprint(w, theme.ClearBelow)
 	}
 	paint()
 	for {
@@ -141,6 +220,9 @@ func runSetMenu(ctx context.Context, env *Env, session bool) int {
 				fmt.Fprintf(env.errw(), "%s is a secret; set it with ~/.pgpass or the environment\n", row.Key.Path)
 				continue
 			}
+			// The value editor and the apply line print below the menu, so
+			// clear the menu first and repaint it at the same anchor after.
+			erase()
 			if code := editRow(env, row.Key, session); code != 0 {
 				return code
 			}
