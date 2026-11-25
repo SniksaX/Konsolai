@@ -139,6 +139,11 @@ Work lands on `dev`. Config keys are the single table in `internal/config/keys.g
 - CPU embeddings can make `/index` slow when an embed service is configured.
 - A configured reranker is often unreachable.
 - Symbol index: not built.
+- Remote models: the y/n gate decision and the token total are per process. `privacy.session_token_cap` counts only the usage a remote call reports, so a request that fails before reporting adds nothing. Remote classification resolves each endpoint host once and caches it; an unresolvable host counts as remote.
+- The welcome drops the `remote` marker when the models box has no room for it. The footer follows the main model and hides the marker in shell mode, with a mode word, and when the footer drops the model word (under 60 columns or when the row does not fit). `/set model` and `/status` always show it.
+- Remote cost needs `price_in` or `price_out` on a remote model (no price fetch) and shows on the end-of-turn `ui.stats` line and the trace `stats:` line; a local model and an unpriced remote model show none. Fast pricing is unit-tested, but no full fast answer exercises the cost line.
+- The provider presets come from published docs and are not exercised against live accounts; the `anthropic` OpenAI-compatible auth header stays unverified.
+- Embeddings stay loopback or private; a remote embed service is rejected, so RAG cannot use a cloud provider.
 - README embeds four screenshots. `slash-menu`, `act-plan`, and `pdf` are not captured.
 - Latest tag `v0.2.2`; `dev` is past it and no newer tag exists. `version` in `cmd/konsolai` is still `"dev"` unless ldflags stamp it.
 
