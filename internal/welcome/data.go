@@ -21,16 +21,18 @@ import (
 
 	"github.com/SniksaX/Konsolai/internal/banner"
 	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/llm"
 	"github.com/SniksaX/Konsolai/internal/store"
 )
 
 type Status string
 
 const (
-	StatusUp      Status = "up"      // latency under the slow threshold
-	StatusSlow    Status = "slow"    // latency >= threshold (embed: latency > threshold)
-	StatusDown    Status = "down"    // error
-	StatusTimeout Status = "timeout" // deadline hit
+	StatusUp      Status = "up"          // latency under the slow threshold
+	StatusSlow    Status = "slow"        // latency >= threshold, or the probe deadline hit
+	StatusAuth    Status = "auth failed" // the endpoint answered 401 or 403
+	StatusDown    Status = "down"        // error
+	StatusTimeout Status = "timeout"     // deadline hit
 )
 
 type Model struct {
@@ -103,6 +105,9 @@ type Input struct {
 	MemoryTimeout time.Duration
 	RateWindow    int
 	ModelSlow     time.Duration
+	// APIKey resolves the bearer key for a role ("main" or "fast") at probe
+	// time. A nil hook sends no key.
+	APIKey func(role string) (string, error)
 }
 
 // resolveInput fills zero gather budgets from the built-in profile.
@@ -267,6 +272,46 @@ func probeModel(ctx context.Context, in Input, role, name, endpoint, kind string
 		m.Stat = "n/a"
 		return m
 	}
+	if kind != "models" {
+		return probeLocalModel(ctx, in, m, kind, endpoint)
+	}
+	c := llm.New(endpoint, "")
+	// The welcome cannot wait for the remote probe budget: a late result is
+	// dropped at the gather deadline anyway, so a remote probe keeps the
+	// short welcome timeout and a timeout reads as slow.
+	c.SetProbeTimeout(in.ProbeTimeout)
+	c.SetRemoteProbeTimeout(in.ProbeTimeout)
+	if in.APIKey != nil {
+		c.SetAPIKey(func() (string, error) { return in.APIKey(role) })
+	}
+	res := c.Probe(ctx)
+	switch res.Kind {
+	case llm.ProbeOK:
+		m.Status = statusForLimit(role, res.Latency, in.ModelSlow)
+		m.Stat = statText(ctx, in, role, name, res.Latency)
+	case llm.ProbeSlow:
+		// A probe that hits its budget does not prove the host is down.
+		m.Status = StatusSlow
+		m.Stat = "slow"
+	case llm.ProbeAuthFailed:
+		m.Status = StatusAuth
+		m.Stat = "auth failed"
+	case llm.ProbeHTTPError:
+		m.Status = StatusDown
+		m.Stat = fmt.Sprintf("http %d", res.Status)
+	default:
+		m.Status = StatusDown
+		if p := portOf(endpoint); p != "" {
+			m.Stat = ":" + p + " unreachable"
+		} else {
+			m.Stat = "n/a"
+		}
+	}
+	return m
+}
+
+// probeLocalModel probes an embed or rerank service; they take no key.
+func probeLocalModel(ctx context.Context, in Input, m Model, kind, endpoint string) Model {
 	timeout := in.ProbeTimeout
 	pctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -285,8 +330,8 @@ func probeModel(ctx context.Context, in Input, role, name, endpoint, kind string
 		}
 		return m
 	}
-	m.Status = statusForLimit(role, lat, in.ModelSlow)
-	m.Stat = statText(ctx, in, role, name, lat)
+	m.Status = statusForLimit(m.Role, lat, in.ModelSlow)
+	m.Stat = statText(ctx, in, m.Role, m.Name, lat)
 	return m
 }
 
