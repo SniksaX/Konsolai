@@ -266,3 +266,61 @@ func TestGatherMarksRemoteModels(t *testing.T) {
 		t.Fatalf("local fast marked remote: %+v", byRole["fast"])
 	}
 }
+
+// TestGatherRepaintsLateRemoteProbe is the welcome bug: one remote probe slower
+// than the first paint must not mark the other rows offline, an unfinished row
+// reads "checking", and the late snapshot repaints the row.
+func TestGatherRepaintsLateRemoteProbe(t *testing.T) {
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/models") {
+			time.Sleep(500 * time.Millisecond)
+			_, _ = w.Write([]byte(`{"data":[{"id":"remote-model"}]}`))
+		}
+	}))
+	defer remote.Close()
+	local := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"id":"fast-model"}]}`))
+	}))
+	defer local.Close()
+
+	oldRemote := hostIsRemote
+	hostIsRemote = func(endpoint string) bool { return strings.HasPrefix(endpoint, remote.URL) }
+	t.Cleanup(func() { hostIsRemote = oldRemote })
+	updates := make(chan Data, 32)
+	start := time.Now()
+	first, err := Gather(context.Background(), Input{
+		Endpoint: remote.URL + "/v1", Model: "remote-model",
+		FastEndpoint: local.URL + "/v1", FastModel: "fast",
+		CWD:         t.TempDir(),
+		ProbeBudget: 150 * time.Millisecond, ProbeTimeout: 100 * time.Millisecond,
+		RemoteProbeTimeout: 900 * time.Millisecond,
+		OnUpdate:           func(d Data) { updates <- d },
+	})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed > 400*time.Millisecond {
+		t.Fatalf("the first paint waited %s for the slow probe", elapsed)
+	}
+	if first.Models[0].Status != StatusChecking || first.Models[0].Stat != "checking" {
+		t.Fatalf("an unfinished probe must read checking: %+v", first.Models[0])
+	}
+	if first.Models[1].Status != StatusUp {
+		t.Fatalf("the slow remote probe marked the local row offline: %+v", first.Models[1])
+	}
+	if first.Up != 1 {
+		t.Fatalf("checking must not count as up/down: up=%d", first.Up)
+	}
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case d := <-updates:
+			if d.Models[0].Status == StatusUp && d.Up == 2 {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("the late remote probe never repainted its row")
+		}
+	}
+}
