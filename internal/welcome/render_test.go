@@ -44,6 +44,7 @@ func allUp() Data {
 			{Name: "rerank-model", Role: "rerank", Status: StatusUp, Stat: "18ms"},
 		},
 		Up: 4, Total: 4,
+		MCP: MCPCount{Up: 2, Total: 3},
 		Session: Session{
 			Dir:     "~/projects/demo",
 			Branch:  "main",
@@ -173,6 +174,29 @@ func TestRenderGoldens(t *testing.T) {
 					}
 				}
 			}
+		}
+	}
+}
+
+// TestRenderMCPCount shows the configured MCP count in the session box and the
+// status strip, and hides it when no server is configured.
+func TestRenderMCPCount(t *testing.T) {
+	plain(t)
+	d := allUp()
+	d.MCP = MCPCount{Up: 2, Total: 3}
+	for _, layout := range []string{"split", "frame"} {
+		got := renderString(d, layout, 140, 40)
+		if !strings.Contains(got, "mcp") || !strings.Contains(got, "2/3 up") {
+			t.Errorf("%s misses the MCP count:\n%s", layout, got)
+		}
+	}
+	if got := renderString(d, "split", 140, 20); !strings.Contains(got, "mcp 2/3 up") {
+		t.Errorf("the degraded layout misses the MCP count:\n%s", got)
+	}
+	d.MCP = MCPCount{}
+	for _, layout := range []string{"split", "frame"} {
+		if got := renderString(d, layout, 140, 40); strings.Contains(got, "mcp") {
+			t.Errorf("%s paints an MCP line with no server configured:\n%s", layout, got)
 		}
 	}
 }
@@ -541,7 +565,7 @@ func TestDrawBoxWidth(t *testing.T) {
 				t.Fatalf("box width %d line %d\n%q", w, got, ln)
 			}
 		}
-		plainBox := drawBox(pal, w, "session", "", nil, sessionLines(pal, w-2, allUp().Session))
+		plainBox := drawBox(pal, w, "session", "", nil, sessionLines(pal, w-2, allUp().Session, allUp().MCP))
 		assertBoxTops(t, "session", strings.Join(plainBox, "\n"))
 		for _, ln := range plainBox {
 			if got := theme.DisplayWidth(ln); got != w {
