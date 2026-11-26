@@ -274,7 +274,33 @@ func welcomeInput(env *commands.Env, info banner.Info) welcome.Input {
 		}
 		return env.Profile.ModelAPIKey(name)
 	}
+	in.MCP = mcpWelcomeCount(env)
 	return in
+}
+
+// mcpWelcomeCount reports the welcome MCP line without connecting anything:
+// every configured server is the denominator and a manager state of
+// "connected" is the numerator. Gather re-queries it on each repaint, so a
+// session created after the first paint updates the line.
+func mcpWelcomeCount(env *commands.Env) func() (up, total int) {
+	if env == nil {
+		return nil
+	}
+	return func() (int, int) {
+		names := env.Profile.MCPServerNames()
+		if len(names) == 0 {
+			return 0, 0
+		}
+		up := 0
+		if env.MCP != nil {
+			for _, name := range names {
+				if strings.EqualFold(strings.TrimSpace(env.MCP.Known(name)), "connected") {
+					up++
+				}
+			}
+		}
+		return up, len(names)
+	}
 }
 
 func welcomeLimits(env *commands.Env) welcome.Limits {
