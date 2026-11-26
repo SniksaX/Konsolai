@@ -20,6 +20,13 @@ func (m fakeMCPManager) Status(name string) MCPServerStatus {
 	return MCPServerStatus{}
 }
 
+func (m fakeMCPManager) Known(name string) string {
+	if row, ok := m[name]; ok {
+		return row.State
+	}
+	return ""
+}
+
 func mcpListEnv(t *testing.T) (*Env, *bytes.Buffer) {
 	t.Helper()
 	env, out, _ := testEnv(t)
