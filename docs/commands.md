@@ -67,9 +67,9 @@ A session is recorded as `finished` on 0, `aborted` on 3 and 130, and `failed` o
 | Intent | Tools | Plan |
 | --- | --- | --- |
 | answer | none; the reply is streamed | no |
-| lookup | read-only, including a read-only shell | no; a mutating attempt escalates to act once |
-| act | all | only when effort is high |
-| build | all | always; temperature 0.3 |
+| lookup | read-only, including a read-only shell and MCP read-only tools | no; a mutating attempt escalates to act once |
+| act | all, including the allowed MCP tools | only when effort is high |
+| build | all, including the allowed MCP tools | always; temperature 0.3 |
 
 ## Memory
 
@@ -85,6 +85,14 @@ From the shell the same commands are `konsolai /history` and so on. The bare wor
 ## Export
 
 `export_doc` accepts `html` and `pdf`. The model writes Markdown, then exports it. Mermaid fences render in headless Chromium; the HTML result inlines the SVGs and contains no script. PDF uses the same Chromium. Shell PDF and HTML printers are refused. A docs plan that asks for PDF or HTML has to name `export_doc`.
+
+## MCP servers
+
+`/mcp` (or `/mcp list`) prints one row per configured MCP server: name, transport, enabled or disabled, trust, private marker, cached tool count and live state. A disabled server reads `disabled`; a server that has not been used yet reads `not connected`. The command never prints a command line, an env value or a header value.
+
+`/set mcp` edits the servers: `add stdio <name> <command> [args...]`, `add http <name> <url>`, `remove`, `enable`, `disable`, `trust <name> ask|read_only|auto`, `allow`/`deny <name> <glob>`, and `header`/`env <name> <KEY> <value>`. Adding a stdio server prints the exact command line and asks once. A literal secret is refused; use a `${ENV_VAR}` reference. See [mcp.md](mcp.md) for setup, trust levels, examples and the threat model, and [configuration.md](configuration.md#mcp-servers) for the field reference.
+
+`/status` adds per-server `mcp` rows after `rerank` (state, transport, trust, tool count, private marker, unresolved env names, one short error) plus `server: tool` lines. `/doctor` adds one `mcp <name>` line per server after the remote-model lines: `✓` connected, disabled or not yet connected, `!` down or an unresolved env variable, with the fix. The welcome shows `mcp 2/3 up` over the configured servers, and a `--trace` stats line adds `mcp=N` when the turn called an MCP tool.
 
 ## Slash commands
 
