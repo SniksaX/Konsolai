@@ -2,6 +2,7 @@ package turn
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sort"
 	"strings"
@@ -194,6 +195,36 @@ func (rt *MCPRuntime) Known(name string) string {
 		return "not connected"
 	}
 	return rt.Manager.Known(name)
+}
+
+// mcpRouterLines renders one safe line per configured MCP server for the
+// intent router: name and policy metadata only, never schemas, commands,
+// arguments, env values, headers or URLs.
+func mcpRouterLines(profile config.Config) []string {
+	names := profile.MCPServerNames()
+	lines := make([]string, 0, len(names))
+	for _, name := range names {
+		server, ok := profile.MCPServer(name)
+		if !ok {
+			continue
+		}
+		state := "enabled"
+		if !server.Enabled {
+			state = "disabled"
+		}
+		line := fmt.Sprintf("%s: %s, trust %s, %s", name, server.Transport, server.TrustMode(), state)
+		if server.Private {
+			line += ", private"
+		}
+		if n := len(server.Tools.Allow); n > 0 {
+			line += fmt.Sprintf(", %d allow globs", n)
+		}
+		if n := len(server.Tools.Deny); n > 0 {
+			line += fmt.Sprintf(", %d deny globs", n)
+		}
+		lines = append(lines, line)
+	}
+	return lines
 }
 
 // MCPStatus is one display-only live row for /mcp, /status and /doctor.
