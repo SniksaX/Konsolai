@@ -901,20 +901,6 @@ func codeContext(ctx context.Context, snap sysctx.Snapshot, root string) string 
 	return b.String()
 }
 
-func (r *Runner) sessionMemoryHits(ctx context.Context, mem *memory.Guard, projectID *int64, text string, needed bool) []rag.Hit {
-	if !needed || r.Embed == nil || mem == nil || mem.Store() == nil {
-		return nil
-	}
-	st := mem.Store()
-	if !st.RAGAvailable(ctx) {
-		return nil
-	}
-	hits, err := rag.SearchTune(ctx, st, r.Embed, r.Embed, r.Profile.Name, projectID, text, "sessions", 4, rag.TuneFrom(r.Profile))
-	if err != nil || len(hits) == 0 {
-		return nil
-	}
-	return hits
-}
 func AttachMemories(user string, hits []rag.Hit) (string, int) {
 	if len(hits) == 0 {
 		return user, 0
