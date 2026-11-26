@@ -49,7 +49,7 @@ func frameLines(pal ui.Palette, d Data, width, height int) []string {
 	lines = append(lines, frameRow(pal, width, " "+header+" "))
 
 	models := modelRows(pal, c1, d.Models)
-	session := sessionLines(pal, c2, d.Session)
+	session := sessionLines(pal, c2, d.Session, d.MCP)
 	var recent []string
 	if height >= lim.RecentHeight {
 		recent = insetRecent(pal, c3, d.Recent)
