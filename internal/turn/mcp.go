@@ -5,6 +5,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/SniksaX/Konsolai/internal/config"
@@ -20,6 +21,55 @@ type MCPRuntime struct {
 	Manager   *mcp.Manager
 	Bridge    *tools.MCPBridge
 	MaxInline int
+
+	privateMu    sync.Mutex
+	privateAsked map[string]bool
+	privateOK    map[string]bool
+}
+
+// mainRemote reports whether the main model's endpoint is remote.
+func (rt *MCPRuntime) mainRemote() bool {
+	if rt == nil {
+		return false
+	}
+	return rt.Profile.Main().Remote()
+}
+
+// privateAllowed applies the private-server rule for a remote main model: one
+// confirmation per process, remembered for both allow and refuse. A local main
+// model needs none. --yes skips the prompt.
+func (rt *MCPRuntime) privateAllowed(server string, remoteMain, yes bool, confirm func(string) (bool, error)) bool {
+	if !remoteMain {
+		return true
+	}
+	rt.privateMu.Lock()
+	if rt.privateAsked == nil {
+		rt.privateAsked = map[string]bool{}
+		rt.privateOK = map[string]bool{}
+	}
+	if rt.privateOK[server] {
+		rt.privateMu.Unlock()
+		return true
+	}
+	if rt.privateAsked[server] {
+		rt.privateMu.Unlock()
+		return false
+	}
+	rt.privateMu.Unlock()
+	ok := false
+	if yes {
+		ok = true
+	} else if confirm != nil {
+		allow, err := confirm(server)
+		ok = err == nil && allow
+	}
+	rt.privateMu.Lock()
+	rt.privateAsked[server] = true
+	if ok {
+		rt.privateOK[server] = true
+	}
+	rt.privateMu.Unlock()
+	return ok
 }
 
 // NewMCPRuntime maps the profile servers to manager specs and builds the lazy
@@ -84,14 +134,30 @@ func (rt *MCPRuntime) Close() {
 // ToolsFor returns the MCP tools one intent may see: none for answer, only the
 // read-only ones for lookup, the whole allowed catalog for act/build. Above the
 // inline cap it returns the single find meta-tool instead of every schema.
-func (rt *MCPRuntime) ToolsFor(ctx context.Context, intent string) ([]tools.Tool, error) {
+func (rt *MCPRuntime) ToolsFor(ctx context.Context, intent string, remoteMain, yes bool, confirm func(string) (bool, error)) ([]tools.Tool, error) {
 	if rt == nil || rt.Bridge == nil {
 		return nil, nil
 	}
 	if intent == "answer" {
 		return nil, nil
 	}
-	exposed, err := rt.Bridge.Exposed(ctx)
+	bridge := rt.Bridge
+	if remoteMain {
+		// A private server must be confirmed before it is even asked for its
+		// tool list: nothing is sent to it before the answer.
+		filtered := rt.Profile
+		filtered.MCP.Servers = map[string]config.MCPServer{}
+		for name, server := range rt.Profile.MCP.Servers {
+			filtered.MCP.Servers[name] = server
+		}
+		for name, server := range filtered.MCP.Servers {
+			if server.Private && !rt.privateAllowed(name, remoteMain, yes, confirm) {
+				delete(filtered.MCP.Servers, name)
+			}
+		}
+		bridge = bridge.WithProfile(filtered)
+	}
+	exposed, err := bridge.Exposed(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -106,13 +172,28 @@ func (rt *MCPRuntime) ToolsFor(ctx context.Context, intent string) ([]tools.Tool
 		return nil, nil
 	}
 	if len(filtered) > rt.MaxInline {
-		return []tools.Tool{rt.Bridge.FindToolFor(filtered)}, nil
+		return []tools.Tool{bridge.FindToolFor(filtered)}, nil
 	}
 	out := make([]tools.Tool, 0, len(filtered))
 	for _, e := range filtered {
 		out = append(out, e.Tool)
 	}
 	return out, nil
+}
+
+// Known reports a server state without connecting or listing tools. It is the
+// cheap accessor the welcome uses on every repaint.
+func (rt *MCPRuntime) Known(name string) string {
+	if rt == nil {
+		return "not connected"
+	}
+	if server, ok := rt.Profile.MCPServer(name); ok && !server.Enabled {
+		return "disabled"
+	}
+	if rt.Manager == nil {
+		return "not connected"
+	}
+	return rt.Manager.Known(name)
 }
 
 // MCPStatus is one display-only live row for /mcp, /status and /doctor.
