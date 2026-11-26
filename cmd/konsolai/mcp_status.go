@@ -14,6 +14,13 @@ type mcpStatusAdapter struct {
 	rt *turn.MCPRuntime
 }
 
+func (a mcpStatusAdapter) Known(name string) string {
+	if a.rt == nil {
+		return "not connected"
+	}
+	return a.rt.Known(name)
+}
+
 func (a mcpStatusAdapter) Status(name string) commands.MCPServerStatus {
 	if a.rt == nil {
 		return commands.MCPServerStatus{State: "not connected"}
