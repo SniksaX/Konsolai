@@ -432,6 +432,17 @@ func (m *Manager) listTools(ctx context.Context, st *serverState, sess *sdk.Clie
 	}
 }
 
+// CachedTools returns the tool list already cached for one server without
+// connecting. It reports false when the server has never listed its tools, so a
+// display can show a cached count lazily.
+func (m *Manager) CachedTools(name string) ([]Tool, bool) {
+	st, err := m.lookup(name)
+	if err != nil {
+		return nil, false
+	}
+	return m.cachedTools(st)
+}
+
 func (m *Manager) cachedTools(st *serverState) ([]Tool, bool) {
 	st.toolsMu.Lock()
 	defer st.toolsMu.Unlock()
