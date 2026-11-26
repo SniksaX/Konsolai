@@ -19,7 +19,7 @@ A paste of at least `ui.paste_chip_lines` lines (default 11) or `ui.paste_chip_c
 
 `/theme` with no argument opens a picker on a TTY. Esc leaves it with the current theme. Enter saves the highlighted palette, erases the picker, and leaves the screen in place. `/theme glacier` is `/set theme glacier`: it writes the palette and prints `applied now`. Names: `amber`, `glacier`, `nebula`, `jade`, `rose`, `mono`.
 
-These commands exist only in the REPL: `exit`, `clear`, `cd`, `cmd`, `yes`, `trace`, `think`, `model`, `compact`.
+These commands exist only in the REPL: `exit`, `clear`, `cd`, `cmd`, `remote`, `yes`, `trace`, `think`, `model`, `compact`.
 
 `/clear` redraws the welcome. `ui.clear_header` is `full` (the welcome), `compact` (one line), or `none`. `/cmd clear`, Ctrl-L, and `clear` or `reset` in shell mode do the same. `/cmd forget` drops the shell-mode context. `ui.pinned_header` keeps the header fixed in a scroll region. Lines scrolled inside that region may not enter the terminal's scrollback.
 
@@ -68,8 +68,8 @@ A session is recorded as `finished` on 0, `aborted` on 3 and 130, and `failed` o
 | --- | --- | --- |
 | answer | none; the reply is streamed | no |
 | lookup | read-only, including a read-only shell and MCP read-only tools | no; a mutating attempt escalates to act once |
-| act | all, including the allowed MCP tools | only when effort is high |
-| build | all, including the allowed MCP tools | always; temperature 0.3 |
+| act | all, including the allowed MCP tools; when effort is high, read-only tools and `propose_plan` until the plan is approved | only when effort is high |
+| build | read-only tools and `propose_plan` until the plan is approved, then all, including the allowed MCP tools | always; temperature 0.3 |
 
 ## Memory
 
@@ -90,7 +90,7 @@ From the shell the same commands are `konsolai /history` and so on. The bare wor
 
 `/mcp` (or `/mcp list`) prints one row per configured MCP server: name, transport, enabled or disabled, trust, private marker, cached tool count and known state. It never connects a server: an unused server reads `not connected` and shows no count, while a server that connected earlier keeps its cached state and count. The command never prints a command line, an env value or a header value.
 
-`/mcp tools <name>` connects to that server once and prints one row per tool: name, `read-only` or `mutating` under the server's trust and globs, `allowed` or `hidden` with the rule that hid it (`not in allow`, `deny <glob>`, `trust read_only`), the live `offered` column and the first line of the description capped at 80 characters. `offered` is what the next `act` or `build` turn would send the model: `yes`, or `no:` with the reason (`private (remote main)`, `server disabled`, `not in allow`, `deny <glob>`, `trust read_only`, or `find tool only (inline cap)`); the summary ends with `N offered now`. The inline-cap part counts the inspected server only, so with several servers the real turn can still switch to the find meta-tool. `/mcp test <name>` connects once, lists the tools and prints the latency and the tool count. `/mcp tools` and `/mcp test` print a redacted error that may name the server, but never an env value, a header value or a `${ENV_VAR}` resolution; an unresolved variable is shown by name.
+`/mcp tools <name>` connects to that server once and prints one row per tool: name, `read-only` or `mutating` under the server's trust and globs, `allowed` or `hidden` with the rule that hid it (`not in allow`, `deny <glob>`, `trust read_only`), the live `offered` column and the first line of the description capped at 80 characters. `offered` is what the next `act` or `build` turn would send the model: `yes`, or `no:` with the reason (`private (remote main)`, `server disabled`, `not in allow`, `deny <glob>`, `trust read_only`, or `find tool only (inline cap)`); the summary ends with `N offered now`. The inline-cap part counts the inspected server only, so with several servers the real turn can still switch to the find meta-tool, and the column ignores the plan phase: before a required plan is approved the turn sends only the read-only tools and `propose_plan` (plus `mcp_find_tool` above the cap), so direct MCP tools wait for approval. `/mcp test <name>` connects once, lists the tools and prints the latency and the tool count. `/mcp tools` and `/mcp test` print a redacted error that may name the server, but never an env value, a header value or a `${ENV_VAR}` resolution; an unresolved variable is shown by name.
 
 `/set mcp` edits the servers: `add stdio <name> <command> [args...]`, `add http <name> <url>`, `remove`, `enable`, `disable`, `trust <name> ask|read_only|auto`, `allow`/`deny <name> <glob>`, and `header`/`env <name> <KEY> <value>`. Adding a stdio server prints the exact command line and asks once. A literal secret is refused; use a `${ENV_VAR}` reference. Every rule (trust, allow, deny, enabled, private, inline cap) is re-read for each request, so a change applies to the next turn; the manager's per-server spec (whether the server was enabled at start, the command, URL and timeout) is fixed at process start, so enabling a previously disabled server or changing its command, URL or timeout needs a restart. See [mcp.md](mcp.md) for setup, trust levels, examples and the threat model, and [configuration.md](configuration.md#mcp-servers) for the field reference.
 
