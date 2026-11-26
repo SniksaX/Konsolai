@@ -197,6 +197,8 @@ func run() int {
 		fmt.Println(version)
 		return 0
 	}
+	// A --config path must be the protected active file for the tool layer too.
+	setActiveConfigFromFlag(inv.Config)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 	defer stop()
