@@ -545,7 +545,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		_ = rec.Message(ctx, msg)
 
 		if len(msg.ToolCalls) == 0 {
-			if cfg.RequirePlan && !state.planApproved && !state.changeNudged && (cfg.Intent == "act" || cfg.Intent == "build") {
+			if cfg.RequirePlan && !state.planApproved && !state.changeNudged && !state.sawGateReject && (cfg.Intent == "act" || cfg.Intent == "build") {
 				// A change request answered with prose: the mutating tools are
 				// locked behind the plan, so nudge once to call propose_plan.
 				state.changeNudged = true
