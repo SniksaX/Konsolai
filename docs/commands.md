@@ -115,6 +115,7 @@ The `name` cell is `Command.DisplayNames`. The `args` cell lists `Arg.Name`; opt
 | /status | | Show version, model, database and environment |
 | /config | action | Show or write the YAML config |
 | /set | [name] [value] | Show or change a setting |
+| /mcp | [action] | List configured MCP servers |
 | /models | | Show configured models |
 | /theme | [name] | List palettes or apply one |
 | /index | [action] | Index the project for recall |
