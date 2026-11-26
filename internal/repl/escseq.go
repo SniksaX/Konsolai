@@ -128,6 +128,9 @@ func fallbackEdit(tail []byte) string {
 		return "forward-word"
 	case "[3;5~":
 		return "kill-word"
+	case "[13;2u", "[27;2;13~":
+		// Shift+Enter: fixterms CSI-u and modifyOtherKeys encodings.
+		return "insert-newline"
 	case "\r", "\n":
 		return "insert-newline"
 	default:
