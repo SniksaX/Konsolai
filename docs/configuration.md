@@ -138,7 +138,7 @@ Every model endpoint check sends the key the turn would send: the welcome, `/sta
 | any other non-2xx | `http N` |
 | a dial, DNS or refused connection | `unreachable` (`down` in `/set model`; the welcome shows the port as unreachable) |
 
-A failed probe never means the host is down: only a failed chat call can say the server cannot be reached, and a probe failure says the turn made no chat call. `llm.remote_probe_timeout_ms` (default `3000`) is the budget for one remote probe in `/status`, `/doctor`, the startup probe and the turn clients; local endpoints keep their short built-in budgets. The welcome probes a remote model with its short gather budget (`ui.probe_timeout_ms`, `ui.probe_deadline_ms`) instead, so a remote row can read `slow` on the welcome while `/status` reads `ok`.
+A failed probe never means the host is down: only a failed chat call can say the server cannot be reached, and a probe failure says the turn made no chat call. `llm.remote_probe_timeout_ms` (default `3000`) is the budget for one remote probe in `/status`, `/doctor`, the startup probe, the welcome and the turn clients; local endpoints keep their short built-in budgets. The welcome waits only its gather budget (`ui.probe_deadline_ms`) for the first paint: an unfinished row reads `checking` and the late result repaints it through `OnUpdate`, so a slow probe never blocks the prompt.
 
 ### Privacy
 
@@ -192,7 +192,9 @@ Embedding endpoints must be loopback or private; a remote embed service is rejec
 
 ## MCP servers
 
-MCP is configured under `mcp`. `mcp.max_inline_tools` (default `15`) caps how many MCP tools are offered inline; a later phase moves the rest behind a listing. Each entry of `mcp.servers` is one server:
+Konsolai is a [Model Context Protocol](https://modelcontextprotocol.io) client: a stdio child process or a streamable HTTP endpoint. MCP tools are offered in `lookup`, `act`, and `build` turns, never in `answer`; the model cannot add, edit, enable, trust or remove a server. Setup, trust levels, examples and the threat model are in [mcp.md](mcp.md); this section is the configuration reference.
+
+`mcp.max_inline_tools` (default `15`) caps how many tools are offered at once. Above it a turn offers one `mcp_find_tool` meta-tool instead. Each entry of `mcp.servers` is one server:
 
 ```yaml
 mcp:
@@ -201,7 +203,7 @@ mcp:
     files:
       transport: stdio
       command: npx
-      args: ["-y", "@modelcontextprotocol/server-filesystem"]
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/data/projects"]
       env:
         FS_KEY: "${FILES_KEY}"
       enabled: true
@@ -228,13 +230,14 @@ mcp:
 | `enabled` | default `true` |
 | `trust` | `ask` (default), `read_only` or `auto` |
 | `timeout_ms` | default `30000`; must be positive |
-| `private` | no remote classification for this server |
-| `tools.allow`, `tools.deny`, `tools.read_only` | shell-style globs over tool names |
+| `private` | a remote main model must not see this server unless it is confirmed |
+| `tools.allow`, `tools.deny` | shell-style globs over `tool` or `server:tool`; deny wins |
+| `tools.read_only` | globs the user declares read-only; trusted at every trust level |
 
-An env or header value that looks like a stored credential (`sk-`, `ghp_`, `AKIA`, a long token, a `Bearer` literal, `password=`) is refused; use a `${ENV_VAR}` reference instead. A reference that does not resolve yet is accepted and resolved when the server starts. `mcp` entries are not keys: `/set` edits them through `/set mcp`, and `/config show` / `/config diff` mask every env and header value.
+An env or header value that looks like a stored credential (`sk-`, `ghp_`, `AKIA`, a long token, a `Bearer` literal, `password=`) is refused; use a `${ENV_VAR}` reference instead. A reference is resolved when the session starts, and a missing variable names itself in `/mcp`, `/status` and `/doctor`; the value never appears in output. `mcp` entries are not keys: `/set` edits them through `/set mcp`, and `/config show` / `/config diff` mask every env and header value.
 
 ```sh
-konsolai /set mcp add stdio files npx -y @modelcontextprotocol/server-filesystem
+konsolai /set mcp add stdio files npx -y @modelcontextprotocol/server-filesystem /data/projects
 konsolai /set mcp add http docs https://example.com/mcp
 konsolai /set mcp trust files read_only
 konsolai /set mcp allow files "read_*"
@@ -244,4 +247,4 @@ konsolai /set mcp remove files
 konsolai /mcp
 ```
 
-Adding a stdio server prints the exact command line and asks once; `n` leaves the file unchanged. `/mcp` lists one row per server with its transport, enabled state, trust, private marker, cached tool count and live status; until the runtime is connected the status reads `not connected`. `/mcp tools` and `/mcp test` are not implemented yet.
+Adding a stdio server prints the exact command line and asks once; `n` leaves the file unchanged. `/mcp` lists one row per server with its transport, enabled state, trust, private marker, cached tool count and live state. `/status` and `/doctor` add per-server rows (state, transport, trust, tool count, unresolved env names, `server: tool` lines), the welcome shows `mcp 2/3 up` over the configured servers, and a `--trace` stats line adds `mcp=N` when the turn called an MCP tool. `/mcp tools` and `/mcp test` are not implemented.
