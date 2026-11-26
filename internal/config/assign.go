@@ -239,6 +239,7 @@ func FriendlyTable() string {
 		{"elide", "<trigger> <target>", "context.elide_trigger, context.elide_target"},
 		{"ctx", "warn|hot <pct>", "ui.ctx_warn_pct, ui.ctx_hot_pct"},
 		{"timeout", "shell <sec> | model <sec>", "tools.shell.default_timeout_sec, llm.idle_timeout_seconds"},
+		{"mcp", "add stdio <name> <command> [args...] | add http <name> <url> | remove | enable | disable | trust <name> ask|read_only|auto | allow | deny <name> <glob> | header | env <name> <KEY> <value>", "mcp.servers.*, mcp.max_inline_tools"},
 	}
 	var b strings.Builder
 	b.WriteString("| name | values | keys |\n| --- | --- | --- |\n")
@@ -304,6 +305,19 @@ func CompleteSet(parts []string, partial string, haveSpace bool) []string {
 		return nil
 	case "web":
 		return filterPrefix([]string{"on", "off", "results"}, partial)
+	case "mcp":
+		if len(parts) == 1 || (len(parts) == 2 && !haveSpace) {
+			return filterPrefix([]string{"add", "remove", "enable", "disable", "trust", "allow", "deny", "header", "env"}, partial)
+		}
+		if len(parts) >= 2 {
+			switch parts[1] {
+			case "add":
+				return filterPrefix([]string{"stdio", "http"}, partial)
+			case "trust":
+				return filterPrefix([]string{"ask", "read_only", "auto"}, partial)
+			}
+		}
+		return nil
 	default:
 		if k, _, ok := MatchKey(head); ok {
 			if len(k.Allowed) > 0 {
