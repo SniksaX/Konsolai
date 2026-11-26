@@ -1,21 +1,20 @@
 package ui
 
 import (
-	"bytes"
 	"os"
 	"strings"
 	"testing"
 	"time"
 )
 
-func testPrompter(t *testing.T) (p *Prompter, write *os.File, out *bytes.Buffer) {
+func testPrompter(t *testing.T) (p *Prompter, write *os.File, out *safeBuffer) {
 	t.Helper()
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { r.Close(); w.Close() })
-	out = &bytes.Buffer{}
+	out = &safeBuffer{}
 	p = &Prompter{
 		out: out,
 		read: func() (byte, error) {
@@ -215,7 +214,7 @@ func TestOpenPrompterSkipsDevTTY(t *testing.T) {
 	}
 }
 
-func waitPrompt(t *testing.T, out *bytes.Buffer, needle string) {
+func waitPrompt(t *testing.T, out *safeBuffer, needle string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
