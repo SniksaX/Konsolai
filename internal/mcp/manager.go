@@ -204,6 +204,34 @@ func (m *Manager) lookup(name string) (*serverState, error) {
 	return st, nil
 }
 
+// Known reports the server state without connecting or listing: connected,
+// down, disabled, or not connected. It never touches the transport, so a
+// welcome repaint cannot spend a server round trip.
+func (m *Manager) Known(name string) string {
+	if m == nil {
+		return "not connected"
+	}
+	m.mu.Lock()
+	closed := m.closed
+	st, ok := m.servers[name]
+	m.mu.Unlock()
+	if closed || !ok {
+		return "not connected"
+	}
+	if !st.spec.Enabled {
+		return "disabled"
+	}
+	st.sessionMu.Lock()
+	defer st.sessionMu.Unlock()
+	if st.down {
+		return "down"
+	}
+	if st.session != nil {
+		return "connected"
+	}
+	return "not connected"
+}
+
 // run connects if needed, runs op, and recovers from one crash. A caller
 // cancellation tears the session down (and kills a stdio process group); a
 // server that answers with a protocol error is not treated as a crash.
