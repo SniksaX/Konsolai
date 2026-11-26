@@ -339,7 +339,7 @@ func mcpSetLevel(*Env) []Choice {
 			Next: []Choice{
 				{Value: config.MCPTrustAsk, Description: "Ask before a mutating tool runs"},
 				{Value: config.MCPTrustReadOnly, Description: "Allow read-only tools only"},
-				{Value: config.MCPTrustAuto, Description: "Allow the server's tools without asking"},
+				{Value: config.MCPTrustAuto, Description: "Trust the server's read-only hint; mutating calls still ask"},
 			},
 		},
 		{Value: "allow", Description: "Add an allow glob for tools"},
