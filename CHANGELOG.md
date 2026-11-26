@@ -16,6 +16,7 @@
 - The model has no tool that adds, edits, enables, trusts or removes an MCP server.
 
 ### Fixed
+- Shift+Enter (and Alt+Enter, Ctrl+J) inserts a newline in the prompt; multi-line input and pasted text render correctly.
 - MCP read-only tools stay in the lookup catalog.
 - `/mcp` and the `/status` count are lazy: listing never connects a server, and the count reads `N configured` until the first session connects.
 - MCP trust, allow, deny and enable changes apply to the next request while the manager keeps its sessions and cached tool lists.
@@ -49,6 +50,7 @@
 - The `/set` menu fits the terminal height. README rewritten, reference moved to docs/.
 
 ### Fixed
+- Shift+Enter (and Alt+Enter, Ctrl+J) inserts a newline in the prompt; multi-line input and pasted text render correctly.
 - Keys are never sent over plain HTTP or across redirects, and are masked in errors.
 - Tool-call history is repaired before every request (strict providers no longer reject it).
 - Automatic retry when a provider rejects `tool_choice` or `reasoning_effort`; short rate limits retried once.
