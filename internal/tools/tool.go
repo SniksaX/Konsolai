@@ -87,6 +87,11 @@ type Result struct {
 	Final   bool
 	Meta    string
 	Change  *FileChange
+	// ReadStart and ReadEnd are the 1-based inclusive lines a read_file
+	// actually returned. They are zero for other tools and for a read that
+	// showed no line, so a caller never treats an unshown range as read.
+	ReadStart int
+	ReadEnd   int
 }
 
 type Options struct {
