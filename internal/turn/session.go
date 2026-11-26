@@ -161,7 +161,7 @@ func SessionStatus(code int) string {
 	}
 }
 
-func DecideIntentFloor(ctx context.Context, client *llm.Client, forceIntent, request string, newSession bool, cands []intent.Candidate, inRepo bool, verbs, targets []string, prev string) intent.Decision {
+func DecideIntentFloor(ctx context.Context, client *llm.Client, forceIntent, request string, newSession bool, cands []intent.Candidate, inRepo bool, verbs, targets []string, prev string, mcpServers []string) intent.Decision {
 	floor, hasFloor := intent.ActionFloorPrev(request, prev, verbs, targets, inRepo)
 	if forceIntent != "" {
 		n := 0
@@ -181,7 +181,7 @@ func DecideIntentFloor(ctx context.Context, client *llm.Client, forceIntent, req
 			Reason: "identity floor", Effort: intent.EffortLow, Task: intent.TaskOther,
 		}
 	}
-	d, _ := intent.Classify(ctx, client, request, cands, inRepo)
+	d, _ := intent.ClassifyWithServers(ctx, client, request, cands, inRepo, mcpServers)
 	if hasFloor {
 		d = intent.RaiseTo(d, floor)
 	}
