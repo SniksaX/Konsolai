@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/SniksaX/Konsolai/internal/config"
 	"github.com/SniksaX/Konsolai/internal/llm"
 	"github.com/SniksaX/Konsolai/internal/redact"
 	"github.com/SniksaX/Konsolai/internal/safety"
@@ -119,10 +120,22 @@ func (a *searchAction) Run(ctx context.Context) (Result, error) {
 	total := 0
 	masked := 0
 	searchOne := func(resolved, display, rel string) {
+		// The active config and its backups are masked; the secrets file is
+		// skipped, so no raw config bytes can reach the model through search.
+		maskConfig := false
+		if kind, ok := config.ProtectedKindOf(resolved); ok {
+			switch kind {
+			case config.ProtectedSecrets:
+				hits = append(hits, fmt.Sprintf("%s: [secrets file: skipped; the configuration is changed only through /set]", display))
+				return
+			default:
+				maskConfig = true
+			}
+		}
 		if safety.SensitiveRead(resolved) {
 			return
 		}
-		n, skip, err := searchFile(resolved, display, rel, a.re, searchCap-len(hits))
+		n, skip, err := searchFile(resolved, display, rel, a.re, searchCap-len(hits), maskConfig)
 		if err != nil || skip {
 			return
 		}
@@ -195,7 +208,7 @@ type searchHits struct {
 	masked int
 }
 
-func searchFile(abs, display, rel string, re *regexp.Regexp, room int) (searchHits, bool, error) {
+func searchFile(abs, display, rel string, re *regexp.Regexp, room int, maskConfig bool) (searchHits, bool, error) {
 	fi, err := os.Stat(abs)
 	if err != nil {
 		return searchHits{}, true, err
@@ -218,8 +231,12 @@ func searchFile(abs, display, rel string, re *regexp.Regexp, room int) (searchHi
 		return searchHits{}, true, err
 	}
 	data := append(peek[:n], rest...)
+	text := string(data)
+	if maskConfig {
+		text = config.MaskConfigContent(text)
+	}
 	var hits searchHits
-	for i, line := range strings.Split(string(data), "\n") {
+	for i, line := range strings.Split(text, "\n") {
 		if !re.MatchString(line) {
 			continue
 		}
