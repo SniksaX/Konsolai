@@ -23,6 +23,11 @@ type MCPRuntime struct {
 	Bridge    *tools.MCPBridge
 	MaxInline int
 
+	// profileMu guards the live profile snapshot. The REPL can change MCP
+	// policy mid-session through /set mcp, so every turn re-reads it instead of
+	// filtering with the profile captured at process start.
+	profileMu sync.RWMutex
+
 	privateMu    sync.Mutex
 	privateAsked map[string]bool
 	privateOK    map[string]bool
@@ -33,7 +38,10 @@ func (rt *MCPRuntime) mainRemote() bool {
 	if rt == nil {
 		return false
 	}
-	return rt.Profile.Main().Remote()
+	rt.profileMu.RLock()
+	remote := rt.Profile.Main().Remote()
+	rt.profileMu.RUnlock()
+	return remote
 }
 
 // privateAllowed applies the private-server rule for a remote main model: one
@@ -114,6 +122,61 @@ func NewMCPRuntime(profile config.Config, projectDir, version string) (*MCPRunti
 	return rt, nil
 }
 
+// UseProfile refreshes the live profile snapshot used by the next turn. The
+// process MCP manager keeps its sessions and its cached tool lists; only the
+// trust, allow/deny, enabled, private and cap rules are re-read, so a trust
+// change applies to the next request instead of a stale process catalog.
+func (rt *MCPRuntime) UseProfile(profile config.Config) {
+	if rt == nil {
+		return
+	}
+	cap := profile.MCP.MaxInlineTools
+	if cap <= 0 {
+		cap = 15
+	}
+	rt.profileMu.Lock()
+	defer rt.profileMu.Unlock()
+	rt.Profile = profile
+	rt.MaxInline = cap
+	switch {
+	case rt.Manager != nil:
+		rt.Bridge = tools.NewMCPBridge(rt.Manager, profile)
+	case rt.Bridge != nil:
+		rt.Bridge = rt.Bridge.WithProfile(profile)
+	}
+}
+
+// profileSnapshot returns the live profile, bridge and inline cap together.
+func (rt *MCPRuntime) profileSnapshot() (config.Config, *tools.MCPBridge, int) {
+	rt.profileMu.RLock()
+	defer rt.profileMu.RUnlock()
+	return rt.Profile, rt.Bridge, rt.MaxInline
+}
+
+// PrivateConfirmed reports whether a private server was already confirmed for
+// a remote main model in this process. It never prompts.
+func (rt *MCPRuntime) PrivateConfirmed(server string) bool {
+	if rt == nil {
+		return false
+	}
+	rt.privateMu.Lock()
+	defer rt.privateMu.Unlock()
+	return rt.privateOK[server]
+}
+
+// CachedToolCount reports the tool count already known for one server without
+// connecting it, so the status displays stay lazy.
+func (rt *MCPRuntime) CachedToolCount(server string) (int, bool) {
+	if rt == nil || rt.Manager == nil {
+		return 0, false
+	}
+	list, ok := rt.Manager.CachedTools(server)
+	if !ok {
+		return 0, false
+	}
+	return len(list), true
+}
+
 func cloneStringMap(in map[string]string) map[string]string {
 	if len(in) == 0 {
 		return nil
@@ -136,19 +199,22 @@ func (rt *MCPRuntime) Close() {
 // read-only ones for lookup, the whole allowed catalog for act/build. Above the
 // inline cap it returns the single find meta-tool instead of every schema.
 func (rt *MCPRuntime) ToolsFor(ctx context.Context, intent string, remoteMain, yes bool, confirm func(string) (bool, error)) ([]tools.Tool, error) {
-	if rt == nil || rt.Bridge == nil {
+	if rt == nil {
+		return nil, nil
+	}
+	profile, bridge, maxInline := rt.profileSnapshot()
+	if bridge == nil {
 		return nil, nil
 	}
 	if intent == "answer" {
 		return nil, nil
 	}
-	bridge := rt.Bridge
 	if remoteMain {
 		// A private server must be confirmed before it is even asked for its
 		// tool list: nothing is sent to it before the answer.
-		filtered := rt.Profile
+		filtered := profile
 		filtered.MCP.Servers = map[string]config.MCPServer{}
-		for name, server := range rt.Profile.MCP.Servers {
+		for name, server := range profile.MCP.Servers {
 			filtered.MCP.Servers[name] = server
 		}
 		for name, server := range filtered.MCP.Servers {
@@ -172,7 +238,7 @@ func (rt *MCPRuntime) ToolsFor(ctx context.Context, intent string, remoteMain, y
 	if len(filtered) == 0 {
 		return nil, nil
 	}
-	if len(filtered) > rt.MaxInline {
+	if len(filtered) > maxInline {
 		return []tools.Tool{bridge.FindToolFor(filtered)}, nil
 	}
 	out := make([]tools.Tool, 0, len(filtered))
@@ -188,7 +254,8 @@ func (rt *MCPRuntime) Known(name string) string {
 	if rt == nil {
 		return "not connected"
 	}
-	if server, ok := rt.Profile.MCPServer(name); ok && !server.Enabled {
+	profile, _, _ := rt.profileSnapshot()
+	if server, ok := profile.MCPServer(name); ok && !server.Enabled {
 		return "disabled"
 	}
 	if rt.Manager == nil {
@@ -240,7 +307,8 @@ type MCPStatus struct {
 // Status probes one server for the status commands. It is the only place that
 // connects a server merely to display it.
 func (rt *MCPRuntime) Status(ctx context.Context, name string) MCPStatus {
-	server, ok := rt.Profile.MCPServer(name)
+	profile, _, _ := rt.profileSnapshot()
+	server, ok := profile.MCPServer(name)
 	if !ok {
 		return MCPStatus{State: "not connected"}
 	}
