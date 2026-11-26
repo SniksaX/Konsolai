@@ -117,6 +117,7 @@ type Stats struct {
 	RouterTime       time.Duration
 	Rejects          int
 	OutsidePlan      int
+	MCPCalls         int
 	MaxStep          time.Duration
 	Pricing          Pricing
 	Serving          Model
@@ -838,6 +839,9 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				state.printedBlock = true
 			}
 			start := time.Now()
+			if _, ok := action.(interface{ MCPServer() string }); ok {
+				st.MCPCalls++
+			}
 			result, err := action.Run(ctx)
 			elapsed := time.Since(start)
 			st.ToolTime += elapsed
