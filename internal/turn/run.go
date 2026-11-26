@@ -400,12 +400,16 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			DisableWeb:          !r.Profile.WebOn(),
 		})
 		reg = registryForRAG(reg, r.Profile.RAGEnabled())
+		var mcpOffered []string
 		if r.MCPRuntime != nil {
 			// /set mcp can change trust, allow/deny and the cap between turns;
 			// re-read the live profile so this request filters with the policy
 			// the user has now, not the one captured at process start.
 			r.MCPRuntime.UseProfile(r.Profile)
 			if extra, mcpErr := r.MCPRuntime.ToolsFor(ctx, string(dec.Intent), r.MCPRuntime.mainRemote(), req.Yes, r.MCPPrivateConfirm); mcpErr == nil {
+				for _, mt := range extra {
+					mcpOffered = append(mcpOffered, mt.Spec().Function.Name)
+				}
 				reg = reg.Add(extra...)
 			}
 		}
@@ -452,7 +456,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		}
 		switch dec.Intent {
 		case intent.Lookup:
-			cfg.Tools = reg.Named(lookupToolNames(r.Profile.RAGEnabled())...)
+			cfg.Tools = reg.Named(append(lookupToolNames(r.Profile.RAGEnabled()), mcpOffered...)...)
 			cfg.Prompt = agent.LookupPrompt + "\n" + lang + sub
 			cfg.MaxSteps = r.Profile.MaxStepsFor("lookup")
 			cfg.ExploreBudget = r.Profile.ExploreBudgetFor("lookup", string(dec.Task))
