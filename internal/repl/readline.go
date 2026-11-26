@@ -124,6 +124,9 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\M-\C-m`), "insert-newline", false)
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\e\r`), "insert-newline", false)
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\e\n`), "insert-newline", false)
+	// Ctrl+J is Shift+Enter on terminals that send LF. It inserts a newline
+	// like the Alt+Enter encodings; only CR (plain Enter) submits.
+	bindEmacsVi(`\C-j`, "insert-newline")
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\C-z`), "undo-or-expand-paste", false)
 	_ = sh.Config.Bind("emacs", inputrc.Unescape(`\C-l`), "konsolai-clear", false)
 	// Default emacs binds store arrows as \M-[A (a meta rune). ConvertMeta
@@ -152,7 +155,6 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 	bindEmacsVi(`\e`, "konsolai-esc")
 	bindEmacsVi(`\C-i`, "konsolai-tab")
 	bindEmacsVi(`\C-m`, "konsolai-enter")
-	bindEmacsVi(`\C-j`, "konsolai-enter")
 	bindEmacsVi(`?`, "konsolai-question")
 	// Reeflective has no inter-byte timeout, so a longer Esc bind would
 	// make a lone Esc wait forever. This local map matches Esc at once.
@@ -441,7 +443,7 @@ func (r *rlReader) slashDown() {
 		r.applyMenu(r.menu.Down())
 		return
 	}
-	r.callWidget("next-history")
+	r.callWidget("down-line-or-history")
 }
 
 func (r *rlReader) slashUp() {
@@ -454,7 +456,9 @@ func (r *rlReader) slashUp() {
 		r.applyMenu(r.menu.Up())
 		return
 	}
-	r.callWidget("previous-history")
+	// Up moves within a multi-line buffer first and falls back to the
+	// previous history entry on its first line.
+	r.callWidget("up-line-or-history")
 }
 
 func (r *rlReader) SetEscTimeout(fn func() time.Duration) {
