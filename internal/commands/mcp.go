@@ -3,8 +3,11 @@ package commands
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
 // MCPServerStatus is one live row reported by an MCP manager. Every field is
@@ -98,4 +101,154 @@ func mcpTree(*Env) []Choice {
 	return []Choice{
 		{Value: "list", Description: "List configured MCP servers", Terminal: true},
 	}
+}
+
+// mcpRow is the display view of one configured MCP server. Only profile fields
+// and the manager's display-only status enter it: a command line, an env value
+// and a header value never do.
+type mcpRow struct {
+	Name       string
+	State      string
+	Transport  string
+	Trust      string
+	Private    bool
+	Tools      int
+	ToolsKnown bool
+	ToolNames  []string
+	Err        string
+	MissingEnv []string
+}
+
+// mcpRows reads one row per configured server and probes the live state once
+// per server. /status and /doctor call it; the welcome uses the manager's Known
+// instead so a repaint never connects anything.
+func mcpRows(ctx context.Context, env *Env) []mcpRow {
+	if env == nil {
+		return nil
+	}
+	names := env.Profile.MCPServerNames()
+	if len(names) == 0 {
+		return nil
+	}
+	out := make([]mcpRow, 0, len(names))
+	for _, name := range names {
+		server, ok := env.Profile.MCPServer(name)
+		if !ok {
+			continue
+		}
+		row := mcpRow{
+			Name:      name,
+			Transport: strings.ToLower(strings.TrimSpace(server.Transport)),
+			Trust:     server.TrustMode(),
+			Private:   server.Private,
+		}
+		if env.MCP != nil {
+			live := env.MCP.Status(name)
+			row.State = strings.TrimSpace(live.State)
+			row.Tools = live.Tools
+			row.ToolsKnown = live.ToolsKnown
+			row.ToolNames = append([]string(nil), live.ToolNames...)
+			sort.Strings(row.ToolNames)
+			row.Err = firstLine(live.Err)
+			row.MissingEnv = append([]string(nil), live.MissingEnv...)
+		}
+		if !server.Enabled {
+			row.State = "disabled"
+		}
+		if row.State == "" {
+			row.State = "not connected"
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+const (
+	// mcpToolLinesShown caps the per-server tool lines in /status and /doctor.
+	mcpToolLinesShown = 8
+	mcpStatusLabel    = "mcp"
+	mcpToolLabel      = "mcp tool"
+	mcpStatusWidth    = 14
+)
+
+// mcpDetail is one server's line: state, transport, trust, tool count, a
+// private marker, the unresolved env names and one short error line. Values
+// never appear, only names.
+func mcpDetail(r mcpRow) string {
+	parts := []string{r.State, r.Transport, "trust " + r.Trust}
+	if r.ToolsKnown {
+		parts = append(parts, fmt.Sprintf("%d tools", r.Tools))
+	}
+	if r.Private {
+		parts = append(parts, "private")
+	}
+	if len(r.MissingEnv) > 0 {
+		parts = append(parts, "missing "+strings.Join(r.MissingEnv, ", "))
+	}
+	if r.Err != "" {
+		parts = append(parts, "error: "+r.Err)
+	}
+	return strings.Join(parts, "  ")
+}
+
+// mcpShownTools returns the tool names to print and how many were left out.
+func mcpShownTools(r mcpRow) ([]string, int) {
+	if len(r.ToolNames) <= mcpToolLinesShown {
+		return r.ToolNames, 0
+	}
+	return r.ToolNames[:mcpToolLinesShown], len(r.ToolNames) - mcpToolLinesShown
+}
+
+// writeMCPStatus prints the /status MCP rows after the model and RAG lines. A
+// profile without servers prints one "not configured" line, and a known tool
+// list is printed as "server: tool".
+func writeMCPStatus(ctx context.Context, env *Env) {
+	if env == nil {
+		return
+	}
+	rows := mcpRows(ctx, env)
+	if len(rows) == 0 {
+		fmt.Fprintf(env.out(), "%-*s %s\n", mcpStatusWidth, mcpStatusLabel, ui.Current().Muted("not configured"))
+		return
+	}
+	for _, r := range rows {
+		fmt.Fprintf(env.out(), "%-*s %s  %s\n", mcpStatusWidth, mcpStatusLabel, r.Name, mcpDetail(r))
+		shown, more := mcpShownTools(r)
+		for _, tool := range shown {
+			fmt.Fprintf(env.out(), "%-*s %s: %s\n", mcpStatusWidth, mcpToolLabel, r.Name, tool)
+		}
+		if more > 0 {
+			fmt.Fprintf(env.out(), "%-*s %s: +%d more tools\n", mcpStatusWidth, mcpToolLabel, r.Name, more)
+		}
+	}
+}
+
+// mcpChecks reports one line per configured MCP server after the remote-model
+// lines, then one line per known tool (capped). A warning is a "!" with the fix
+// it needs; an unresolved env name is listed without its value.
+func mcpChecks(ctx context.Context, env *Env) []doctorCheck {
+	rows := mcpRows(ctx, env)
+	var out []doctorCheck
+	for _, r := range rows {
+		check := doctorCheck{mark: "✓", name: mcpStatusLabel + " " + r.Name, detail: mcpDetail(r)}
+		var fixes []string
+		if r.State == "down" {
+			check.mark = "!"
+			fixes = append(fixes, "check the server command or URL, then /mcp")
+		}
+		if len(r.MissingEnv) > 0 {
+			check.mark = "!"
+			fixes = append(fixes, "export "+strings.Join(r.MissingEnv, ", "))
+		}
+		check.fix = strings.Join(fixes, "; ")
+		out = append(out, check)
+		shown, more := mcpShownTools(r)
+		for _, tool := range shown {
+			out = append(out, doctorCheck{mark: "✓", name: mcpToolLabel, detail: r.Name + ": " + tool})
+		}
+		if more > 0 {
+			out = append(out, doctorCheck{mark: "✓", name: mcpToolLabel, detail: fmt.Sprintf("%s: +%d more tools", r.Name, more)})
+		}
+	}
+	return out
 }
