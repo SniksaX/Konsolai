@@ -53,7 +53,7 @@ func TestReadDedupeIdenticalReadReturnsShortNote(t *testing.T) {
 	if !strings.Contains(first, "line 0001") {
 		t.Fatalf("the first read lost its content: %q", first)
 	}
-	if !strings.Contains(second, "already in context above") {
+	if !strings.Contains(second, readNotePrefix) {
 		t.Fatalf("the identical read did not return a note: %q", second)
 	}
 	if strings.Contains(second, "line 0001") || len(second) > 200 {
@@ -79,7 +79,7 @@ func TestReadDedupeDifferentUncoveredRangeReturnsContent(t *testing.T) {
 		{Role: llm.RoleAssistant, Content: "done"},
 	})
 	second := rep.toolContent("2")
-	if strings.Contains(second, "already in context") {
+	if strings.Contains(second, readNotePrefix) {
 		t.Fatalf("an uncovered range was skipped: %q", second)
 	}
 	if !strings.Contains(second, "line 0020") || !strings.Contains(second, "line 0025") {
@@ -101,7 +101,7 @@ func TestReadDedupeResetsEachTurn(t *testing.T) {
 		{Role: llm.RoleAssistant, Content: "done"},
 	})
 	got := second.toolContent("1")
-	if strings.Contains(got, "already in context") {
+	if strings.Contains(got, readNotePrefix) {
 		t.Fatalf("the read cache leaked across turns: %q", got)
 	}
 	if !strings.Contains(got, "alpha") {
