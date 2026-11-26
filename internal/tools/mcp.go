@@ -457,6 +457,15 @@ func (r *Registry) Add(extra ...Tool) *Registry {
 	return &Registry{tools: list, byName: byName}
 }
 
+// WithProfile returns a bridge with the same caller and another profile
+// snapshot (used to hide unconfirmed private servers for one turn).
+func (b *MCPBridge) WithProfile(profile config.Config) *MCPBridge {
+	if b == nil {
+		return nil
+	}
+	return &MCPBridge{caller: b.caller, profile: profile}
+}
+
 // FindToolFor builds the meta-tool from a caller-filtered catalog (for
 // example only the read-only entries an intent may see).
 func (b *MCPBridge) FindToolFor(entries []MCPExposed) Tool {
