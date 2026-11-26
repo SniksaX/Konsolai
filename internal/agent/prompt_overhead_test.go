@@ -18,7 +18,7 @@ import (
 // roughly the same shape.
 const overheadSnapshot = `system: linux/amd64
 shell: bash
-cwd: /home/user/project
+cwd: /srv/project
 package manager: pacman
 git branch: dev, 3 changed, ahead 2
 terminal: 120x32
