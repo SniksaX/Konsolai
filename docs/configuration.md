@@ -99,6 +99,7 @@ The `name` column is accepted by `/set` in place of a full key path. The `values
 | elide | \<trigger\> \<target\> | context.elide_trigger, context.elide_target |
 | ctx | warn\|hot \<pct\> | ui.ctx_warn_pct, ui.ctx_hot_pct |
 | timeout | shell \<sec\> \| model \<sec\> | tools.shell.default_timeout_sec, llm.idle_timeout_seconds |
+| mcp | add stdio \<name\> \<command\> [args...] \| add http \<name\> \<url\> \| remove \| enable \| disable \| trust \<name\> ask\|read_only\|auto \| allow \| deny \<name\> \<glob\> \| header \| env \<name\> \<KEY\> \<value\> | mcp.servers.*, mcp.max_inline_tools |
 
 ## Models
 
@@ -188,3 +189,59 @@ The trace line, the end-of-turn stats line (`ui.stats`) and the footer name the 
 The fast role answers only short greetings (such as `hi`, `hello`, `bonjour`, `merci`) and answer turns at effort `none` whose estimated full answer prompt is under `router.answer_main_above_tokens` (default `200`; `0` disables the token gate). The estimate counts the system context, the history and the question, not only the question, so a long history sends even a short question to main. Every other answer streams on main. The fast client is still the first router when it is reachable, and `fast.context_guard_ratio` still skips it when the answer prompt fills its window.
 
 Embedding endpoints must be loopback or private; a remote embed service is rejected, so RAG stays local.
+
+## MCP servers
+
+MCP is configured under `mcp`. `mcp.max_inline_tools` (default `15`) caps how many MCP tools are offered inline; a later phase moves the rest behind a listing. Each entry of `mcp.servers` is one server:
+
+```yaml
+mcp:
+  max_inline_tools: 15
+  servers:
+    files:
+      transport: stdio
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-filesystem"]
+      env:
+        FS_KEY: "${FILES_KEY}"
+      enabled: true
+      trust: ask
+      timeout_ms: 30000
+      private: false
+      tools:
+        allow: ["read_*"]
+        deny: ["write_*"]
+        read_only: ["read_*"]
+    docs:
+      transport: http
+      url: https://example.com/mcp
+      headers:
+        Authorization: "Bearer ${DOCS_TOKEN}"
+      trust: read_only
+```
+
+| field | values |
+| --- | --- |
+| `transport` | `stdio` runs `command` with `args`; `http` connects to `url` |
+| `command`, `args`, `env` | stdio only; `env` values may be a `${ENV_VAR}` reference |
+| `url`, `headers` | http only; `https`, or plain `http` on a loopback or private host; `headers` values may be a `${ENV_VAR}` reference |
+| `enabled` | default `true` |
+| `trust` | `ask` (default), `read_only` or `auto` |
+| `timeout_ms` | default `30000`; must be positive |
+| `private` | no remote classification for this server |
+| `tools.allow`, `tools.deny`, `tools.read_only` | shell-style globs over tool names |
+
+An env or header value that looks like a stored credential (`sk-`, `ghp_`, `AKIA`, a long token, a `Bearer` literal, `password=`) is refused; use a `${ENV_VAR}` reference instead. A reference that does not resolve yet is accepted and resolved when the server starts. `mcp` entries are not keys: `/set` edits them through `/set mcp`, and `/config show` / `/config diff` mask every env and header value.
+
+```sh
+konsolai /set mcp add stdio files npx -y @modelcontextprotocol/server-filesystem
+konsolai /set mcp add http docs https://example.com/mcp
+konsolai /set mcp trust files read_only
+konsolai /set mcp allow files "read_*"
+konsolai /set mcp header docs Authorization "Bearer ${DOCS_TOKEN}"
+konsolai /set mcp disable files
+konsolai /set mcp remove files
+konsolai /mcp
+```
+
+Adding a stdio server prints the exact command line and asks once; `n` leaves the file unchanged. `/mcp` lists one row per server with its transport, enabled state, trust, private marker, cached tool count and live status; until the runtime is connected the status reads `not connected`. `/mcp tools` and `/mcp test` are not implemented yet.
