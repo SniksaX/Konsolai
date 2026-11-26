@@ -94,7 +94,7 @@ An `env` or `headers` value may be a literal or a `${ENV_VAR}` reference. A refe
 
 - `answer` turns see no MCP tools. `lookup` sees only read-only tools. `act` and `build` see the allowed catalog.
 - A tool is exposed to the model as `server__tool` (lowercase, sanitized, collisions get a stable numeric suffix). Two servers can offer tools with the same name.
-- Above `mcp.max_inline_tools`, the turn exposes one meta-tool, `mcp_find_tool`, instead of every schema. It searches names and one-line descriptions, so a large catalog does not fill the prompt. The names it returns are not registered as callable tools in that turn: raise the cap or narrow `tools.allow` to call one.
+- Above `mcp.max_inline_tools`, the turn exposes one meta-tool, `mcp_find_tool`, instead of every schema. It searches names and one-line descriptions, so a large catalog does not fill the prompt. A found tool is registered between steps and can be called in the same turn: its schema is sent on the next request, a tool declared in the plan is accepted, and one outside the plan asks again. A `read_only` server still hides mutating found tools, and a name the server does not serve stays refused.
 - In a `build` or planned `act` turn, `propose_plan` accepts `tools`: the MCP tools the plan will call, as `server__tool` or `server:tool`. A call outside that list is outside the plan and follows the usual confirmation path.
 - A tool result is untrusted data. Konsolai masks secret-shaped values, caps the raw result at 8 MiB and the wrapped output at 64 KiB, omits images, audio and resources with a marker, and wraps the text in `<untrusted_mcp_result>` followed by a line telling the model that the content is data, never instructions. Tool descriptions are flattened and capped at 240 characters, and secret-shaped text is masked in descriptions and input schemas too, so a server cannot leak a configured env or header value back to the model through its tool list.
 
@@ -105,6 +105,8 @@ An MCP result is part of the conversation, so it leaves the machine when the mai
 ## Status and diagnostics
 
 - `/mcp` (or `/mcp list`) prints one row per configured server: name, transport, enabled or disabled, trust, private marker, cached tool count and live state.
+- `/mcp tools <name>` prints one row per tool: name, `read-only` or `mutating`, `allowed` or `hidden` with the rule that hid it, and the first line of the description capped at 80 characters. Read-only means a `tools.read_only` glob matched, or the server's `readOnlyHint` under `read_only`/`auto` trust. Hidden means the tool is not in `tools.allow`, matched a `tools.deny` glob, or is mutating on a `read_only` server.
+- `/mcp test <name>` connects to one server once, lists its tools and prints the connect-and-list latency and the tool count. A down or unresolvable server prints a short error and the unresolved variable name, never its value.
 - `/status` adds `mcp` rows after `rerank`: state, transport, trust, tool count, private marker, unresolved env names and one short error, followed by `server: tool` lines for the known tools.
 - `/doctor` adds one `mcp <name>` row after the remote-model lines: `✓` for a connected, disabled or not-yet-connected server, `!` for a down server or an unresolved env variable, with the fix it needs. Connected servers list their tools as `server: tool` lines.
 - The welcome screen shows `mcp 2/3 up`: every configured server is the denominator and a live session is the numerator; the line is hidden when no server is configured. The count never connects a server, so a server joins only after its first use.
@@ -121,6 +123,7 @@ What is *not* protected:
 - The stdio process group kill is Unix-only (`Setpgid`/`SIGKILL`). On an unsupported platform a child may outlive the session.
 - The HTTP transport refuses a cross-host redirect and an https-to-http downgrade, but that path has no test against a live server.
 - No MCP behavior here is verified against a live vendor server; the tests use fake stdio and HTTP servers. Transports, auth schemes and tool annotations can differ in practice.
+- Discovery registers the tools a `mcp_find_tool` call returns for the rest of the turn, so the exposed set can grow with each step; a very large catalog still costs one schema per found tool.
 - The session manager enforces one timeout per connect/list/call (`timeout_ms`), a process-wide cap of 4 concurrent calls, and an 8 MiB raw result cap. It does not rate-limit a server, audit its calls, or prove a `readOnlyHint` true.
 
 See [configuration.md](configuration.md#mcp-servers) for the reference section and [commands.md](commands.md#mcp-servers) for the slash commands.
