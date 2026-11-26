@@ -119,7 +119,7 @@ An MCP result is part of the conversation, so it leaves the machine when the mai
 
 The active config file, its `config.yaml.bak-*` backups and the secrets file are protected from the agent. `write_file`, `edit_file` and `export_doc` resolve the real path (symlinks included) and refuse a protected path with the `/set` pointer; `run_shell` refuses a command whose text mentions `config.yaml`, `KONSOLAI_CONFIG` or `.config/konsolai/secrets`, which covers redirection, `tee`, `sed -i`, `mv`, `cp`, `truncate` and an interpreter that writes the file. The refusal points at `/set` to change the configuration and `/config show` to inspect it.
 
-`read_file` on the active config or a backup returns a masked view: MCP `command`, `args`, `env` and `headers` become `<set>`, and MCP and database URLs keep their scheme and path but lose their host. A secrets-file read is refused. `/config show` is the unmasked view for the user at the terminal.
+`read_file` on the active config or a backup returns a masked view: MCP `command`, `args`, `env` and `headers` become `<set>`, and MCP and database URLs keep their scheme and path but lose their host. A secrets-file read is refused. `search` matches the masked view of the active config and its backups, and skips the secrets file with a marker. `/config show` is the unmasked view for the user at the terminal.
 
 Only the user's `/set` and `/set mcp` change the configuration. The MCP bridge has no configuration path, so no tool or server can add, edit, enable, trust or remove a server.
 
@@ -135,7 +135,7 @@ What is *not* protected:
 - The HTTP transport refuses a cross-host redirect and an https-to-http downgrade, but that path has no test against a live server.
 - No MCP behavior here is verified against a live vendor server; the tests use fake stdio and HTTP servers. Transports, auth schemes and tool annotations can differ in practice.
 - Discovery registers the tools a `mcp_find_tool` call returns for the rest of the turn, so the exposed set can grow with each step; a very large catalog still costs one schema per found tool.
-- The shell rule matches the protected names in the command text. A command that builds the name without those literal strings is not caught by that check; the file tools resolve the real path and are not affected. The `search` tool also reads file contents raw, so an active config that the project file list can see (a tracked or non-gitignored `config.yaml`, or a symlink inside the project) can still leak lines through `search`; keep the active config outside the project or gitignored, and inspect it with `/config show`.
+- The shell rule matches the protected names in the command text. A command that builds the name without those literal strings is not caught by that check; `read_file` and `search` classify the resolved path, so the protected config returns the masked view and the secrets file is refused or skipped with a marker.
 - The session manager enforces one timeout per connect/list/call (`timeout_ms`), a process-wide cap of 4 concurrent calls, and an 8 MiB raw result cap. It does not rate-limit a server, audit its calls, or prove a `readOnlyHint` true.
 
 See [configuration.md](configuration.md#mcp-servers) for the reference section and [commands.md](commands.md#mcp-servers) for the slash commands.
