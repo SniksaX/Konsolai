@@ -2,6 +2,7 @@ package welcome
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -52,6 +53,15 @@ func hintLine(pal ui.Palette, width int, tip string) string {
 		}
 	}
 	return clip(line, width)
+}
+
+// mcpStatusLine is the short MCP count the degraded layouts paint under the
+// status strip. It is empty when no server is configured.
+func mcpStatusLine(pal ui.Palette, d Data) string {
+	if d.MCP.Total <= 0 {
+		return ""
+	}
+	return pal.Muted("mcp") + " " + pal.Meta(fmt.Sprintf("%d/%d", d.MCP.Up, d.MCP.Total)) + " " + pal.Muted("up")
 }
 
 func modelName(m Model) string {
@@ -172,7 +182,7 @@ func fitTail(s string, width int) string {
 	return out
 }
 
-func sessionLines(pal ui.Palette, inner int, s Session) []string {
+func sessionLines(pal ui.Palette, inner int, s Session, mcp MCPCount) []string {
 	if inner <= 0 {
 		return nil
 	}
@@ -203,6 +213,10 @@ func sessionLines(pal ui.Palette, inner int, s Session) []string {
 		rows = append(rows, kvLine(pal, inner, "memory", s.Memory, true, func(v string) string {
 			return paintMetaErr(pal, v)
 		}))
+	}
+	if mcp.Total > 0 {
+		// Configured servers are the denominator; only a live session is up.
+		rows = append(rows, kvLine(pal, inner, "mcp", fmt.Sprintf("%d/%d up", mcp.Up, mcp.Total), false, pal.Meta))
 	}
 	return rows
 }
