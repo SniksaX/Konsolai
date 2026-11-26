@@ -401,6 +401,10 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		})
 		reg = registryForRAG(reg, r.Profile.RAGEnabled())
 		if r.MCPRuntime != nil {
+			// /set mcp can change trust, allow/deny and the cap between turns;
+			// re-read the live profile so this request filters with the policy
+			// the user has now, not the one captured at process start.
+			r.MCPRuntime.UseProfile(r.Profile)
 			if extra, mcpErr := r.MCPRuntime.ToolsFor(ctx, string(dec.Intent), r.MCPRuntime.mainRemote(), req.Yes, r.MCPPrivateConfirm); mcpErr == nil {
 				reg = reg.Add(extra...)
 			}
