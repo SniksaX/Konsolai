@@ -205,6 +205,7 @@ func TestV050GreetingFastNoPrompt(t *testing.T) {
 		return
 	}
 	r := startScenarioPTY(t, "TestV050GreetingFastNoPrompt", "gate", t.TempDir())
+	r.prompt(t, "main prompt")
 	r.v.typeKeys("hi\r", screenHas("FAST_OK"))
 	if strings.Contains(r.v.shot().dump(), v050Prompt) {
 		failScreen(t, "greeting asked for remote confirmation", r.v.shot(), r.v.raw())
