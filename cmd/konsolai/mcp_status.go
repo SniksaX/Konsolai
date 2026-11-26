@@ -16,6 +16,15 @@ type mcpStatusAdapter struct {
 	rt *turn.MCPRuntime
 }
 
+// CachedToolCount reports the tool count already known for one server without
+// connecting it, so /mcp list stays lazy.
+func (a mcpStatusAdapter) CachedToolCount(name string) (int, bool) {
+	if a.rt == nil {
+		return 0, false
+	}
+	return a.rt.CachedToolCount(name)
+}
+
 func (a mcpStatusAdapter) Known(name string) string {
 	if a.rt == nil {
 		return "not connected"
