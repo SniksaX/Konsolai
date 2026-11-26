@@ -61,6 +61,7 @@ type Runner struct {
 	SlashHelp        string
 	Ingest           *rag.Ingester
 	Embed            *embed.Client
+	MCPRuntime       *MCPRuntime
 	shellOut         []string
 	lastCode         int
 	lastIntent       intent.Intent
