@@ -75,6 +75,7 @@ func doctorChecks(ctx context.Context, env *Env) []doctorCheck {
 		out = append(out, checkModels(ctx, env, "fast endpoint", "fast", env.Profile.FastEndpoint(), "roles.fast", timeout))
 	}
 	out = append(out, checkRemoteModels(env)...)
+	out = append(out, mcpChecks(ctx, env)...)
 	if strings.TrimSpace(env.Profile.EmbedURL()) != "" {
 		out = append(out, checkKind(ctx, "embed endpoint", env.Profile.EmbedURL(), "embed", "roles.embed", timeout))
 	}
