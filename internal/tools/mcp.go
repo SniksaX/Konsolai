@@ -430,3 +430,35 @@ func (a *mcpFindAction) Run(context.Context) (Result, error) {
 	}
 	return Result{Output: b.String()}, nil
 }
+
+// Add returns a registry with the extra tools appended. The receiver is
+// unchanged, so a caller can build one turn's catalog without shared mutation.
+func (r *Registry) Add(extra ...Tool) *Registry {
+	if r == nil || len(extra) == 0 {
+		return r
+	}
+	list := make([]Tool, 0, len(r.tools)+len(extra))
+	list = append(list, r.tools...)
+	byName := make(map[string]Tool, len(r.byName)+len(extra))
+	for n, t := range r.byName {
+		byName[n] = t
+	}
+	for _, t := range extra {
+		if t == nil {
+			continue
+		}
+		n := t.Spec().Function.Name
+		if _, dup := byName[n]; dup {
+			continue
+		}
+		list = append(list, t)
+		byName[n] = t
+	}
+	return &Registry{tools: list, byName: byName}
+}
+
+// FindToolFor builds the meta-tool from a caller-filtered catalog (for
+// example only the read-only entries an intent may see).
+func (b *MCPBridge) FindToolFor(entries []MCPExposed) Tool {
+	return &mcpFindTool{bridge: b, entries: entries}
+}
