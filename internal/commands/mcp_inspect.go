@@ -12,7 +12,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/SniksaX/Konsolai/internal/config"
+	"github.com/SniksaX/Konsolai/internal/mcp"
 	"github.com/SniksaX/Konsolai/internal/redact"
+	"github.com/SniksaX/Konsolai/internal/tools"
 )
 
 // MCPTool is one tool row a manager reports for /mcp tools. It is
@@ -46,8 +48,8 @@ const (
 	mcpUsage          = "usage: /mcp [list | tools <name> | test <name>]"
 	mcpToolDescCap    = 80
 	mcpToolNameCap    = 40
-	mcpToolTableFmt   = "  %-24s %-9s %-8s %-34s %s\n"
-	mcpToolTableHead  = "  %-24s %-9s %-8s %-34s %s\n"
+	mcpToolTableFmt   = "  %-24s %-9s %-8s %-26s %-24s %s\n"
+	mcpToolTableHead  = "  %-24s %-9s %-8s %-26s %-24s %s\n"
 	mcpToolStateAllow = "allowed"
 	mcpToolStateHide  = "hidden"
 )
@@ -59,8 +61,18 @@ type mcpToolRow struct {
 	Name        string
 	Kind        string
 	State       string
+	Offered     string
 	Reason      string
 	Description string
+}
+
+// mcpOfferContext is the caller-level state the offer rule needs beyond the
+// per-tool trust and glob rules: a private server hidden under a remote main
+// model, and whether the inline cap turns the catalog into mcp_find_tool only.
+type mcpOfferContext struct {
+	serverHidden bool
+	hiddenReason string
+	findOnly     bool
 }
 
 // mcpTools prints one row per tool: name, read-only or mutating under the
@@ -97,24 +109,64 @@ func mcpTools(ctx context.Context, env *Env, args []string) int {
 		mcpInspectError(env, "tools", name, server, err)
 		return 1
 	}
-	rows := mcpToolRows(server, name, list)
-	allowed := 0
+	offer := mcpOfferForEnv(env, name, server, list)
+	rows := mcpToolRows(server, name, list, offer)
+	allowed, offered := 0, 0
 	for _, row := range rows {
 		if row.State == mcpToolStateAllow {
 			allowed++
 		}
+		if row.Offered == mcpToolOfferedYes {
+			offered++
+		}
 	}
-	fmt.Fprintf(env.out(), "mcp %s: %s, trust %s, %d tools (%d allowed, %d hidden)\n",
-		name, server.Transport, server.TrustMode(), len(rows), allowed, len(rows)-allowed)
+	fmt.Fprintf(env.out(), "mcp %s: %s, trust %s, %d tools (%d allowed, %d hidden, %d offered now)\n",
+		name, server.Transport, server.TrustMode(), len(rows), allowed, len(rows)-allowed, offered)
 	if len(rows) == 0 {
 		fmt.Fprintln(env.out(), "no tools")
 		return 0
 	}
-	fmt.Fprintf(env.out(), mcpToolTableHead, "tool", "kind", "state", "reason", "description")
+	fmt.Fprintf(env.out(), mcpToolTableHead, "tool", "kind", "state", "offered", "reason", "description")
 	for _, row := range rows {
-		fmt.Fprintf(env.out(), mcpToolTableFmt, row.Name, row.Kind, row.State, row.Reason, row.Description)
+		fmt.Fprintf(env.out(), mcpToolTableFmt, row.Name, row.Kind, row.State, row.Offered, row.Reason, row.Description)
 	}
 	return 0
+}
+
+const (
+	mcpToolOfferedYes = "yes"
+	mcpToolOfferedNo  = "no: "
+)
+
+// mcpOfferForEnv builds the caller-level offer context for one server. The
+// private rule mirrors the turn: a remote main model needs a confirmation
+// (remembered by the runtime) or --yes before a private server is offered; the
+// inline cap mirrors the runtime default when the profile leaves it at zero.
+func mcpOfferForEnv(env *Env, name string, server config.MCPServer, list []MCPTool) mcpOfferContext {
+	if env == nil {
+		return mcpOfferContext{}
+	}
+	offer := mcpOfferContext{}
+	if env.Profile.Main().Remote() && server.Private && !env.Yes {
+		confirmed := env.Runner != nil && env.Runner.MCPRuntime != nil && env.Runner.MCPRuntime.PrivateConfirmed(name)
+		if !confirmed {
+			offer.serverHidden = true
+			offer.hiddenReason = "private (remote main)"
+		}
+	}
+	cap := env.Profile.MCPInlineCap()
+	if cap <= 0 {
+		cap = 15
+	}
+	allowed := 0
+	for _, tool := range list {
+		candidate := mcp.Tool{Name: tool.Name, ReadOnly: tool.ReadOnly}
+		if tools.MCPToolAllowed(server, name, candidate) {
+			allowed++
+		}
+	}
+	offer.findOnly = allowed > cap
+	return offer
 }
 
 // mcpTest connects to one server once, lists its tools and reports the
@@ -193,8 +245,11 @@ func mcpMissingEnvRefs(server config.MCPServer) []string {
 	return out
 }
 
-// mcpToolRows classifies every tool under the server's trust and globs.
-func mcpToolRows(server config.MCPServer, serverName string, list []MCPTool) []mcpToolRow {
+// mcpToolRows classifies every tool under the server's trust and globs, then
+// marks what the model would be offered right now. The offer rule is the same
+// one the turn uses: enabled, allow/deny, trust and the caller-level private
+// and inline-cap decisions.
+func mcpToolRows(server config.MCPServer, serverName string, list []MCPTool, offer mcpOfferContext) []mcpToolRow {
 	rows := make([]mcpToolRow, 0, len(list))
 	for _, tool := range list {
 		kind, readOnly := mcpToolKind(server, tool)
@@ -203,10 +258,19 @@ func mcpToolRows(server config.MCPServer, serverName string, list []MCPTool) []m
 		if !allowed {
 			state = mcpToolStateHide
 		}
+		candidate := mcp.Tool{Name: tool.Name, ReadOnly: tool.ReadOnly}
+		ok, why := tools.MCPToolOffered(server, serverName, candidate, offer.serverHidden, offer.hiddenReason)
+		offered := mcpToolOfferedYes
+		if !ok {
+			offered = mcpToolOfferedNo + why
+		} else if offer.findOnly {
+			offered = mcpToolOfferedNo + "find tool only (inline cap)"
+		}
 		rows = append(rows, mcpToolRow{
 			Name:        capMCPText(redact.String(tool.Name), mcpToolNameCap),
 			Kind:        kind,
 			State:       state,
+			Offered:     offered,
 			Reason:      reason,
 			Description: mcpToolDescription(tool.Description),
 		})
