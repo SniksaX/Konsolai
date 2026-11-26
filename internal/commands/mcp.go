@@ -27,6 +27,10 @@ type MCPServerStatus struct {
 // nil until the runtime is wired, so /mcp list then says not connected.
 type MCPManager interface {
 	Status(name string) MCPServerStatus
+	// Known reports the state without touching the server: connected, down,
+	// not connected, or disabled. It must never connect, because the welcome
+	// counts it on every repaint.
+	Known(name string) string
 }
 
 func runMCP(ctx context.Context, env *Env, args []string) int {
