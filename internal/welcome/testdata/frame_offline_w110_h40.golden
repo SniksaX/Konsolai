@@ -14,6 +14,7 @@
   │ behind   2                                       │  ╰──────────────────────────────────────────────────╯
   │ build    v0.1.0  ab12cd3                         │
   │ memory   412 facts · 2 sessions                  │
+  │ mcp      2/3 up                                  │
   ╰──────────────────────────────────────────────────╯
 
     / commands   ! shell   @ files   ? help                             tip /undo reverts the last file change

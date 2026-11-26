@@ -11,7 +11,8 @@
   │ branch   not a git repo                                         │  │ › lookup theme roles                                 lookup  2h │
   │ build    v0.1.0  ab12cd3                                        │  │ › answer a short question                            answer  1d │
   │ memory   412 facts · 2 sessions                                 │  │ › wire the footer meter                                 act  3w │
-  ╰─────────────────────────────────────────────────────────────────╯  ╰─────────────────────────────────────────────────────────────────╯
+  │ mcp      2/3 up                                                 │  ╰─────────────────────────────────────────────────────────────────╯
+  ╰─────────────────────────────────────────────────────────────────╯
 
     / commands   ! shell   @ files   ? help                                                           tip /undo reverts the last file change
 
