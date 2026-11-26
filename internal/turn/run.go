@@ -211,9 +211,9 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	if intent.LooksLikeMemory(req.Text) {
 		dec.NeedsMemory = true
 	}
-	if n, text := r.attachSessionMemory(ctx, mem, projectID, req.Text, dec.NeedsMemory); n > 0 {
-		req.Text = text
-		fmt.Fprintln(r.out(), ui.Current().Muted(fmt.Sprintf("recalled %d memories", n)))
+	if hits := r.sessionMemoryHits(ctx, mem, projectID, req.Text, dec.NeedsMemory); len(hits) > 0 {
+		history = AppendRecallBackground(history, hits)
+		fmt.Fprintln(r.out(), ui.Current().Muted(fmt.Sprintf("recalled %d memories", len(hits))))
 	}
 	if sessionID == "" && len(history) == 0 {
 		sessionID = CreateSession(ctx, mem, r.Profile, projectID, cwd, string(dec.Intent), req.Text)
@@ -901,21 +901,20 @@ func codeContext(ctx context.Context, snap sysctx.Snapshot, root string) string 
 	return b.String()
 }
 
-func (r *Runner) attachSessionMemory(ctx context.Context, mem *memory.Guard, projectID *int64, text string, needed bool) (int, string) {
+func (r *Runner) sessionMemoryHits(ctx context.Context, mem *memory.Guard, projectID *int64, text string, needed bool) []rag.Hit {
 	if !needed || r.Embed == nil || mem == nil || mem.Store() == nil {
-		return 0, text
+		return nil
 	}
 	st := mem.Store()
 	if !st.RAGAvailable(ctx) {
-		return 0, text
+		return nil
 	}
 	hits, err := rag.SearchTune(ctx, st, r.Embed, r.Embed, r.Profile.Name, projectID, text, "sessions", 4, rag.TuneFrom(r.Profile))
 	if err != nil || len(hits) == 0 {
-		return 0, text
+		return nil
 	}
-	return len(hits), rag.PrependMemory(text, hits)
+	return hits
 }
-
 func AttachMemories(user string, hits []rag.Hit) (string, int) {
 	if len(hits) == 0 {
 		return user, 0
