@@ -400,6 +400,11 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			DisableWeb:          !r.Profile.WebOn(),
 		})
 		reg = registryForRAG(reg, r.Profile.RAGEnabled())
+		if r.MCPRuntime != nil {
+			if extra, mcpErr := r.MCPRuntime.ToolsFor(ctx, string(dec.Intent)); mcpErr == nil {
+				reg = reg.Add(extra...)
+			}
+		}
 		cfg := agent.Config{
 			Client:            client,
 			Tools:             reg,
