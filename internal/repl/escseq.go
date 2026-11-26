@@ -36,7 +36,24 @@ func readEscapeTail(next func() (byte, bool)) (tail []byte, lone bool) {
 		if !ok {
 			return tail, false
 		}
-		return append(tail, n), false
+		tail = append(tail, n)
+		if n >= '0' && n <= '9' {
+			// SS3 with modifiers: ESC O 1;2 A.
+			for {
+				m, ok := next()
+				if !ok {
+					return tail, false
+				}
+				tail = append(tail, m)
+				if m >= 0x40 && m <= 0x7e {
+					return tail, false
+				}
+				if (m < '0' || m > '9') && m != ';' {
+					return tail, false
+				}
+			}
+		}
+		return tail, false
 	default:
 		return tail, false
 	}
@@ -51,14 +68,26 @@ func (r *rlReader) nextEscByte(d time.Duration) (byte, bool) {
 	return readStdinByte(d)
 }
 
-func arrowUp(tail []byte) bool {
-	s := string(tail)
-	return s == "[A" || s == "OA"
-}
-
-func arrowDown(tail []byte) bool {
-	s := string(tail)
-	return s == "[B" || s == "OB"
+// escapeArrow reports an Up or Down sequence, including the CSI, SS3 and
+// modifier forms Konsole sends (ESC[A, ESC OA, ESC[1;5A, ESC O 1;2 A).
+func escapeArrow(tail []byte) (byte, bool) {
+	if len(tail) < 2 {
+		return 0, false
+	}
+	if tail[0] != '[' && tail[0] != 'O' {
+		return 0, false
+	}
+	body := tail[1:]
+	final := body[len(body)-1]
+	if final != 'A' && final != 'B' {
+		return 0, false
+	}
+	for _, c := range body[:len(body)-1] {
+		if (c < '0' || c > '9') && c != ';' {
+			return 0, false
+		}
+	}
+	return final, true
 }
 
 // actionFor returns the emacs binding for a full sequence, including the Esc
@@ -112,19 +141,21 @@ func dropEsc(tail []byte) bool {
 // Page, insert, and function keys are listed in dropEsc so they are never typed.
 func fallbackEdit(tail []byte) string {
 	switch string(tail) {
-	case "[3~":
+	case "[3~", "[3;2~", "[3;3~", "[3;4~":
 		return "delete-char"
-	case "[1~", "[7~", "[H", "OH":
+	case "[1~", "[7~", "[H", "OH",
+		"[1;2H", "[1;3H", "[1;5H", "[1;7H", "O1;2H", "O1;3H", "O1;5H":
 		return "beginning-of-line"
-	case "[4~", "[8~", "[F", "OF":
+	case "[4~", "[8~", "[F", "OF",
+		"[1;2F", "[1;3F", "[1;5F", "[1;7F", "O1;2F", "O1;3F", "O1;5F":
 		return "end-of-line"
-	case "[D", "OD":
+	case "[D", "OD", "[1;2D", "O1;2D":
 		return "backward-char"
-	case "[C", "OC":
+	case "[C", "OC", "[1;2C", "O1;2C":
 		return "forward-char"
-	case "[1;5D", "[1;3D", "b":
+	case "[1;5D", "[1;3D", "O1;5D", "O1;3D", "b":
 		return "backward-word"
-	case "[1;5C", "[1;3C", "f":
+	case "[1;5C", "[1;3C", "O1;5C", "O1;3C", "f":
 		return "forward-word"
 	case "[3;5~":
 		return "kill-word"
