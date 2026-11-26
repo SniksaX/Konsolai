@@ -155,7 +155,7 @@ konsolai /set mcp trust files read_only
 konsolai /mcp
 ```
 
-Servers can be scoped by trust (`ask`, `read_only`, `auto`), tool globs and a per-server timeout; env and header values take `${ENV_VAR}` references instead of literals, and `/set mcp` refuses a value that looks like a stored secret. In a planned turn the plan lists the MCP tools it will call; anything else is outside the plan. `private` servers stay away from a remote main model unless `--yes` confirms them. The welcome shows `mcp 2/3 up` over the configured servers, `/status` and `/doctor` add per-server rows, and `--trace` counts MCP calls on the stats line.
+Servers can be scoped by trust (`ask`, `read_only`, `auto`), tool globs and a per-server timeout; env and header values take `${ENV_VAR}` references instead of literals, and `/set mcp` refuses a value that looks like a stored secret. In a planned turn the plan lists the MCP tools it will call; anything else is outside the plan. `private` servers stay away from a remote main model unless you confirm them or pass `--yes`. The welcome shows `mcp 2/3 up` over the configured servers, `/status` and `/doctor` add per-server rows, and `--trace` counts MCP calls on the stats line.
 
 Setup, trust levels, filesystem and database examples, and the threat model are in [docs/mcp.md](docs/mcp.md).
 
