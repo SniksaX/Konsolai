@@ -2086,7 +2086,7 @@ func TestReadDedupeSkipsCoveredRange(t *testing.T) {
 			}
 		}
 	}
-	if !strings.Contains(skip, "already in context above (step 1, lines 1-5)") {
+	if !strings.Contains(skip, readNotePrefix+" since step 1 (lines 1-5)") {
 		t.Fatalf("skip %q", skip)
 	}
 }
@@ -2117,7 +2117,7 @@ func TestReadDedupeRerunsAfterChange(t *testing.T) {
 			}
 		}
 	}
-	if strings.Contains(second, "already in context") {
+	if strings.Contains(second, readNotePrefix) {
 		t.Fatalf("changed file was skipped: %q", second)
 	}
 	if !strings.Contains(second, "new") {
