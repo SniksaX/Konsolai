@@ -401,7 +401,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 		})
 		reg = registryForRAG(reg, r.Profile.RAGEnabled())
 		if r.MCPRuntime != nil {
-			if extra, mcpErr := r.MCPRuntime.ToolsFor(ctx, string(dec.Intent)); mcpErr == nil {
+			if extra, mcpErr := r.MCPRuntime.ToolsFor(ctx, string(dec.Intent), r.MCPRuntime.mainRemote(), req.Yes, r.MCPPrivateConfirm); mcpErr == nil {
 				reg = reg.Add(extra...)
 			}
 		}
