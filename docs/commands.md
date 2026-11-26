@@ -88,7 +88,7 @@ From the shell the same commands are `konsolai /history` and so on. The bare wor
 
 ## MCP servers
 
-`/mcp` (or `/mcp list`) prints one row per configured MCP server: name, transport, enabled or disabled, trust, private marker, cached tool count and live state. A disabled server reads `disabled`; a server that has not been used yet reads `not connected`. The command never prints a command line, an env value or a header value.
+`/mcp` (or `/mcp list`) prints one row per configured MCP server: name, transport, enabled or disabled, trust, private marker, cached tool count and live state. A disabled server reads `disabled`; a server that has not been used yet reads `not connected`. `/mcp tools <name>` prints one row per tool: name, `read-only` or `mutating` under the server's trust and globs, `allowed` or `hidden` with the rule that hid it (`not in allow`, `deny <glob>`, `trust read_only`), and the first line of the description capped at 80 characters. `/mcp test <name>` connects once, lists the tools and prints the latency and the tool count. The commands never print a command line, an env value, a header value or a `${ENV_VAR}` resolution; an unresolved variable is shown by name.
 
 `/set mcp` edits the servers: `add stdio <name> <command> [args...]`, `add http <name> <url>`, `remove`, `enable`, `disable`, `trust <name> ask|read_only|auto`, `allow`/`deny <name> <glob>`, and `header`/`env <name> <KEY> <value>`. Adding a stdio server prints the exact command line and asks once. A literal secret is refused; use a `${ENV_VAR}` reference. See [mcp.md](mcp.md) for setup, trust levels, examples and the threat model, and [configuration.md](configuration.md#mcp-servers) for the field reference.
 
@@ -123,7 +123,7 @@ The `name` cell is `Command.DisplayNames`. The `args` cell lists `Arg.Name`; opt
 | /status | | Show version, model, database and environment |
 | /config | action | Show or write the YAML config |
 | /set | [name] [value] | Show or change a setting |
-| /mcp | [action] | List configured MCP servers |
+| /mcp | [action] | List, inspect or test MCP servers |
 | /models | | Show configured models |
 | /theme | [name] | List palettes or apply one |
 | /index | [action] | Index the project for recall |
