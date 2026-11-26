@@ -139,7 +139,7 @@ func (r *Runner) RunTurn(ctx context.Context, req Request) Result {
 	spoken := req.Text
 	prevCtx := strings.TrimSpace(r.lastUser + "\n" + r.lastAssistant)
 	if !continued {
-		dec = DecideIntentFloor(ctx, routeClient, req.Intent, req.Text, req.New, routerCands, inRepo, r.Profile.Router.ActionVerbs, r.Profile.Router.Targets, prevCtx)
+		dec = DecideIntentFloor(ctx, routeClient, req.Intent, req.Text, req.New, routerCands, inRepo, r.Profile.Router.ActionVerbs, r.Profile.Router.Targets, prevCtx, mcpRouterLines(r.Profile))
 	} else if dec.Reason == "continue-promise" && r.lastUser != "" {
 		req.Text = r.lastUser
 		r.lastPromise = false
