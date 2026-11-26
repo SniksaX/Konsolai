@@ -218,6 +218,9 @@ func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 	if err := t.guard.CheckCommandPaths(cmd, resolved); err != nil {
 		return nil, err
 	}
+	if name, ok := config.ShellProtected(cmd); ok {
+		return nil, fmt.Errorf("tools: run_shell: %s is protected: %s", name, config.ProtectedRefusal)
+	}
 	sec := args.TimeoutSec
 	if sec == 0 {
 		sec = int(t.defaultTimeout / time.Second)
