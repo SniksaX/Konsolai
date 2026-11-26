@@ -182,3 +182,6 @@ privacy:
   allow_remote: true   # allow prompts to be sent to a remote model
   remote_roles: ["main", "fast"]   # roles that may point at a remote model
   session_token_cap: 0   # stop remote calls after this many tokens; 0 = off
+mcp:
+  max_inline_tools: 15   # inline MCP tool cap; larger catalogs are listed on demand
+  servers: {}
