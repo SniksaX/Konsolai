@@ -10,7 +10,7 @@ The active file is `--config`, then `KONSOLAI_CONFIG`, then `$XDG_CONFIG_HOME/ko
 
 `--profile NAME` selects the profile. If that flag is empty, `KONSOLAI_PROFILE` is used, then `default_profile`, then the built-in name `default`.
 
-Every change goes through `/set`. A new setting is one entry in `internal/config/keys.go`. The agent's file tools and shell guard refuse to write the active file, its `config.yaml.bak-*` backups and the secrets file: `write_file`, `edit_file` and `export_doc` refuse a protected path with the `/set` pointer, `run_shell` refuses a command that mentions them, and `read_file` returns a masked view (MCP `command`/`args`/`env`/`headers` hidden, MCP and database hosts masked; a secrets read is refused). `/config show` is the unmasked view for the user.
+Every change goes through `/set`. A new setting is one entry in `internal/config/keys.go`. The agent's file tools and shell guard refuse to write the active file, its `config.yaml.bak-*` backups and the secrets file: `write_file`, `edit_file` and `export_doc` refuse a protected path with the `/set` pointer, `run_shell` refuses a command that mentions them, and `read_file` returns a masked view (MCP `command`/`args`/`env`/`headers` hidden, MCP and database hosts masked; a secrets read is refused). `/config show` prints the configuration for the user at the terminal; a database password and literal MCP env/header values stay masked.
 
 ```sh
 konsolai /set
@@ -124,7 +124,7 @@ konsolai /set rerank off
 
 A model is remote when its endpoint host resolves outside loopback and the private address ranges. Remote models are supported: `/set model` and `/status` mark a remote endpoint, the welcome models box marks a remote row, and the footer marks the model that served the last call when that model is remote. `/doctor` prints one line per remote model with its host, whether a key is present (never the value), and a warning for plain HTTP. The privacy keys below gate all of it.
 
-The presets `openai`, `openrouter`, `groq`, `together`, `mistral`, `deepseek`, `gemini`, and `anthropic` fill the endpoint, context and request quirks for an API-key provider. They come from each provider's OpenAI-compatible documentation and were not exercised against live accounts here. The `anthropic` preset is experimental: its OpenAI-compatible endpoint accepts an auth header that has not been verified.
+The presets `openai`, `openrouter`, `groq`, `together`, `mistral`, `deepseek`, `gemini`, and `anthropic` fill the endpoint, context and request quirks for an API-key provider. The DeepSeek and OpenAI presets were exercised against live accounts; the others come from each provider's OpenAI-compatible documentation and were not exercised here. The `anthropic` preset is experimental: its OpenAI-compatible endpoint accepts an auth header that has not been verified.
 
 ### Probes
 
@@ -247,7 +247,7 @@ konsolai /set mcp remove files
 konsolai /mcp
 ```
 
-Adding a stdio server prints the exact command line and asks once; `n` leaves the file unchanged. `/mcp` lists one row per server with its transport, enabled state, trust, private marker, cached tool count and known state; it never connects a server, so an unused server reads `not connected` with no count. `/mcp tools <name>` connects to that server once and classifies each tool under the server's trust and globs, with a live `offered` column for the next `act`/`build` turn (`N offered now` in the summary; the inline cap is checked per inspected server). `/mcp test <name>` connects once and reports the latency and tool count.
+Adding a stdio server prints the exact command line and asks once; `n` leaves the file unchanged. `/mcp` lists one row per server with its transport, enabled state, trust, private marker, cached tool count and known state; it never connects a server, so an unused server reads `not connected` with no count. `/mcp tools <name>` connects to that server once and classifies each tool under the server's trust and globs, with a live `offered` column for the next `act`/`build` turn after a required plan is approved (`N offered now` in the summary; the inline cap is checked per inspected server). `/mcp test <name>` connects once and reports the latency and tool count.
 
 `/status` adds a count line and per-server rows after `rerank`: the count reads `N configured` until the first server connects and `U/T up` afterwards; the rows carry state, transport, trust, tool count, private marker, unresolved env names and `server: tool` lines. `/doctor` adds one `mcp <name>` line per server, and the welcome shows `mcp N configured` until a server connects and then `U/T up`. A `--trace` stats line adds `mcp=N` when the turn called an MCP tool.
 
