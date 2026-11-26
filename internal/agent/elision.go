@@ -198,12 +198,17 @@ func elidedMarker(tool, summary string) string {
 }
 
 type readSpan struct {
-	abs    string
-	hash   string
-	start  int
-	end    int
-	step   int
-	toolID string
+	abs   string
+	hash  string
+	start int
+	end   int
+	// askedStart and askedEnd are the lines the call requested. An identical
+	// repeat is deduped even when the answer was capped; a different range is
+	// deduped only when the shown lines already cover it.
+	askedStart int
+	askedEnd   int
+	step       int
+	toolID     string
 }
 
 func parseReadRange(raw string) (start, end int) {
@@ -273,7 +278,10 @@ func (s readSpan) covers(start, end int) bool {
 func findReadSpan(spans []readSpan, abs, hash string, start, end int) (readSpan, bool) {
 	for i := len(spans) - 1; i >= 0; i-- {
 		sp := spans[i]
-		if sp.abs == abs && sp.hash == hash && sp.covers(start, end) {
+		if sp.abs != abs || sp.hash != hash {
+			continue
+		}
+		if sp.covers(start, end) || (sp.askedStart == start && sp.askedEnd == end) {
 			return sp, true
 		}
 	}
