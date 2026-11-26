@@ -10,7 +10,7 @@ The active file is `--config`, then `KONSOLAI_CONFIG`, then `$XDG_CONFIG_HOME/ko
 
 `--profile NAME` selects the profile. If that flag is empty, `KONSOLAI_PROFILE` is used, then `default_profile`, then the built-in name `default`.
 
-Every change goes through `/set`. A new setting is one entry in `internal/config/keys.go`.
+Every change goes through `/set`. A new setting is one entry in `internal/config/keys.go`. The agent's file tools and shell guard refuse to write the active file, its `config.yaml.bak-*` backups and the secrets file: `write_file`, `edit_file` and `export_doc` refuse a protected path with the `/set` pointer, `run_shell` refuses a command that mentions them, and `read_file` returns a masked view (MCP `command`/`args`/`env`/`headers` hidden, MCP and database hosts masked; a secrets read is refused). `/config show` is the unmasked view for the user.
 
 ```sh
 konsolai /set
@@ -247,4 +247,8 @@ konsolai /set mcp remove files
 konsolai /mcp
 ```
 
-Adding a stdio server prints the exact command line and asks once; `n` leaves the file unchanged. `/mcp` lists one row per server with its transport, enabled state, trust, private marker, cached tool count and live state. `/status` and `/doctor` add per-server rows (state, transport, trust, tool count, unresolved env names, `server: tool` lines), the welcome shows `mcp 2/3 up` over the configured servers, and a `--trace` stats line adds `mcp=N` when the turn called an MCP tool. `/mcp tools <name>` classifies each tool under the server's trust and globs, and `/mcp test <name>` connects once and reports the latency and tool count.
+Adding a stdio server prints the exact command line and asks once; `n` leaves the file unchanged. `/mcp` lists one row per server with its transport, enabled state, trust, private marker, cached tool count and known state; it never connects a server, so an unused server reads `not connected` with no count. `/mcp tools <name>` connects to that server once and classifies each tool under the server's trust and globs, with a live `offered` column for the next `act`/`build` turn (`N offered now` in the summary; the inline cap is checked per inspected server). `/mcp test <name>` connects once and reports the latency and tool count.
+
+`/status` adds a count line and per-server rows after `rerank`: the count reads `N configured` until the first server connects and `U/T up` afterwards; the rows carry state, transport, trust, tool count, private marker, unresolved env names and `server: tool` lines. `/doctor` adds one `mcp <name>` line per server, and the welcome shows `mcp N configured` until a server connects and then `U/T up`. A `--trace` stats line adds `mcp=N` when the turn called an MCP tool.
+
+Every MCP rule (trust, allow, deny, enabled, private, inline cap) is re-read for each request, so a `/set mcp` change applies to the next turn while the manager keeps its session and cached tool list. The manager's per-server spec (whether the server was enabled at start, the command, URL and timeout) is fixed when the process starts, so enabling a server that started disabled, or changing its command, URL or timeout, needs a restart.
