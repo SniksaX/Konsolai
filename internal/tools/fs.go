@@ -272,7 +272,7 @@ func (a *readFileAction) Run(ctx context.Context) (Result, error) {
 	if len(allBytes) > 0 && allBytes[len(allBytes)-1] == '\n' {
 		lines = lines[:len(lines)-1]
 	}
-	out, truncated := formatRead(a.display, lines, a.startLine, a.endLine)
+	out, truncated, shownStart, shownEnd := formatRead(a.display, lines, a.startLine, a.endLine)
 	if truncated {
 		out += "\n... [truncated; set start_line to read the rest]"
 	}
@@ -280,7 +280,7 @@ func (a *readFileAction) Run(ctx context.Context) (Result, error) {
 	if masked > 0 {
 		meta = fmt.Sprintf("masked %d values", masked)
 	}
-	return Result{Output: out, Meta: meta}, nil
+	return Result{Output: out, Meta: meta, ReadStart: shownStart, ReadEnd: shownEnd}, nil
 }
 
 type listDirTool struct{ guard *safety.Guard }
@@ -365,7 +365,7 @@ func (a *listDirAction) Run(ctx context.Context) (Result, error) {
 	return Result{Output: out, Meta: fmt.Sprintf("%d entries", len(entries))}, nil
 }
 
-func formatRead(display string, lines []string, start, end int) (string, bool) {
+func formatRead(display string, lines []string, start, end int) (string, bool, int, int) {
 	n := len(lines)
 	if start < 1 {
 		start = 1
@@ -374,10 +374,10 @@ func formatRead(display string, lines []string, start, end int) (string, bool) {
 		end = n
 	}
 	if n == 0 {
-		return fmt.Sprintf("%s (lines 0-0 of 0)\n", display), false
+		return fmt.Sprintf("%s (lines 0-0 of 0)\n", display), false, 0, 0
 	}
 	if start > n {
-		return fmt.Sprintf("error: start_line %d past end (%d lines)", start, n), false
+		return fmt.Sprintf("error: start_line %d past end (%d lines)", start, n), false, 0, 0
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s (lines %d-%d of %d)\n", display, start, end, n)
@@ -399,7 +399,10 @@ func formatRead(display string, lines []string, start, end int) (string, bool) {
 	if last < end {
 		trunc = true
 	}
-	return b.String(), trunc
+	if shown == 0 {
+		return b.String(), trunc, 0, 0
+	}
+	return b.String(), trunc, start, last
 }
 
 func formatSize(n int64) string {
