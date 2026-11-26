@@ -194,7 +194,7 @@ Embedding endpoints must be loopback or private; a remote embed service is rejec
 
 Konsolai is a [Model Context Protocol](https://modelcontextprotocol.io) client: a stdio child process or a streamable HTTP endpoint. MCP tools are offered in `lookup`, `act`, and `build` turns, never in `answer`; the model cannot add, edit, enable, trust or remove a server. Setup, trust levels, examples and the threat model are in [mcp.md](mcp.md); this section is the configuration reference.
 
-`mcp.max_inline_tools` (default `15`) caps how many tools are offered at once. Above it a turn offers one `mcp_find_tool` meta-tool instead. Each entry of `mcp.servers` is one server:
+`mcp.max_inline_tools` (default `15`) caps how many tools are offered at once. Above it a turn offers one `mcp_find_tool` meta-tool instead; the tools it finds are registered and callable in the same turn. Each entry of `mcp.servers` is one server:
 
 ```yaml
 mcp:
@@ -247,4 +247,4 @@ konsolai /set mcp remove files
 konsolai /mcp
 ```
 
-Adding a stdio server prints the exact command line and asks once; `n` leaves the file unchanged. `/mcp` lists one row per server with its transport, enabled state, trust, private marker, cached tool count and live state. `/status` and `/doctor` add per-server rows (state, transport, trust, tool count, unresolved env names, `server: tool` lines), the welcome shows `mcp 2/3 up` over the configured servers, and a `--trace` stats line adds `mcp=N` when the turn called an MCP tool. `/mcp tools` and `/mcp test` are not implemented.
+Adding a stdio server prints the exact command line and asks once; `n` leaves the file unchanged. `/mcp` lists one row per server with its transport, enabled state, trust, private marker, cached tool count and live state. `/status` and `/doctor` add per-server rows (state, transport, trust, tool count, unresolved env names, `server: tool` lines), the welcome shows `mcp 2/3 up` over the configured servers, and a `--trace` stats line adds `mcp=N` when the turn called an MCP tool. `/mcp tools <name>` classifies each tool under the server's trust and globs, and `/mcp test <name>` connects once and reports the latency and tool count.
