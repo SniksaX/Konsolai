@@ -32,8 +32,14 @@ type MCPManager interface {
 	Status(name string) MCPServerStatus
 	// Known reports the state without touching the server: connected, down,
 	// not connected, or disabled. It must never connect, because the welcome
-	// counts it on every repaint.
+	// and /mcp list read it on every paint.
 	Known(name string) string
+}
+
+// MCPCachedToolCounter is the optional lazy capability /mcp list reads for its
+// tool count: a cached count from an earlier connection, never a fresh connect.
+type MCPCachedToolCounter interface {
+	CachedToolCount(name string) (int, bool)
 }
 
 func runMCP(ctx context.Context, env *Env, args []string) int {
@@ -86,12 +92,24 @@ func mcpList(env *Env) int {
 		tools := "-"
 		status := "not connected"
 		if env.MCP != nil {
-			live := env.MCP.Status(name)
-			if live.ToolsKnown {
-				tools = strconv.Itoa(live.Tools)
-			}
-			if strings.TrimSpace(live.State) != "" {
-				status = strings.TrimSpace(live.State)
+			if counter, ok := env.MCP.(MCPCachedToolCounter); ok {
+				// The live manager: state and count from cheap cached data only,
+				// so listing never connects a lazy server.
+				if known := strings.TrimSpace(env.MCP.Known(name)); known != "" {
+					status = known
+				}
+				if n, cached := counter.CachedToolCount(name); cached {
+					tools = strconv.Itoa(n)
+				}
+			} else {
+				// A manager without the lazy capability keeps the old live row.
+				live := env.MCP.Status(name)
+				if live.ToolsKnown {
+					tools = strconv.Itoa(live.Tools)
+				}
+				if strings.TrimSpace(live.State) != "" {
+					status = strings.TrimSpace(live.State)
+				}
 			}
 		}
 		fmt.Fprintf(env.out(), "%-16s %-9s %-9s %-10s %-8s %-6s %s\n",
@@ -214,9 +232,44 @@ func mcpShownTools(r mcpRow) ([]string, int) {
 	return r.ToolNames[:mcpToolLinesShown], len(r.ToolNames) - mcpToolLinesShown
 }
 
+// mcpKnownCount counts connected servers without connecting any: it reads the
+// manager's Known state only. Every configured server is in total.
+func mcpKnownCount(env *Env) (up, total int) {
+	if env == nil {
+		return 0, 0
+	}
+	names := env.Profile.MCPServerNames()
+	if len(names) == 0 {
+		return 0, 0
+	}
+	if env.MCP != nil {
+		for _, name := range names {
+			if strings.EqualFold(strings.TrimSpace(env.MCP.Known(name)), "connected") {
+				up++
+			}
+		}
+	}
+	return up, len(names)
+}
+
+// mcpCountText is the /status MCP count: "N configured" until a server
+// connects, then "up/total up". A lazy connect is not a failure.
+func mcpCountText(up, total int) string {
+	if total <= 0 {
+		return ""
+	}
+	if up <= 0 {
+		return fmt.Sprintf("%d configured", total)
+	}
+	return fmt.Sprintf("%d/%d up", up, total)
+}
+
 // writeMCPStatus prints the /status MCP rows after the model and RAG lines. A
-// profile without servers prints one "not configured" line, and a known tool
-// list is printed as "server: tool".
+// profile without servers prints one "not configured" line, a count line says
+// how many servers are configured or up, and a known tool list is printed as
+// "server: tool". The count is read before the rows probe anything, so the first
+// /status after startup shows the lazy "configured" state; a later /status sees
+// the connection and shows up/total.
 func writeMCPStatus(ctx context.Context, env *Env) {
 	if env == nil {
 		return
@@ -226,6 +279,8 @@ func writeMCPStatus(ctx context.Context, env *Env) {
 		fmt.Fprintf(env.out(), "%-*s %s\n", mcpStatusWidth, mcpStatusLabel, ui.Current().Muted("not configured"))
 		return
 	}
+	up, total := mcpKnownCount(env)
+	fmt.Fprintf(env.out(), "%-*s %s\n", mcpStatusWidth, mcpStatusLabel, mcpCountText(up, total))
 	for _, r := range rows {
 		fmt.Fprintf(env.out(), "%-*s %s  %s\n", mcpStatusWidth, mcpStatusLabel, r.Name, mcpDetail(r))
 		shown, more := mcpShownTools(r)
