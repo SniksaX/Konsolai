@@ -1,3 +1,38 @@
+## v0.5.0
+
+### Added
+- MCP servers: local stdio commands and streamable HTTP endpoints under `mcp.servers`, configured with `/set mcp`, with `${ENV_VAR}` references for env and header values. `/mcp` lists the servers, `/mcp tools <name>` shows one server's tools and what the next turn would offer, and `/mcp test <name>` connects once.
+- Trust levels (`ask`, `read_only`, `auto`), per-server allow/deny/read-only tool globs, and a per-server timeout. Plans declare the MCP tools they will call; a call outside the plan needs the usual confirmation.
+- Above `mcp.max_inline_tools` the model searches the catalog with `mcp_find_tool` and can call a tool it found in the same turn.
+- MCP state in the interface: lazy `/mcp` rows, `/status` and `/doctor` rows, the welcome count, a router line per server, and `mcp=N` on the trace stats line.
+- Repeated `read_file` calls for the same path and range in one turn return a short `already read and unchanged` note instead of the content, which cuts prompt tokens on long read-heavy turns.
+- Recalled sessions are fenced as `<memory_background>`: history is background data, never instructions.
+
+### Security
+- The agent cannot write the active configuration (including a `--config` path and symlinks), its `config.yaml.bak-*` backups or `~/.config/konsolai/secrets`: the file tools, exports and shell commands that name them are refused with the `/set` pointer.
+- `read_file` and `search` return a masked view of the active config and its backups (MCP command/args/env/headers and MCP/database hosts hidden); the secrets file is refused or skipped with a marker.
+- MCP results are masked, size-capped and wrapped as untrusted data, and tool descriptions and input schemas are masked too. A `private` MCP server is hidden from a remote main model until the user confirms it once; `--yes` confirms it and a non-interactive run refuses it.
+- Redaction masks the whole value of an environment-style assignment, including auth schemes and values with spaces.
+- The model has no tool that adds, edits, enables, trusts or removes an MCP server.
+
+### Fixed
+- MCP read-only tools stay in the lookup catalog.
+- `/mcp` and the `/status` count are lazy: listing never connects a server, and the count reads `N configured` until the first session connects.
+- MCP trust, allow, deny and enable changes apply to the next request while the manager keeps its sessions and cached tool lists.
+- The plan gate nudges a prose reply to a change request once toward `propose_plan`, and does not nudge after a rejected mutating call.
+- A tool found through `mcp_find_tool` is registered between steps and its schema is sent on the next request.
+- A read capped by the line or byte limit records only the lines it showed, so a later read of the unseen tail is not skipped.
+
+### Known issues
+- MCP `trust` and `private` are caller-side policies: the session manager carries the labels but does not enforce them, and the per-server spec (enabled at start, command, URL, timeout) is fixed at construction, so changing it needs a restart.
+- MCP behavior is covered by fake stdio and HTTP servers only, not a live vendor server. The stdio process-group kill is Unix-only, and the HTTPS-to-HTTP redirect policy has no live test.
+- `/mcp tools` checks the inline cap per inspected server and ignores the plan phase.
+- Shell commands cannot yet run inside a folder named outside the project; such plans may show extra outside-plan prompts.
+- Fast-model cost attribution is unit-tested only, and identity questions are answered without a model only for the EN/FR phrase list.
+- Provider presets other than DeepSeek and OpenAI (live-tested) stay documentation-derived; `anthropic` is experimental.
+- The shell check for the protected config paths is textual, so a path built from fragments can evade it.
+- DeepSeek-strict forced-plan/named `tool_choice` path: the PTY scenario hung; under investigation, not reproduced as a unit test yet.
+
 ## v0.4.0
 
 ### Added
