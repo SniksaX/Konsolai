@@ -15,8 +15,6 @@ import (
 	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
-const dedupeNotePrefix = "already in context"
-
 // TestReadDedupeTokenSaving replays the config-edit pattern (the same path read
 // three times) against a fake provider and measures prompt tokens with and
 // without the per-turn dedupe. "Before" is the captured request log with every
@@ -68,7 +66,7 @@ func TestReadDedupeTokenSaving(t *testing.T) {
 		beforeMsgs := make([]llm.Message, len(rep.reqs[i]))
 		copy(beforeMsgs, rep.reqs[i])
 		for j, m := range beforeMsgs {
-			if m.Role == llm.RoleTool && strings.HasPrefix(m.Content, dedupeNotePrefix) {
+			if m.Role == llm.RoleTool && strings.HasPrefix(m.Content, readNotePrefix) {
 				m.Content = firstRead
 				beforeMsgs[j] = m
 			}
