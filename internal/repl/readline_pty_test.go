@@ -302,7 +302,7 @@ func TestReadlineSubmittedOnceOnPTY(t *testing.T) {
 	v := startView(t, ptmx, 24, 80)
 	v.expect("prompt", func(sc *screen) bool { return strings.Contains(sc.dump(), "›") })
 	v.typeKeys("hii", func(sc *screen) bool { return strings.Contains(screenPrompt(sc), "hii") })
-	v.typeKeys("\n", func(sc *screen) bool { return strings.Contains(sc.dump(), "hii") })
+	v.typeKeys("\r", func(sc *screen) bool { return strings.Contains(sc.dump(), "hii") })
 	deadline := time.Now().Add(ptyTimeout())
 	var waitErr error
 	done := make(chan struct{})
@@ -455,7 +455,7 @@ func TestFrameNoPartialRuleAfterTurn(t *testing.T) {
 	v := startView(t, ptmx, 24, 80)
 	v.expect("prompt", func(sc *screen) bool { return strings.Contains(sc.dump(), "›") })
 	v.typeKeys("hello", func(sc *screen) bool { return strings.Contains(screenPrompt(sc), "hello") })
-	v.typeKeys("\n", screenHas("TURN_DONE"))
+	v.typeKeys("\r", screenHas("TURN_DONE"))
 	_ = cmd.Wait()
 	sc := v.shot()
 	if short := partialRules(sc, 80); len(short) > 0 {
