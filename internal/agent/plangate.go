@@ -198,6 +198,39 @@ func RestoreApprovedPlan(msgs []llm.Message) (files, cmds []string, text string,
 	return nil, nil, "", false
 }
 
+func planToolsOf(a tools.Action) []string {
+	type hasTools interface{ PlanTools() []string }
+	if p, ok := a.(hasTools); ok {
+		return p.PlanTools()
+	}
+	return nil
+}
+
+// mcpIdentity returns the server:tool identity of a bridge action.
+func mcpIdentity(a tools.Action) (server, tool string, ok bool) {
+	type hasMCP interface {
+		MCPServer() string
+		MCPTool() string
+	}
+	p, ok := a.(hasMCP)
+	if !ok {
+		return "", "", false
+	}
+	return p.MCPServer(), p.MCPTool(), true
+}
+
+// mcpInPlan reports whether the exposed name or server:tool pair was declared
+// in the approved plan.
+func mcpInPlan(declared []string, exposed, server, tool string) bool {
+	for _, d := range declared {
+		d = strings.TrimSpace(d)
+		if d == exposed || d == server+":"+tool || d == server+"__"+tool {
+			return true
+		}
+	}
+	return false
+}
+
 func planTextOf(a tools.Action) string {
 	type hasText interface{ PlanText() string }
 	if p, ok := a.(hasText); ok {
