@@ -422,20 +422,37 @@ func (f *mcpFindTool) Prepare(rawArgs string) (Action, error) {
 	return &mcpFindAction{bridge: f.bridge, entries: f.entries, query: args.Query}, nil
 }
 
+// Discoverer is an action that found extra tools for the rest of the turn.
+type Discoverer interface {
+	DiscoveredTools() []Tool
+}
+
 type mcpFindAction struct {
 	bridge  *MCPBridge
 	entries []MCPExposed
 	query   string
+	found   []MCPExposed
 }
 
 func (a *mcpFindAction) Summary() string  { return "mcp find " + a.query }
 func (a *mcpFindAction) Preview() string  { return a.Summary() }
 func (a *mcpFindAction) Kind() ActionKind { return ReadOnly }
+
+// DiscoveredTools hands the matches to the agent so it can register their
+// schemas for the next model call in this turn.
+func (a *mcpFindAction) DiscoveredTools() []Tool {
+	out := make([]Tool, 0, len(a.found))
+	for _, e := range a.found {
+		out = append(out, e.Tool)
+	}
+	return out
+}
 func (a *mcpFindAction) Run(context.Context) (Result, error) {
 	if len(a.entries) == 0 {
 		return Result{Output: "no MCP servers are configured", IsError: true}, nil
 	}
 	matches := a.bridge.search(a.entries, a.query)
+	a.found = matches
 	if len(matches) == 0 {
 		return Result{Output: "no MCP tool matched " + a.query}, nil
 	}
