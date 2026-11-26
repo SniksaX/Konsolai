@@ -291,6 +291,16 @@ func run() int {
 		Version:    version,
 		SlashHelp:  commands.Default().SlashLines(),
 	}
+	var mcpRT *turn.MCPRuntime
+	if len(prof.MCP.Servers) > 0 {
+		if rt, mcpErr := turn.NewMCPRuntime(prof, cwd, version); mcpErr != nil {
+			fmt.Fprintln(os.Stderr, "konsolai: mcp:", mcpErr)
+		} else {
+			mcpRT = rt
+			runner.MCPRuntime = rt
+			defer rt.Close()
+		}
+	}
 	isRepl := inv.Slash == "" && inv.Cmd == cmdRequest && strings.TrimSpace(inv.Request) == "" && stdinIsTTY() && stdoutIsTTY()
 	var emb *embed.Client
 	if st != nil && prof.RAGEnabled() {
@@ -320,6 +330,9 @@ func run() int {
 
 	if isRepl {
 		env := commandEnv(runner, mem, prof, cwd, projectID, inv, emb)
+		if mcpRT != nil {
+			env.MCP = mcpStatusAdapter{rt: mcpRT}
+		}
 		env.InRepl = true
 		model := prof.MainModelID()
 		if id, err := client.ResolveModel(ctx); err == nil && id != "" {
@@ -334,6 +347,9 @@ func run() int {
 
 	if inv.Slash != "" || inv.Cmd != cmdRequest {
 		env := commandEnv(runner, mem, prof, cwd, projectID, inv, emb)
+		if mcpRT != nil {
+			env.MCP = mcpStatusAdapter{rt: mcpRT}
+		}
 		name, args := inv.Slash, inv.SlashArgs[:inv.SlashN]
 		if inv.Slash == "" {
 			name, args = bareCommand(inv)
