@@ -23,10 +23,10 @@ func TestMCPRuntimeMapsProfileAndDisabledServer(t *testing.T) {
 	if rt.Manager == nil || rt.Bridge == nil {
 		t.Fatal("runtime did not build a manager and a bridge")
 	}
-	if tools, err := rt.ToolsFor(context.Background(), "answer"); err != nil || len(tools) != 0 {
+	if tools, err := rt.ToolsFor(context.Background(), "answer", false, false, nil); err != nil || len(tools) != 0 {
 		t.Fatalf("answer got MCP tools: %v %v", tools, err)
 	}
-	if tools, err := rt.ToolsFor(context.Background(), "build"); err != nil || len(tools) != 0 {
+	if tools, err := rt.ToolsFor(context.Background(), "build", false, false, nil); err != nil || len(tools) != 0 {
 		t.Fatalf("disabled server exposed tools: %v %v", tools, err)
 	}
 	st := rt.Status(context.Background(), "off")
@@ -47,7 +47,7 @@ func TestMCPRuntimeWithoutServersIsSafe(t *testing.T) {
 		t.Fatal("no servers must not build a manager")
 	}
 	rt.Close()
-	if tools, err := rt.ToolsFor(context.Background(), "build"); err != nil || tools != nil {
+	if tools, err := rt.ToolsFor(context.Background(), "build", false, false, nil); err != nil || tools != nil {
 		t.Fatalf("empty runtime tools %v %v", tools, err)
 	}
 }
