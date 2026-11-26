@@ -679,6 +679,20 @@ func (s *screen) clearLine() {
 	}
 }
 
+// clearLineBefore mirrors CSI 1 K: erase the cursor column and those before it.
+func (s *screen) clearLineBefore() {
+	if s.r < 0 || s.r >= s.h {
+		return
+	}
+	end := s.c
+	if end >= s.w {
+		end = s.w - 1
+	}
+	for c := 0; c <= end; c++ {
+		s.cell[s.r][c] = ' '
+	}
+}
+
 func (s *screen) feed(p []byte) {
 	i := 0
 	for i < len(p) {
@@ -829,7 +843,19 @@ func (s *screen) applyCSI(cmd byte, args []int) {
 			}
 		}
 	case 'K':
-		s.clearLine()
+		kind := 0
+		if len(args) > 0 {
+			kind = args[0]
+		}
+		switch kind {
+		case 0:
+			s.clearLine()
+		case 1:
+			s.clearLineBefore()
+		case 2:
+			s.clearLineBefore()
+			s.clearLine()
+		}
 	case 'r':
 		// Like a real terminal, setting the scroll region homes the cursor.
 		// The region itself is not emulated.
