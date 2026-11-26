@@ -290,6 +290,10 @@ func run() int {
 		Err:        os.Stderr,
 		Version:    version,
 		SlashHelp:  commands.Default().SlashLines(),
+		// One confirmation per process before a private MCP server's results
+		// reach a remote main model; --yes skips it, a non-interactive run
+		// refuses it and the runtime remembers either answer.
+		MCPPrivateConfirm: mcpPrivatePrompt,
 	}
 	var mcpRT *turn.MCPRuntime
 	if len(prof.MCP.Servers) > 0 {
