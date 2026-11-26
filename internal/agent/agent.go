@@ -853,6 +853,16 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			}
 			result, err := action.Run(ctx)
 			elapsed := time.Since(start)
+			if err == nil && !result.IsError {
+				if d, ok := action.(tools.Discoverer); ok {
+					if extra := d.DiscoveredTools(); len(extra) > 0 {
+						// A find-tool result makes the discovered schemas callable for the
+						// rest of this turn; the caller's registry is not mutated.
+						cfg.Tools = cfg.Tools.Add(extra...)
+						specs = cfg.Tools.Specs()
+					}
+				}
+			}
 			st.ToolTime += elapsed
 			if err != nil {
 				if ctx.Err() != nil {
