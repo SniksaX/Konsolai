@@ -29,6 +29,9 @@ func tinyLines(pal ui.Palette, d Data, width int, withHint bool) []string {
 	lines := []string{""}
 	lines = append(lines, clip(banner.Compact(bannerInfo(d), pal), width))
 	lines = append(lines, statusStrip(pal, d, width))
+	if m := mcpStatusLine(pal, d); m != "" {
+		lines = append(lines, clip("  "+m, width))
+	}
 	if withHint {
 		lines = append(lines, hintLine(pal, width, d.Tip))
 	}
@@ -42,6 +45,9 @@ func narrowLines(pal ui.Palette, d Data, width, height int) []string {
 	lines = append(lines, wordmarkMin(width, lim.TinyWidth)...)
 	lines = append(lines, "")
 	lines = append(lines, statusStrip(pal, d, width))
+	if m := mcpStatusLine(pal, d); m != "" {
+		lines = append(lines, clip("  "+m, width))
+	}
 	if height >= lim.RecentHeight {
 		lines = append(lines, "")
 		contentW := width - 2
@@ -81,7 +87,7 @@ func splitWide(pal ui.Palette, d Data, width, height int) []string {
 		bw = 16
 	}
 	inner := bw - 2
-	sessRows := sessionLines(pal, inner, d.Session)
+	sessRows := sessionLines(pal, inner, d.Session, d.MCP)
 	var bottom []string
 	if height >= lim.RecentHeight {
 		recW := inner - 1
