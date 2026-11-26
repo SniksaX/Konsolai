@@ -246,8 +246,11 @@ func PrintSummary(w io.Writer, intent string, s Stats) {
 }
 
 func FormatStatsLine(s Stats) string {
-	line := fmt.Sprintf("stats: steps=%d rejects=%d outside_plan=%d think_tokens=%d max_step_s=%s",
-		s.Steps, s.Rejects, s.OutsidePlan, s.ReasoningTokens,
+	line := fmt.Sprintf("stats: steps=%d rejects=%d outside_plan=%d", s.Steps, s.Rejects, s.OutsidePlan)
+	if s.MCPCalls > 0 {
+		line += fmt.Sprintf(" mcp=%d", s.MCPCalls)
+	}
+	line += fmt.Sprintf(" think_tokens=%d max_step_s=%s", s.ReasoningTokens,
 		strconv.FormatFloat(s.MaxStep.Seconds(), 'f', 3, 64))
 	if s.Serving.Valid() {
 		line += " model=" + s.Serving.Label()
