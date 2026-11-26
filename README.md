@@ -145,6 +145,20 @@ Set `price_in` or `price_out` (USD per million tokens) on a remote model to add 
 
 Full details: [docs/configuration.md](docs/configuration.md#cloud-models).
 
+## MCP servers
+
+Konsolai is a Model Context Protocol client. A server is a local stdio command or a streamable HTTP endpoint, and its tools join `lookup`, `act`, and `build` turns (never `answer`):
+
+```sh
+konsolai /set mcp add stdio files npx -y @modelcontextprotocol/server-filesystem /data/projects
+konsolai /set mcp trust files read_only
+konsolai /mcp
+```
+
+Servers can be scoped by trust (`ask`, `read_only`, `auto`), tool globs and a per-server timeout; env and header values take `${ENV_VAR}` references instead of literals, and `/set mcp` refuses a value that looks like a stored secret. In a planned turn the plan lists the MCP tools it will call; anything else is outside the plan. `private` servers stay away from a remote main model unless `--yes` confirms them. The welcome shows `mcp 2/3 up` over the configured servers, `/status` and `/doctor` add per-server rows, and `--trace` counts MCP calls on the stats line.
+
+Setup, trust levels, filesystem and database examples, and the threat model are in [docs/mcp.md](docs/mcp.md).
+
 ## Configuration
 
 Configuration lives in `config.yaml`: `/config init` writes it, `/set` changes it, and `/config path` prints the file in use. Profiles, the environment variables for containers and CI, the full friendly-name table, and the model roles are in [docs/configuration.md](docs/configuration.md).
