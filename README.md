@@ -86,7 +86,7 @@ With no config file, Konsolai starts on the built-in defaults: one model named `
 If no model server is listening, the REPL still starts. The first request stops with one line:
 
 ```
-konsolai: cannot reach the model server at localhost:8000. Run /doctor to check every endpoint.
+konsolai: a model probe could not reach localhost:8000; this turn made no chat call. Run /doctor to check the endpoint.
 ```
 
 `/doctor` checks the config file and its mode, the main and fast endpoints, the embedding and rerank endpoints, the database, Chromium, the clipboard backend, git, and the terminal. Every failed check prints its own fix.
@@ -113,7 +113,7 @@ Konsolai requires one OpenAI-compatible chat endpoint. Everything else is option
 - A welcome screen with the current model, memory state, and recent sessions for the project.
 - A plan before every build turn, one approval, then visible steps and a recovery path when a step fails.
 - One command registry for the REPL and one-shot use, with `/` completion and an inline help screen.
-- Four palettes and three welcome layouts, applied without restarting.
+- Six palettes and three welcome layouts, applied without restarting.
 
 ![Welcome screen with model, memory, and recent sessions](docs/assets/screens/welcome.png)
 
@@ -125,7 +125,7 @@ Konsolai requires one OpenAI-compatible chat endpoint. Everything else is option
 
 ## Cloud models
 
-Konsolai also talks to remote OpenAI-compatible providers. A model whose host resolves to a public address is `remote`; loopback and private addresses stay local. A remote model is marked `remote` in `/set model`, `/status`, and the welcome; the footer marks a remote main model, and `/doctor` reports each one. The presets fill the endpoint and request quirks:
+Konsolai also talks to remote OpenAI-compatible providers. A model whose host resolves to a public address is `remote`; loopback and private addresses stay local. A remote model is marked `remote` in `/set model`, `/status`, and the welcome; the footer marks the model that served the last call when it is remote, and `/doctor` reports each one. The presets fill the endpoint and request quirks:
 
 ```sh
 konsolai /set model add gpt --provider openai   # also openrouter, groq, together, mistral, deepseek, gemini, anthropic
@@ -157,7 +157,7 @@ konsolai /mcp tools files
 konsolai /mcp test files
 ```
 
-Servers can be scoped by trust (`ask`, `read_only`, `auto`), tool globs and a per-server timeout; env and header values take `${ENV_VAR}` references instead of literals, and `/set mcp` refuses a value that looks like a stored secret. `/mcp tools <name>` shows each tool with its read-only or mutating classification and why a tool is hidden, and `/mcp test <name>` connects once and reports the latency and tool count. In a planned turn the plan lists the MCP tools it will call; anything else is outside the plan. Above `mcp.max_inline_tools` the model searches with `mcp_find_tool` and can call a tool it found in the same turn. `private` servers stay away from a remote main model unless you confirm them or pass `--yes`. The welcome shows `mcp 2/3 up` over the configured servers, `/status` and `/doctor` add per-server rows, and `--trace` counts MCP calls on the stats line.
+Servers can be scoped by trust (`ask`, `read_only`, `auto`), tool globs and a per-server timeout; env and header values take `${ENV_VAR}` references instead of literals, and `/set mcp` refuses a value that looks like a stored secret. `/mcp tools <name>` shows each tool with its read-only or mutating classification and why a tool is hidden, and `/mcp test <name>` connects once and reports the latency and tool count. In a planned turn the plan lists the MCP tools it will call; anything else is outside the plan. Above `mcp.max_inline_tools` the model searches with `mcp_find_tool` and can call a tool it found in the same turn. `private` servers stay away from a remote main model unless you confirm them or pass `--yes`. The welcome shows `mcp N configured` until a server connects and then `U/T up` over the configured servers, `/status` and `/doctor` add per-server rows, and `--trace` counts MCP calls on the stats line.
 
 Setup, trust levels, filesystem and database examples, and the threat model are in [docs/mcp.md](docs/mcp.md).
 
