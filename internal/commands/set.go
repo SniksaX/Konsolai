@@ -47,6 +47,8 @@ func runSet(ctx context.Context, env *Env, args []string) int {
 	switch rest[0] {
 	case "model":
 		return setModel(ctx, env, rest[1:], session)
+	case "mcp":
+		return setMCP(env, rest[1:], session)
 	case "steps":
 		return setSteps(env, rest[1:], session)
 	case "budget":
