@@ -42,21 +42,22 @@ Leaves (no `konsolai/internal` imports):
 - `docrender`: markdown, mermaid, HTML, PDF.
 - `embed`: `POST /embed` and rerank.
 - `clip`: wl-copy, xclip, xsel, OSC 52.
+- `mcp`: lazy MCP session manager, stdio process groups, guarded HTTP, env and header expansion.
 
 - `ui`: TTY prompt and markdown; color only through theme.
 - `banner`: static splash; `Startup` writes the wordmark once.
 - `store`: Postgres via pgxpool, raw SQL, `turn_stats`.
-- `intent`: four-way router, action floor, language detect.
-- `tools`: shell, files, search, plan, recall, web fetch, remember, outline, `export_doc`, finish.
-- `agent`: tool loop and plan gate; never imports `memory` or `store`.
+- `intent`: four-way router, action floor, language detect, one safe line per MCP server.
+- `tools`: shell, files, search, plan, recall, web fetch, remember, outline, `export_doc`, finish, the MCP bridge.
+- `agent`: tool loop and plan gate, MCP tools in plans and per-call stats; never imports `memory` or `store`.
 - `memory`: store adapter; the first store failure disables it.
 - `rag`: chunk, index, embed, search.
 - `welcome`: gather and paint; imports `store` for `WelcomeRow` and `ModelRate`.
-- `turn`: `Runner.RunTurn`.
+- `turn`: `Runner.RunTurn`, the MCP runtime and its private-server gate.
 - `commands`: slash registry; never imports `repl`.
 - `shellmode`: in-REPL shell.
 - `repl`: TTY loop, readline, slash menu, welcome paint.
-- `cmd/konsolai`: entrypoint.
+- `cmd/konsolai`: entrypoint; owns the MCP manager lifecycle and the `/status` adapter.
 
 `tools`, `agent`, and `ui` never import pgx. `ui` must not import `store`.
 
@@ -100,11 +101,12 @@ Accessors are the only `<= 0` means default logic (`nonzero` and the ratio acces
 
 ## Tests that define behavior
 
-- `internal/welcome/testdata/*.golden` (150) via `TestRenderGoldens`. `TestFrameBelow120MatchesSplit`. `TestWideSplitKeepsRecentBesideSession`.
+- `internal/welcome/testdata/*.golden` (180) via `TestRenderGoldens`. `TestFrameBelow120MatchesSplit`. `TestWideSplitKeepsRecentBesideSession`.
 - PTY: `internal/repl/readline_pty_test.go` (placeholder not accepted, Ctrl-L, slash menu), `internal/repl/theme_pty_test.go` (Esc leaves the theme, Enter applies it in place), `cmd/konsolai/e2e_slash_pty_test.go`.
 - `turn_stats` tests need the test DB (`internal/store/stats_test.go`).
 - Plan: `internal/tools/plan_test.go` (command-only plans, `export_doc` for PDF). `internal/agent/agent_test.go` (`TestIdenticalPlanRejectStops`, `TestShellStillRequiresPlan`). Exit codes: `TestRunTurnRepeatedRejectExit`, `TestRunTurnMaxStepsExit`, `TestRunTurnInterruptExit`, `TestSessionStatusCodes` in `internal/turn/turn_test.go`.
 - Config: `TestConfigKeysComplete` in `internal/config/keys_test.go`.
+- MCP: `internal/mcp` (manager lifecycle, transports, results, env/header rules, crash and timeout), `internal/tools/mcp_test.go` (bridge, trust, plan tools, find meta-tool), `internal/turn/mcp_*_test.go` (runtime, private gate, router lines), `internal/agent/mcp_*_test.go` (call count, plan, display), `internal/commands/*_mcp_test.go` (list, set, status, doctor), `internal/repl/mcp_welcome_test.go`, and the welcome MCP count tests.
 
 ## Current status
 
@@ -141,7 +143,7 @@ Work lands on `dev`. Config keys are the single table in `internal/config/keys.g
 - Symbol index: not built.
 - Remote models: the y/n gate decision and the token total are per process. `privacy.session_token_cap` counts only the usage a remote call reports, so a request that fails before reporting adds nothing. Remote classification resolves each endpoint host once and caches it; an unresolvable host counts as remote.
 - A probe only reports what the endpoint answered: 401/403 is `auth failed`, its deadline is `slow`, another non-2xx is `http N`, and only a failed connection is `unreachable`. Only a failed chat call may say the server cannot be reached. An empty id needs exactly one served model and a configured id must be served, so a resolution failure stops the turn before any chat call.
-- The welcome probes a remote model with its short gather budget (`ui.probe_timeout_ms`), not `llm.remote_probe_timeout_ms`, so a remote row can read `slow` while `/status` reads `ok`. It also drops the `remote` marker when the models box has no room for it.
+- The welcome drops the `remote` marker when the models box has no room for it.
 - The footer names the model that served the last call (resolved id and role) and hides the `remote` word in shell mode, with a mode word, and when the footer drops the model word (under 60 columns or when the row does not fit). `/set model` and `/status` always mark a remote endpoint.
 - `router.answer_main_above_tokens` (default 200) compares the full answer-prompt estimate on the fast client (system context, history and question), not the question text, so a long history sends a short question to main. Greetings bypass it and `0` disables the token gate.
 - The identity floor matches EN and FR phrases only; other identity or setup questions reach the model, which is told to answer from the model facts and to say "I don't know" when a fact is missing.
@@ -151,8 +153,11 @@ Work lands on `dev`. Config keys are the single table in `internal/config/keys.g
 - Embeddings stay loopback or private; a remote embed service is rejected, so RAG cannot use a cloud provider.
 - README embeds four screenshots. `slash-menu`, `act-plan`, and `pdf` are not captured.
 - Latest tag `v0.3.0`; `dev` is past it and no `v0.4.0` tag exists. `version` in `cmd/konsolai` is still `"dev"` unless ldflags stamp it.
-- MCP Phases 3/4 status (v0.5.0): Phase 3 bridge is done in `internal/tools/mcp.go` (sanitized `server__tool` names with stable collisions, trust/allow/deny filtering, read-only classification, masked/wrapped/size-capped results, `mcp_find_tool`). Phase 4 done: `turn.MCPRuntime` maps the profile to manager specs, owns the manager lifecycle, and exposes tools per intent (answer none, lookup read-only, act/build allowed; meta-tool above `mcp.max_inline_tools`); the agent counts `Stats.MCPCalls`; `cmd/konsolai` wires `Env.MCP` for /mcp,/status,/doctor and closes the manager on exit. Phase 4 follow-up now done: propose_plan `tools []string` with display and matching (`mcp_plan_test.go`), strict tool-history test, private-server confirm gate for a remote main (allow/refuse/remembered/--yes, no list call before the answer), `/remote`-style no server-management tool test, and the non-blocking `Known` state accessor (Manager.Known / MCPRuntime.Known / adapter Known). Still deferred: the router prompt one-line-per-server addition — the classifier prompt lives in `internal/intent/router.go`, outside this worker's ownership; add an additive `Classify` variant there that appends `server: description` lines (never schemas) and call it from `internal/turn/session.go`. Presentation of mcp=N and the status rows is Phase 5. The bridge itself never adds/edits/enables/trusts a server: no such tool exists and the manager has no config write path.
-- v0.4.1 sweep status: done this session — remote confirmation spinner/decline fix (PTY per intent), pre-plan read-only tool set (forced-plan waste), 429 Retry-After retry/stop, panel fallback after a stream when a rewind is not possible. Deferred with evidence: item 2 (shell cwd inside a named write root and command paths inside allowed roots; `internal/safety/command_path.go` and `planWriteRoots` exist but the shell-cwd/batch behaviour is not reproduced or fixed), item 3 (plan files/commands resolved against one absolute base, effective-cwd warning, absolute resolved path in relative-outside-plan prompts; `internal/agent/agent_test.go` around line 2678 covers the outline only), item 5 positive PTY proof for short/tall/build panel (fallback and height gate fixed; a clean-screen check could not be completed against a fake SSE server), item 7 `agent.same_reason_rejects` (no such key; greps rc=1), items 8-13 (capability profile/fakes/adaptive-retry generalization//set model test/token weight/docs table), items 14-15 (sandbox doc and shell.sandbox), item 16 (three full blocks and 10x PTY runs: only one full block was run this session).
+- MCP (v0.5.0): servers under `mcp.servers` (stdio child or streamable HTTP), `mcp.max_inline_tools` 15. `/set mcp` is the only writer (`add|remove|enable|disable|trust|allow|deny|header|env`) and `/mcp` lists one row per server. `internal/mcp` owns the lazy session manager: one timeout per connect/list/call, a 4-call concurrency cap, an 8 MiB raw result cap, a process-group kill for stdio, and a guarded HTTP client that sends the key and headers on every request and refuses a cross-host or https-to-http redirect. `tools.MCPBridge` exposes `server__tool`, filters allow/deny, classifies read-only from `tools.read_only` globs plus (only for `read_only`/`auto` trust) the server's `readOnlyHint`, wraps results as untrusted data, and above the inline cap offers `mcp_find_tool`. `turn.MCPRuntime` maps the profile, hides private servers under a remote main unless confirmed, and exposes tools per intent (answer none, lookup read-only, act/build allowed). Plans list MCP tools in `tools` (`server__tool` or `server:tool`), and a call outside the list is outside the plan. `Stats.MCPCalls` reaches the `--trace` line as `mcp=N`; `/status` and `/doctor` add per-server rows; the welcome shows `mcp 2/3 up` via the non-blocking `Known`; the intent router gets one safe line per server. The bridge has no configuration path: no tool can add, edit, enable, trust or remove a server. Docs: `docs/mcp.md`.
+- MCP: trust, private and enabled are caller-side policies. `internal/mcp` carries the labels but does not enforce them, so a direct manager caller bypasses them. The stdio process-group kill is Unix-only. The HTTP redirect policy (cross-host and https-to-http refused) has no live test, and no MCP behavior is verified against a real server: the tests use fake stdio and HTTP servers. `/mcp`, `/status` and `/doctor` connect a server (up to its timeout) to show live state, so many or unreachable servers make those commands slow; the welcome never connects.
+- MCP trust `auto` only trusts the server's `readOnlyHint`; a mutating MCP call still goes through the plan and approval gate, so `/set mcp trust auto` is not auto-approval even though its menu description says "without asking".
+- MCP private-server confirmation has no prompt wiring in `cmd/konsolai`: with a remote main model a private server stays hidden unless `--yes` is passed. The runtime has a confirm hook (`MCPPrivateConfirm`) but nothing supplies it yet.
+- Above `mcp.max_inline_tools` a turn exposes only `mcp_find_tool`. The `server__tool` names it returns are not registered as callable tools in that turn, and no test calls a found tool afterwards.
 
 ## Lessons
 
