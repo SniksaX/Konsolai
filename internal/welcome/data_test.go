@@ -324,3 +324,52 @@ func TestGatherRepaintsLateRemoteProbe(t *testing.T) {
 		}
 	}
 }
+
+// TestGatherCountsConfiguredMCPServers reads the Input.MCP hook: every
+// configured server is the denominator and only connected ones count as up.
+func TestGatherCountsConfiguredMCPServers(t *testing.T) {
+	hookCalls := 0
+	data, err := Gather(context.Background(), Input{
+		CWD: t.TempDir(),
+		MCP: func() (int, int) { hookCalls++; return 1, 3 },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.MCP != (MCPCount{Up: 1, Total: 3}) {
+		t.Fatalf("mcp count %+v", data.MCP)
+	}
+	if hookCalls == 0 {
+		t.Fatal("Gather never called the MCP hook")
+	}
+}
+
+// TestGatherHidesMCPWhenNoneConfigured keeps the line out of a profile without
+// MCP servers: no hook, zero count, no text.
+func TestGatherHidesMCPWhenNoneConfigured(t *testing.T) {
+	data, err := Gather(context.Background(), Input{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.MCP != (MCPCount{}) {
+		t.Fatalf("mcp count %+v", data.MCP)
+	}
+}
+
+// TestGateRefreshesTheMCPCount proves the hook runs for every repaint, so a
+// server that connects after the first paint updates the welcome line.
+func TestGateRefreshesTheMCPCount(t *testing.T) {
+	up, total := 0, 2
+	g := &gate{mcp: func() (int, int) { return up, total }}
+	if got := g.take().MCP; got != (MCPCount{Up: 0, Total: 2}) {
+		t.Fatalf("first count %+v", got)
+	}
+	up = 2
+	if got := g.take().MCP; got != (MCPCount{Up: 2, Total: 2}) {
+		t.Fatalf("refreshed count %+v", got)
+	}
+	up, total = 9, -1
+	if got := g.take().MCP; got != (MCPCount{}) {
+		t.Fatalf("clamped count %+v", got)
+	}
+}
