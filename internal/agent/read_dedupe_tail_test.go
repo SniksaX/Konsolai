@@ -52,7 +52,7 @@ func TestReadDedupeDoesNotSkipTruncatedTail(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 	second := rep.toolContent("2")
-	if strings.Contains(second, "already in context") {
+	if strings.Contains(second, readNotePrefix) {
 		t.Fatalf("an unseen tail was skipped as already read: %q", second)
 	}
 	for _, want := range []string{"line 2300", "line 2305"} {
@@ -84,7 +84,7 @@ func TestReadDedupeByteCapTail(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 	second := rep.toolContent("2")
-	if strings.Contains(second, "already in context") {
+	if strings.Contains(second, readNotePrefix) {
 		t.Fatalf("a line past the byte cap was skipped as already read: %q", second)
 	}
 	if !strings.Contains(second, "0950") {
