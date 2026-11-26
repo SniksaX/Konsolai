@@ -175,6 +175,7 @@ type runState struct {
 	noteSent          bool
 	forcePropose      bool
 	planNudged        bool
+	changeNudged      bool
 	sawGateReject     bool
 	readonlyAfterNote int
 	sourceReads       int
@@ -544,6 +545,15 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 		_ = rec.Message(ctx, msg)
 
 		if len(msg.ToolCalls) == 0 {
+			if cfg.RequirePlan && !state.planApproved && !state.changeNudged && (cfg.Intent == "act" || cfg.Intent == "build") {
+				// A change request answered with prose: the mutating tools are
+				// locked behind the plan, so nudge once to call propose_plan.
+				state.changeNudged = true
+				nudge := llm.Message{Role: llm.RoleUser, Content: PlanUnlockNote}
+				msgs = append(msgs, nudge)
+				_ = rec.Message(ctx, nudge)
+				continue
+			}
 			if cfg.Task == "docs" && state.planApproved && !state.wroteFile && !state.exportedDoc && !state.docsNudged {
 				state.docsNudged = true
 				note := DocsFileNote
