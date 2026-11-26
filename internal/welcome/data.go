@@ -70,12 +70,21 @@ type Data struct {
 	Models      []Model // always 4 when config has them: main, fast, embed, rerank
 	Up          int
 	Total       int
+	MCP         MCPCount // configured and connected MCP servers; zero total hides it
 	Session     Session
 	Recent      []Recent // last 4; empty means no sessions
 	Placeholder string
 	Tip         string
 	Version     string // existing version string, frame title uses konsolai + version
 	Limits      Limits // paint-time layout cuts; Gather leaves this zero
+}
+
+// MCPCount is the welcome MCP line: every configured server is in Total and
+// only a live "connected" server is in Up. Total zero hides the line, so a
+// profile without MCP servers paints exactly the same screen as before.
+type MCPCount struct {
+	Up    int
+	Total int
 }
 
 // Limits are the welcome size cuts. Zero fields keep today's layout.
@@ -115,6 +124,11 @@ type Input struct {
 	// APIKey resolves the bearer key for a role ("main" or "fast") at probe
 	// time. A nil hook sends no key.
 	APIKey func(role string) (string, error)
+	// MCP reports how many configured MCP servers are connected and how many
+	// are configured. It must not block; a nil hook hides the welcome line.
+	// Gather re-queries it for every repaint, so a server that connects after
+	// the first paint updates the line.
+	MCP func() (up, total int)
 }
 
 // resolveInput fills zero gather budgets from the built-in profile.
@@ -181,6 +195,7 @@ func Gather(ctx context.Context, in Input) (Data, error) {
 			Total:  len(models),
 		},
 		onUpdate: in.OnUpdate,
+		mcp:      in.MCP,
 	}
 	// Probes keep their own budgets and keep running after Gather returns: a
 	// late row repaints through OnUpdate instead of being dropped. The caller's
@@ -216,10 +231,7 @@ func Gather(ctx context.Context, in Input) (Data, error) {
 	case <-timer.C:
 	}
 
-	g.mu.Lock()
-	d := g.snapshotLocked()
-	g.mu.Unlock()
-	return finalizeData(d, now), nil
+	return finalizeData(g.take(), now), nil
 }
 
 // finalizeData fills the fallbacks a snapshot always needs.
@@ -241,6 +253,34 @@ type gate struct {
 	mu       sync.Mutex
 	d        Data
 	onUpdate func(Data)
+	mcp      func() (up, total int)
+}
+
+// take refreshes the MCP count and returns one snapshot. It calls the hook
+// before taking the mutex so a caller's lock is never held across it.
+func (g *gate) take() Data {
+	if g == nil {
+		return Data{}
+	}
+	if g.mcp != nil {
+		up, total := g.mcp()
+		if total < 0 {
+			total = 0
+		}
+		if up < 0 {
+			up = 0
+		}
+		if up > total {
+			up = total
+		}
+		g.mu.Lock()
+		g.d.MCP = MCPCount{Up: up, Total: total}
+		g.mu.Unlock()
+	}
+	g.mu.Lock()
+	d := g.snapshotLocked()
+	g.mu.Unlock()
+	return d
 }
 
 func (g *gate) setModel(i int, m Model) {
@@ -253,9 +293,8 @@ func (g *gate) setModel(i int, m Model) {
 		return
 	}
 	g.d.Models[i] = m
-	snap := g.snapshotLocked()
 	g.mu.Unlock()
-	g.publish(snap)
+	g.publish(g.take())
 }
 
 // snapshotLocked fills the derived counters. The caller holds g.mu.
@@ -549,9 +588,8 @@ func loadGit(ctx context.Context, cwd string, g *gate, timeout time.Duration) {
 		g.d.Session.Ahead = ahead
 		g.d.Session.Behind = behind
 	}
-	snap := g.snapshotLocked()
 	g.mu.Unlock()
-	g.publish(snap)
+	g.publish(g.take())
 }
 
 func gitStatus(ctx context.Context, cwd string, timeout time.Duration) (branch string, dirty bool, changed, ahead, behind int, notRepo bool) {
@@ -624,9 +662,8 @@ func loadMemory(ctx context.Context, in Input, g *gate, now time.Time) {
 		g.d.Recent = recentFrom(rows, now)
 		g.d.Placeholder = resumePlaceholder(latest, ok, in.CWD, now)
 	}
-	snap := g.snapshotLocked()
 	g.mu.Unlock()
-	g.publish(snap)
+	g.publish(g.take())
 }
 
 func recentFrom(rows []store.WelcomeRow, now time.Time) []Recent {
