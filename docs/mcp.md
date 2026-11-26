@@ -94,13 +94,13 @@ An `env` or `headers` value may be a literal or a `${ENV_VAR}` reference. A refe
 
 - `answer` turns see no MCP tools. `lookup` sees only read-only tools. `act` and `build` see the allowed catalog.
 - A tool is exposed to the model as `server__tool` (lowercase, sanitized, collisions get a stable numeric suffix). Two servers can offer tools with the same name.
-- Above `mcp.max_inline_tools`, the turn exposes one meta-tool, `mcp_find_tool`, instead of every schema. It searches names and one-line descriptions, so a large catalog does not fill the prompt.
+- Above `mcp.max_inline_tools`, the turn exposes one meta-tool, `mcp_find_tool`, instead of every schema. It searches names and one-line descriptions, so a large catalog does not fill the prompt. The names it returns are not registered as callable tools in that turn: raise the cap or narrow `tools.allow` to call one.
 - In a `build` or planned `act` turn, `propose_plan` accepts `tools`: the MCP tools the plan will call, as `server__tool` or `server:tool`. A call outside that list is outside the plan and follows the usual confirmation path.
-- A tool result is untrusted data. Konsolai masks secret-shaped values, caps the raw result at 8 MiB and the wrapped output at 64 KiB, omits images, audio and resources with a marker, and wraps the text in `<untrusted_mcp_result>` followed by a line telling the model that the content is data, never instructions. Tool descriptions are flattened and capped at 240 characters.
+- A tool result is untrusted data. Konsolai masks secret-shaped values, caps the raw result at 8 MiB and the wrapped output at 64 KiB, omits images, audio and resources with a marker, and wraps the text in `<untrusted_mcp_result>` followed by a line telling the model that the content is data, never instructions. Tool descriptions are flattened and capped at 240 characters, and secret-shaped text is masked in descriptions and input schemas too, so a server cannot leak a configured env or header value back to the model through its tool list.
 
 ## Privacy
 
-An MCP result is part of the conversation, so it leaves the machine when the main model is remote. `private` marks a server whose results you do not want a remote model to see. When the main model is remote, a private server is hidden unless it is confirmed: the decision is made once per process and `--yes` accepts it. In this release the interactive prompt is not wired into the CLI, so without `--yes` a private server stays hidden under a remote main model. A local main model needs no confirmation. The MCP session itself is always between Konsolai and the server; the server may itself be remote.
+An MCP result is part of the conversation, so it leaves the machine when the main model is remote. `private` marks a server whose results you do not want a remote model to see. When the main model is remote, a private server is hidden unless it is confirmed: the CLI asks once per process ("this sends MCP results from <server> to the remote model"), `--yes` accepts it without asking, and a non-interactive run without `--yes` leaves it hidden. A local main model needs no confirmation. The MCP session itself is always between Konsolai and the server; the server may itself be remote.
 
 ## Status and diagnostics
 
