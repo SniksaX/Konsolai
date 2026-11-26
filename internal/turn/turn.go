@@ -62,24 +62,27 @@ type Runner struct {
 	Ingest           *rag.Ingester
 	Embed            *embed.Client
 	MCPRuntime       *MCPRuntime
-	shellOut         []string
-	lastCode         int
-	lastIntent       intent.Intent
-	lastLang         string
-	lastEffort       intent.Effort
-	lastTask         intent.Task
-	lastUser         string
-	lastAssistant    string
-	lastPromise      bool
-	lastEscalate     intent.Intent
-	answerCut        bool
-	escalated        bool
-	RebindNext       bool
-	remoteYes        bool
-	statMu           sync.Mutex
-	statOn           bool
-	statIntent       string
-	statSession      string
+	// MCPPrivateConfirm asks once per process before a remote main model sees a
+	// private MCP server. Nil refuses by default; --yes skips the prompt.
+	MCPPrivateConfirm func(server string) (bool, error)
+	shellOut          []string
+	lastCode          int
+	lastIntent        intent.Intent
+	lastLang          string
+	lastEffort        intent.Effort
+	lastTask          intent.Task
+	lastUser          string
+	lastAssistant     string
+	lastPromise       bool
+	lastEscalate      intent.Intent
+	answerCut         bool
+	escalated         bool
+	RebindNext        bool
+	remoteYes         bool
+	statMu            sync.Mutex
+	statOn            bool
+	statIntent        string
+	statSession       string
 }
 
 type Request struct {
