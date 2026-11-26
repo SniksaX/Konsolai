@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/SniksaX/Konsolai/internal/config"
 	"github.com/SniksaX/Konsolai/internal/diff"
 	"github.com/SniksaX/Konsolai/internal/llm"
 	"github.com/SniksaX/Konsolai/internal/safety"
@@ -75,6 +76,9 @@ func (t *editFileTool) Prepare(rawArgs string) (Action, error) {
 	resolved, err := t.guard.ResolvePath(args.Path)
 	if err != nil {
 		return nil, err
+	}
+	if config.IsProtectedWritePath(resolved) {
+		return nil, fmt.Errorf("tools: edit_file: %s: %s", args.Path, config.ProtectedRefusal)
 	}
 	b, err := os.ReadFile(resolved)
 	if err != nil {
