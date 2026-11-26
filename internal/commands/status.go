@@ -122,6 +122,7 @@ func runStatus(ctx context.Context, env *Env, _ []string) int {
 	} else {
 		fmt.Fprintf(env.out(), "rerank         %s  %s\n", turn.EndpointHost(env.Profile.RerankURL()), httpReach(ctx, env.Profile.RerankURL()))
 	}
+	writeMCPStatus(ctx, env)
 	if env.Mem != nil && env.Mem.Store() != nil && env.Mem.Store().RAGAvailable(ctx) {
 		pid := env.ProjectID
 		counts, err := env.Mem.Store().ChunkCounts(ctx, env.Profile.Name, pid)
