@@ -87,6 +87,17 @@ Never print a secret value in full. Refer to it by name and its first 4 characte
 var decisionSchema = json.RawMessage(`{"type":"object","properties":{"intent":{"type":"string","enum":["answer","lookup","act","build"]},"language":{"type":"string"},"reason":{"type":"string"},"reasoning":{"type":"boolean"},"effort":{"type":"string","enum":["none","low","high"]},"task":{"type":"string","enum":["analysis","docs","other"]},"continues_session":{"type":"integer"},"needs_memory":{"type":"boolean"}},"required":["intent","language","reason","reasoning","effort","task","continues_session","needs_memory"],"additionalProperties":false}`)
 
 func Classify(ctx context.Context, client *llm.Client, request string, candidates []Candidate, inRepo bool) (Decision, error) {
+	return classifyWithServers(ctx, client, request, candidates, inRepo, nil)
+}
+
+// ClassifyWithServers is Classify plus one safe line per configured MCP
+// server. The lines carry names and policy metadata only: never tool schemas,
+// never command lines, env values, headers or URLs.
+func ClassifyWithServers(ctx context.Context, client *llm.Client, request string, candidates []Candidate, inRepo bool, servers []string) (Decision, error) {
+	return classifyWithServers(ctx, client, request, candidates, inRepo, servers)
+}
+
+func classifyWithServers(ctx context.Context, client *llm.Client, request string, candidates []Candidate, inRepo bool, servers []string) (Decision, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	sys := routerPrompt
@@ -94,6 +105,12 @@ func Classify(ctx context.Context, client *llm.Client, request string, candidate
 		sys += "\nThere is no previous conversation."
 	} else {
 		sys += "\n" + FormatCandidates(candidates)
+	}
+	if len(servers) > 0 {
+		sys += "\nMCP servers configured (one line each, names and policy only; their tool schemas are not in this prompt):"
+		for _, line := range servers {
+			sys += "\n- " + line
+		}
 	}
 	msgs := []llm.Message{
 		{Role: llm.RoleSystem, Content: sys},
