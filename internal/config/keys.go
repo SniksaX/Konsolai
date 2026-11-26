@@ -380,6 +380,8 @@ var keyTable = []Key{
 		func(c *Config, v bool) { c.Tools.Web.Enabled = v }, func(c Config) bool { return c.Tools.Web.Enabled }).named("web").when(ApplyNext),
 	knn("tools.web.results", "web result cap; 0 means no cap", 0,
 		func(c *Config, v int) { c.Tools.Web.Results = v }, func(c Config) int { return c.Tools.Web.Results }).when(ApplyNext),
+	knn("mcp.max_inline_tools", "inline MCP tool cap; larger catalogs are listed on demand", 15,
+		func(c *Config, v int) { c.MCP.MaxInlineTools = v }, func(c Config) int { return c.MCP.MaxInlineTools }).named("mcp").when(ApplyNext),
 
 	km("store.query_timeout_ms", "database query limit", 2000,
 		func(c *Config, v int) { c.Store.QueryTimeoutMS = v }, func(c Config) int { return c.Store.QueryTimeoutMS }),
@@ -557,6 +559,12 @@ func walkOverlay(n *yaml.Node, t *trieNode, rel, full string, st *walkState) err
 				mentioned = st.mentioned
 			}
 			if err := applyModelMap(target, vn, childFull, mentioned); err != nil {
+				return err
+			}
+			continue
+		}
+		if name == "servers" && rel == "mcp" {
+			if err := applyMCPServerMap(st, vn, childFull); err != nil {
 				return err
 			}
 			continue
@@ -775,6 +783,9 @@ func validateConfig(c Config) error {
 	if err := validateModels(c); err != nil {
 		return err
 	}
+	if err := validateMCP(c); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -941,6 +952,7 @@ func renderShow(c Config) string {
 	fmt.Fprintf(&b, "profile: %s\n", c.Name)
 	writeModels(&b, c, 0, true) // secrets masked
 	writeKeys(&b, c, true, 0)   // secrets masked
+	writeMCP(&b, c, true, 0)    // env and header values masked
 	return b.String()
 }
 
@@ -951,6 +963,7 @@ func renderDoc(c Config, profile string, mask bool) string {
 	b.WriteString("defaults:\n")
 	writeModels(&b, c, 1, mask)
 	writeKeys(&b, c, mask, 1)
+	writeMCP(&b, c, mask, 1)
 	b.WriteString("\nprofiles:\n")
 	fmt.Fprintf(&b, "  %s: {}\n", yamlScalar(profile))
 	return b.String()
@@ -960,6 +973,9 @@ func writeKeys(b *strings.Builder, c Config, mask bool, indentOff int) {
 	var open []string
 	for i := range keyTable {
 		k := &keyTable[i]
+		if strings.HasPrefix(k.Path, "mcp.") {
+			continue // writeMCP renders the whole mcp section
+		}
 		parts := strings.Split(k.Path, ".")
 		for i := 0; i < len(parts)-1; i++ {
 			prefix := strings.Join(parts[:i+1], ".")
@@ -995,6 +1011,7 @@ func DiffText(path, profile string) (string, error) {
 	}
 	var b strings.Builder
 	writeModelDiff(&b, base, fileCfg, full)
+	writeMCPDiff(&b, base, fileCfg, full)
 	for i := range keyTable {
 		k := &keyTable[i]
 		dv := k.present(base, true)
