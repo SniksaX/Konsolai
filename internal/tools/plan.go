@@ -44,7 +44,7 @@ func (t *proposePlanTool) Spec() llm.ToolSpec {
 				"Include files (repo-relative paths) when the plan creates or edits files. " +
 				"Omit files when the plan only runs commands and changes no files, for example go build ./..., go vet ./..., and go test ./.... " +
 				"./... is a real Go package pattern, not a placeholder.",
-			Parameters: json.RawMessage(`{"type":"object","properties":{"summary":{"type":"string","description":"What this plan will do."},"steps":{"type":"array","items":{"type":"string"},"description":"Concrete steps. Use the exact command lines when the plan only runs commands."},"files":{"type":"array","items":{"type":"string"},"description":"Repo-relative paths this plan will create or modify. Required when the plan writes or edits files. Omit when the plan only runs commands and changes no files."},"commands":{"type":"array","items":{"type":"string"},"description":"Exact shell command lines this plan will run, one entry per command. Example: go build ./..., go vet ./..., go test ./.... A multi-line script is one entry. Do not use placeholders."}},"required":["summary","steps"]}`),
+			Parameters: json.RawMessage(`{"type":"object","properties":{"summary":{"type":"string","description":"What this plan will do."},"steps":{"type":"array","items":{"type":"string"},"description":"Concrete steps. Use the exact command lines when the plan only runs commands."},"files":{"type":"array","items":{"type":"string"},"description":"Repo-relative paths this plan will create or modify. Required when the plan writes or edits files. Omit when the plan only runs commands and changes no files."},"commands":{"type":"array","items":{"type":"string"},"description":"Exact shell command lines this plan will run, one entry per command. Example: go build ./..., go vet ./..., go test ./.... A multi-line script is one entry. Do not use placeholders."},"tools":{"type":"array","items":{"type":"string"},"description":"MCP tools this plan will call, as exposed names (server__tool) or server:tool. A call outside this list is outside the plan."}},"required":["summary","steps"]}`),
 		},
 	}
 }
@@ -54,6 +54,7 @@ type proposePlanArgs struct {
 	Steps    []string `json:"steps"`
 	Files    []string `json:"files"`
 	Commands []string `json:"commands"`
+	Tools    []string `json:"tools"`
 }
 
 type proposePlanAction struct {
@@ -61,6 +62,7 @@ type proposePlanAction struct {
 	steps    []string
 	files    []string
 	commands []string
+	tools    []string
 }
 
 func (t *proposePlanTool) Prepare(rawArgs string) (Action, error) {
@@ -104,7 +106,27 @@ func (t *proposePlanTool) Prepare(rawArgs string) (Action, error) {
 			return nil, planShapeError(err.Error(), rawArgs, args)
 		}
 	}
-	return &proposePlanAction{summary: args.Summary, steps: args.Steps, files: nonempty(args.Files), commands: cmds}, nil
+	var declared []string
+	for _, name := range args.Tools {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if strings.ContainsAny(name, " \t\n") {
+			return nil, planShapeError("tools entries must be server__tool or server:tool names", rawArgs, args)
+		}
+		declared = append(declared, name)
+	}
+	return &proposePlanAction{summary: args.Summary, steps: args.Steps, files: nonempty(args.Files), commands: cmds, tools: nonempty(declared)}, nil
+}
+
+// planToolDisplay shows a declared MCP tool with its server and tool, whether
+// the model declared the exposed name or the server:tool form.
+func planToolDisplay(name string) string {
+	if i := strings.Index(name, "__"); i > 0 {
+		return name[:i] + ": " + name[i+2:]
+	}
+	return strings.Replace(name, ":", ": ", 1)
 }
 
 func planCommands(args proposePlanArgs) []string {
@@ -333,6 +355,7 @@ func oneLine(s string) string {
 
 func (a *proposePlanAction) PlanFiles() []string    { return a.files }
 func (a *proposePlanAction) PlanCommands() []string { return a.commands }
+func (a *proposePlanAction) PlanTools() []string    { return a.tools }
 func (a *proposePlanAction) PlanText() string {
 	var b strings.Builder
 	b.WriteString(a.summary)
@@ -342,6 +365,8 @@ func (a *proposePlanAction) PlanText() string {
 	b.WriteString(strings.Join(a.files, "\n"))
 	b.WriteByte('\n')
 	b.WriteString(strings.Join(a.commands, "\n"))
+	b.WriteByte('\n')
+	b.WriteString(strings.Join(a.tools, "\n"))
 	return b.String()
 }
 
@@ -360,6 +385,16 @@ func (a *proposePlanAction) Preview() string {
 	if len(a.commands) > 0 {
 		b.WriteString("commands: ")
 		b.WriteString(strings.Join(a.commands, ", "))
+		b.WriteByte('\n')
+	}
+	if len(a.tools) > 0 {
+		b.WriteString("mcp tools: ")
+		for i, name := range a.tools {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(planToolDisplay(name))
+		}
 		b.WriteByte('\n')
 	}
 	return strings.TrimRight(b.String(), "\n")
