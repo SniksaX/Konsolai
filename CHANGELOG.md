@@ -31,7 +31,7 @@
 - Fast-model cost attribution is unit-tested only, and identity questions are answered without a model only for the EN/FR phrase list.
 - Provider presets other than DeepSeek and OpenAI (live-tested) stay documentation-derived; `anthropic` is experimental.
 - The shell check for the protected config paths is textual, so a path built from fragments can evade it.
-- DeepSeek-strict forced-plan/named `tool_choice` path: the PTY scenario hung; under investigation, not reproduced as a unit test yet.
+- The DeepSeek-strict forced-plan/named `tool_choice` PTY scenario is not automated; the retry path itself is bounded (exactly one auto retry, context-cancellable) and covered by unit/turn tests. The observed PTY stall was harness-side; no product hang was found.
 
 ## v0.4.0
 
