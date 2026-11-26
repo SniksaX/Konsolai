@@ -905,17 +905,24 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				case "read_file":
 					if p, ok := action.(interface{ ResolvedPath() string }); ok {
 						if hash, err := fileSHA256(p.ResolvedPath()); err == nil {
-							start, end, okHdr := parseReadHeader(result.Output)
-							if !okHdr {
-								start, end = parseReadRange(call.Function.Arguments)
-								if end < 1 {
-									end = fileLineCount(p.ResolvedPath())
+							// Record only the lines the result actually showed: a
+							// capped read must not cover the tail it never returned.
+							start, end := result.ReadStart, result.ReadEnd
+							if start <= 0 || end < start {
+								if hdrStart, hdrEnd, okHdr := parseReadHeader(result.Output); okHdr {
+									start, end = hdrStart, hdrEnd
 								}
 							}
 							if start > 0 && end >= start {
+								askedStart, askedEnd := parseReadRange(call.Function.Arguments)
+								if askedEnd < 1 {
+									askedEnd = fileLineCount(p.ResolvedPath())
+								}
 								state.readSpans = append(state.readSpans, readSpan{
 									abs: p.ResolvedPath(), hash: hash,
-									start: start, end: end, step: st.Steps, toolID: call.ID,
+									start: start, end: end,
+									askedStart: askedStart, askedEnd: askedEnd,
+									step: st.Steps, toolID: call.ID,
 								})
 							}
 						}
