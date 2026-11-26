@@ -383,7 +383,7 @@ func TestModelFactsUseTheConfiguredNamesAndIds(t *testing.T) {
 // TestDecideIntentFloorAppliesTheIdentityFloor proves the floor is part of the
 // router decision, not only a RunTurn shortcut.
 func TestDecideIntentFloorAppliesTheIdentityFloor(t *testing.T) {
-	dec := DecideIntentFloor(context.Background(), nil, "", "what model are you ?", true, nil, false, nil, nil, "")
+	dec := DecideIntentFloor(context.Background(), nil, "", "what model are you ?", true, nil, false, nil, nil, "", nil)
 	if dec.Intent != intent.Answer || dec.Reason != "identity floor" || dec.Effort != intent.EffortLow {
 		t.Fatalf("floor decision %+v", dec)
 	}
