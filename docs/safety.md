@@ -1,6 +1,6 @@
 # Safety model
 
-The plan gate is on for every build turn, and for an act turn only when effort is high. Until `propose_plan` is approved, a mutating tool is rejected with `call propose_plan first`. You confirm the plan at the `y` / `n` / `a` / `q` prompt.
+The plan gate is on for every build turn, and for an act turn only when effort is high. Until `propose_plan` is approved, a mutating tool is rejected with `call propose_plan first`. Before the plan is approved, a build turn (and a high-effort act) offers only read-only tools and `propose_plan`; a change request answered in prose is nudged once to call `propose_plan`. You confirm the plan at the `y` / `n` / `a` / `q` prompt.
 
 After approval, a file write must be one of the plan's files. A shell line must pass `safety.MatchPlan`: a read-only command, a command declared on the plan, a file operation on a planned file, or a git command in the same family as the plan. A match runs with no second prompt.
 
@@ -8,7 +8,7 @@ Anything outside the plan is confirmed again. `a` (approve the rest) does not co
 
 When the plan gate is off, each mutating action is confirmed the same way.
 
-`read_file` may open any user-readable path except the sensitive denylist: `~/.ssh`, `~/.gnupg`, `~/.local/share/keyrings`, browser profiles under `~/.config` (`BraveSoftware`, `google-chrome`, `chromium`), `~/.config/konsolai`, `.netrc`, `.pgpass`, names starting with `id_`, extensions `.key`, `.pem`, `.p12`, `.pfx`, `.kdbx`, and `/proc/<pid>/environ`. `safety.extra_read_deny` adds prefixes.
+`read_file` may open any user-readable path except the sensitive denylist: `~/.ssh`, `~/.gnupg`, `~/.mozilla`, `~/.local/share/keyrings`, browser profiles under `~/.config` (`BraveSoftware`, `google-chrome`, `chromium`), `~/.config/konsolai`, `.netrc`, `.pgpass`, names starting with `id_`, extensions `.key`, `.pem`, `.p12`, `.pfx`, `.kdbx`, and `/proc/<pid>/environ`. `safety.extra_read_deny` adds prefixes.
 
 Writes (`write_file`, `edit_file`, `export_doc`) stay inside the project root. An absolute or `~` path named in the request is added as an extra root, and so is an absolute or `~` path from an approved plan, including its parent directories under the home directory. Those extras are refused under `~/.ssh`, `~/.gnupg`, `~/.config`, and `~/.local/share/keyrings`.
 
