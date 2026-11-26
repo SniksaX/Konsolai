@@ -37,7 +37,6 @@ type MCPManager interface {
 }
 
 func runMCP(ctx context.Context, env *Env, args []string) int {
-	_ = ctx
 	if env == nil {
 		return 1
 	}
@@ -47,12 +46,16 @@ func runMCP(ctx context.Context, env *Env, args []string) int {
 	switch strings.ToLower(strings.TrimSpace(args[0])) {
 	case "list":
 		if len(args) > 1 {
-			fmt.Fprintln(env.errw(), "usage: /mcp [list]")
+			fmt.Fprintln(env.errw(), mcpUsage)
 			return 2
 		}
 		return mcpList(env)
+	case "tools":
+		return mcpTools(ctx, env, args[1:])
+	case "test":
+		return mcpTest(ctx, env, args[1:])
 	default:
-		fmt.Fprintln(env.errw(), "usage: /mcp [list]")
+		fmt.Fprintln(env.errw(), mcpUsage)
 		return 2
 	}
 }
@@ -97,9 +100,21 @@ func mcpList(env *Env) int {
 	return 0
 }
 
-func mcpTree(*Env) []Choice {
+// mcpTree lists the /mcp actions; tools and test complete to a configured
+// server name.
+func mcpTree(env *Env) []Choice {
+	next := func() []Choice {
+		names := envProfile(env).MCPServerNames()
+		out := make([]Choice, 0, len(names))
+		for _, name := range names {
+			out = append(out, Choice{Value: name, Description: "MCP server " + name, Terminal: true})
+		}
+		return out
+	}
 	return []Choice{
 		{Value: "list", Description: "List configured MCP servers", Terminal: true},
+		{Value: "tools", Description: "Show a server's tools and policy", Dynamic: next},
+		{Value: "test", Description: "Connect to a server and count its tools", Dynamic: next},
 	}
 }
 
