@@ -106,14 +106,22 @@ func NewReadline(completer func(line []rune, cursor int) readline.Completions, f
 		// Stock forward-char and vi-forward-char call acceptInlineSuggestion,
 		// which would submit the placeholder. End-of-line does not accept in
 		// v1.3.0; the override keeps that and stays off the suggestion.
-		"forward-char":      r.forwardNoAccept,
-		"vi-forward-char":   r.viForwardNoAccept,
-		"end-of-line":       r.endNoAccept,
-		"konsolai-down":     r.slashDown,
-		"konsolai-esc":      r.slashEsc,
-		"konsolai-tab":      r.slashTab,
-		"konsolai-enter":    r.slashEnter,
-		"konsolai-question": r.slashQuestion,
+		"forward-char":         r.navRight,
+		"vi-forward-char":      r.viForwardNoAccept,
+		"end-of-line":          r.navEnd,
+		"backward-char":        r.navLeft,
+		"beginning-of-line":    r.navHome,
+		"backward-delete-char": r.navBackspace,
+		"delete-char":          r.navDelete,
+		// The stock line/history walkers use Cursor.LineMove, whose column
+		// arithmetic is off by one at a line end; these rules replace them.
+		"up-line-or-history":   r.navUp,
+		"down-line-or-history": r.navDown,
+		"konsolai-down":        r.slashDown,
+		"konsolai-esc":         r.slashEsc,
+		"konsolai-tab":         r.slashTab,
+		"konsolai-enter":       r.slashEnter,
+		"konsolai-question":    r.slashQuestion,
 	})
 	bindEmacsVi := func(seq, action string) {
 		key := inputrc.Unescape(seq)
@@ -290,28 +298,6 @@ func (r *rlReader) syncPlaceholder(line []rune) {
 	}
 }
 
-func (r *rlReader) forwardNoAccept() {
-	if r == nil || r.sh == nil || r.sh.Cursor() == nil {
-		return
-	}
-	r.sh.History.SkipSave()
-	vii := 1
-	if r.sh.Iterations != nil {
-		vii = r.sh.Iterations.Get()
-	}
-	for i := 1; i <= vii; i++ {
-		r.sh.Cursor().Inc()
-	}
-}
-
-func (r *rlReader) endNoAccept() {
-	if r == nil || r.sh == nil || r.sh.Cursor() == nil {
-		return
-	}
-	r.sh.History.SkipSave()
-	r.sh.Cursor().EndOfLineAppend()
-}
-
 func (r *rlReader) viForwardNoAccept() {
 	if r == nil || r.sh == nil || r.sh.Cursor() == nil || r.sh.Line() == nil {
 		return
@@ -485,12 +471,13 @@ func (r *rlReader) slashEsc() {
 		r.loneEsc()
 		return
 	}
-	if arrowUp(tail) {
-		r.slashUp()
-		return
-	}
-	if arrowDown(tail) {
-		r.slashDown()
+	if key, ok := escapeArrow(tail); ok {
+		switch key {
+		case 'A':
+			r.slashUp()
+		case 'B':
+			r.slashDown()
+		}
 		return
 	}
 	if dropEsc(tail) {
