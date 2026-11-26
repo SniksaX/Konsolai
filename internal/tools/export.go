@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/SniksaX/Konsolai/internal/config"
 	"github.com/SniksaX/Konsolai/internal/diff"
 	"github.com/SniksaX/Konsolai/internal/docrender"
 	"github.com/SniksaX/Konsolai/internal/llm"
@@ -75,6 +76,9 @@ func (t *exportDocTool) Prepare(rawArgs string) (Action, error) {
 	resolved, err := t.guard.ResolvePath(args.Path)
 	if err != nil {
 		return nil, err
+	}
+	if config.IsProtectedWritePath(resolved) {
+		return nil, fmt.Errorf("tools: export_doc: %s: %s", args.Path, config.ProtectedRefusal)
 	}
 	srcDisplay := strings.TrimSuffix(args.Path, filepath.Ext(args.Path)) + ".md"
 	srcResolved := markdownSource(resolved)
