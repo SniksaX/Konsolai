@@ -158,7 +158,14 @@ func MaskValues(s string) (string, int) {
 			continue
 		}
 		n++
-		lines[i] = sub[1] + maskKeep4(sub[2]) + sub[3]
+		masked := maskKeep4(sub[2])
+		// A value may be several tokens ("Bearer <key>", "correct horse").
+		// Masking only the first token leaves the rest of the value in the
+		// clear, so the whole remainder of the assignment goes too.
+		if rest := strings.TrimSpace(sub[3]); rest != "" {
+			masked += "…[masked " + strconv.Itoa(len(rest)) + " chars]"
+		}
+		lines[i] = sub[1] + masked
 	}
 	return strings.Join(lines, "\n"), n
 }
