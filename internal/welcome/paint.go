@@ -55,13 +55,27 @@ func hintLine(pal ui.Palette, width int, tip string) string {
 	return clip(line, width)
 }
 
+// mcpCountValue is the MCP count text: "N configured" until a server has
+// connected, then "up/total up". Lazy connect is not a failure, so a first paint
+// before any session must not read as "0/N up".
+func mcpCountValue(m MCPCount) string {
+	if m.Total <= 0 {
+		return ""
+	}
+	if m.Up <= 0 {
+		return fmt.Sprintf("%d configured", m.Total)
+	}
+	return fmt.Sprintf("%d/%d up", m.Up, m.Total)
+}
+
 // mcpStatusLine is the short MCP count the degraded layouts paint under the
 // status strip. It is empty when no server is configured.
 func mcpStatusLine(pal ui.Palette, d Data) string {
-	if d.MCP.Total <= 0 {
+	value := mcpCountValue(d.MCP)
+	if value == "" {
 		return ""
 	}
-	return pal.Muted("mcp") + " " + pal.Meta(fmt.Sprintf("%d/%d", d.MCP.Up, d.MCP.Total)) + " " + pal.Muted("up")
+	return pal.Muted("mcp") + " " + pal.Meta(value)
 }
 
 func modelName(m Model) string {
@@ -214,9 +228,10 @@ func sessionLines(pal ui.Palette, inner int, s Session, mcp MCPCount) []string {
 			return paintMetaErr(pal, v)
 		}))
 	}
-	if mcp.Total > 0 {
-		// Configured servers are the denominator; only a live session is up.
-		rows = append(rows, kvLine(pal, inner, "mcp", fmt.Sprintf("%d/%d up", mcp.Up, mcp.Total), false, pal.Meta))
+	if value := mcpCountValue(mcp); value != "" {
+		// Configured servers are the denominator; only a live session is up, and
+		// until one connects the line reads "N configured" instead of 0/N.
+		rows = append(rows, kvLine(pal, inner, "mcp", value, false, pal.Meta))
 	}
 	return rows
 }
