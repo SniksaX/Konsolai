@@ -177,6 +177,61 @@ func mcpToolReadOnly(s config.MCPServer, t mcp.Tool) bool {
 	return false
 }
 
+// MCPToolReadOnly reports whether one server tool is read-only under the
+// server's declared read_only globs and its trust level.
+func MCPToolReadOnly(server config.MCPServer, t mcp.Tool) bool {
+	return mcpToolReadOnly(server, t)
+}
+
+// MCPToolAllowed reports whether the server's allow/deny globs keep one tool.
+func MCPToolAllowed(server config.MCPServer, serverName string, t mcp.Tool) bool {
+	return mcpToolAllowed(server, serverName, t)
+}
+
+// MCPToolHiddenReason names the allow or deny rule that keeps one tool out of
+// the model catalog, or "" when the globs allow it.
+func MCPToolHiddenReason(server config.MCPServer, serverName string, t mcp.Tool) string {
+	if len(server.Tools.Allow) > 0 {
+		ok := false
+		for _, g := range server.Tools.Allow {
+			if globMatch(g, t.Name) || globMatch(g, serverName+":"+t.Name) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return "not in allow"
+		}
+	}
+	for _, g := range server.Tools.Deny {
+		if globMatch(g, t.Name) || globMatch(g, serverName+":"+t.Name) {
+			return "deny " + g
+		}
+	}
+	return ""
+}
+
+// MCPToolOffered reports whether one catalog tool would be exposed to the
+// model under the live profile rules, and the reason when it is not. The
+// caller supplies the caller-level private rule (a private server under a
+// remote main model) through serverHidden/hiddenReason so the turn and the
+// /mcp tools display use exactly the same decision.
+func MCPToolOffered(server config.MCPServer, serverName string, t mcp.Tool, serverHidden bool, hiddenReason string) (bool, string) {
+	if serverHidden {
+		return false, hiddenReason
+	}
+	if !server.Enabled {
+		return false, "server disabled"
+	}
+	if reason := MCPToolHiddenReason(server, serverName, t); reason != "" {
+		return false, reason
+	}
+	if server.TrustMode() == config.MCPTrustReadOnly && !mcpToolReadOnly(server, t) {
+		return false, "trust read_only"
+	}
+	return true, ""
+}
+
 func globMatch(pattern, s string) bool {
 	ok, err := path.Match(pattern, s)
 	return err == nil && ok
