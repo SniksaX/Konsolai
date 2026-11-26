@@ -156,6 +156,13 @@ func (p *fakePTYProvider) setDecision(decision string) {
 	p.mu.Unlock()
 }
 
+// chatCount is the number of non-router chat requests the fake has answered.
+func chatCount(p *fakePTYProvider) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.chats
+}
+
 func (p *fakePTYProvider) chatToolLists() [][]string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -426,6 +433,11 @@ func (s *ptyScenario) close() {
 // startPTYScenario spawns the child REPL with a fake provider and, when wanted, a
 // fake MCP server already listening in the parent.
 func startPTYScenario(t *testing.T, testName, mode string, withMCP bool, env map[string]string) *ptyScenario {
+	return startPTYSized(t, testName, mode, withMCP, env, 40, 120)
+}
+
+// startPTYSized is startPTYScenario with an explicit terminal size.
+func startPTYSized(t *testing.T, testName, mode string, withMCP bool, env map[string]string, rows, cols int) *ptyScenario {
 	t.Helper()
 	if _, err := os.Stat("/dev/ptmx"); err != nil {
 		t.Skip("no /dev/ptmx")
@@ -445,8 +457,12 @@ func startPTYScenario(t *testing.T, testName, mode string, withMCP bool, env map
 	env["HOME"] = home
 	env["XDG_CONFIG_HOME"] = cwd + "/cfg"
 	env["XDG_STATE_HOME"] = cwd + "/state"
-	env["COLUMNS"] = "120"
-	env["LINES"] = "40"
+	if env["COLUMNS"] == "" {
+		env["COLUMNS"] = strconv.Itoa(cols)
+	}
+	if env["LINES"] == "" {
+		env["LINES"] = strconv.Itoa(rows)
+	}
 	env["INPUTRC"] = "/dev/null"
 	env["NO_COLOR"] = "1"
 	env["KONSOLAI_PTY_CHILD"] = mode
@@ -466,10 +482,10 @@ func startPTYScenario(t *testing.T, testName, mode string, withMCP bool, env map
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 40, Cols: 120})
+	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
 	sc.cmd = cmd
 	sc.ptmx = ptmx
-	sc.v = startView(t, ptmx, 40, 120)
+	sc.v = startView(t, ptmx, rows, cols)
 	t.Cleanup(sc.close)
 	return sc
 }
