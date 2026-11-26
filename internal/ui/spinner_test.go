@@ -1,14 +1,14 @@
 package ui
 
 import (
-	"bytes"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 func TestSpinnerFramesOnFakeTTY(t *testing.T) {
-	var buf bytes.Buffer
+	var buf safeBuffer
 	restore := TestHook(&buf, true, 5*time.Millisecond, nil)
 	defer restore()
 	stop := Start("thinking")
@@ -37,7 +37,7 @@ func TestSpinnerFramesOnFakeTTY(t *testing.T) {
 }
 
 func TestSpinnerSkippedWhenNotTTY(t *testing.T) {
-	var buf bytes.Buffer
+	var buf safeBuffer
 	restore := TestHook(&buf, false, 5*time.Millisecond, nil)
 	defer restore()
 	stop := Start("thinking")
@@ -49,15 +49,16 @@ func TestSpinnerSkippedWhenNotTTY(t *testing.T) {
 }
 
 func TestSpinnerElapsedAfter1s(t *testing.T) {
-	var buf bytes.Buffer
+	var buf safeBuffer
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	var now time.Time
-	now = base
-	restore := TestHook(&buf, true, 5*time.Millisecond, func() time.Time { return now })
+	var now atomic.Pointer[time.Time]
+	now.Store(&base)
+	restore := TestHook(&buf, true, 5*time.Millisecond, func() time.Time { return *now.Load() })
 	defer restore()
 	stop := Start("working")
 	time.Sleep(8 * time.Millisecond)
-	now = base.Add(1500 * time.Millisecond)
+	later := base.Add(1500 * time.Millisecond)
+	now.Store(&later)
 	time.Sleep(12 * time.Millisecond)
 	stop()
 	if !strings.Contains(buf.String(), "1.5s") {
@@ -66,7 +67,7 @@ func TestSpinnerElapsedAfter1s(t *testing.T) {
 }
 
 func TestStartAfterDelay(t *testing.T) {
-	var buf bytes.Buffer
+	var buf safeBuffer
 	restore := TestHook(&buf, true, 5*time.Millisecond, nil)
 	defer restore()
 	stop := StartAfter("loading memory", 30*time.Millisecond)
@@ -83,7 +84,7 @@ func TestStartAfterDelay(t *testing.T) {
 }
 
 func TestQuietStartsAfterSilenceAndRestarts(t *testing.T) {
-	var buf bytes.Buffer
+	var buf safeBuffer
 	restore := TestHook(&buf, true, 5*time.Millisecond, nil)
 	defer restore()
 	q := NewQuiet("running", 20*time.Millisecond)
@@ -107,7 +108,7 @@ func TestQuietStartsAfterSilenceAndRestarts(t *testing.T) {
 }
 
 func TestQuietClearedBeforeForwardedOutput(t *testing.T) {
-	var buf bytes.Buffer
+	var buf safeBuffer
 	restore := TestHook(&buf, true, time.Millisecond, nil)
 	defer restore()
 	q := NewQuiet("running", 5*time.Millisecond)
@@ -163,7 +164,7 @@ func committedLines(s string) []string {
 }
 
 func TestLiveSetLabel(t *testing.T) {
-	var buf bytes.Buffer
+	var buf safeBuffer
 	restore := TestHook(&buf, true, 5*time.Millisecond, nil)
 	defer restore()
 	live := StartLive("thinking")
@@ -178,7 +179,7 @@ func TestLiveSetLabel(t *testing.T) {
 }
 
 func TestHoldPromptBlocksSpinner(t *testing.T) {
-	var buf bytes.Buffer
+	var buf safeBuffer
 	restore := TestHook(&buf, true, 5*time.Millisecond, nil)
 	defer restore()
 	HoldPrompt(true)
@@ -195,7 +196,7 @@ func TestHoldPromptBlocksSpinner(t *testing.T) {
 func TestSpinnerCallSiteLabels(t *testing.T) {
 	labels := []string{"understanding", "loading memory", "thinking", "planning", "working", "running", "exporting", "fetching"}
 	for _, label := range labels {
-		var buf bytes.Buffer
+		var buf safeBuffer
 		restore := TestHook(&buf, true, 5*time.Millisecond, nil)
 		stop := Start(label)
 		time.Sleep(12 * time.Millisecond)
