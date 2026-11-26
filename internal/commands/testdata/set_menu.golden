@@ -120,6 +120,8 @@ tools
   tools.shell.wait_delay_ms    2000
   tools.web.enabled            true
   tools.web.results            0
+mcp
+  mcp.max_inline_tools         15
 store
   store.query_timeout_ms       2000
   store.migrate_timeout_ms     15000
