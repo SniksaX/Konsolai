@@ -1,14 +1,13 @@
 package ui
 
 import (
-	"bytes"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestPauseLiveClearsTheSpinnerLine(t *testing.T) {
-	var buf bytes.Buffer
+	var buf safeBuffer
 	restore := TestHook(&buf, true, 5*time.Millisecond, time.Now)
 	defer restore()
 	testSpinnerWriter(&buf)
@@ -30,14 +29,14 @@ func TestPauseLiveClearsTheSpinnerLine(t *testing.T) {
 	}
 	ResumeLive()
 	time.Sleep(40 * time.Millisecond)
+	live.Stop()
 	if buf.String() == afterPause {
 		t.Fatal("the spinner did not resume")
 	}
-	live.Stop()
 }
 
 // testSpinnerWriter keeps the spinner's test writer in one place.
-func testSpinnerWriter(w *bytes.Buffer) {
+func testSpinnerWriter(w *safeBuffer) {
 	if hookWriter() != w {
 		t := TestHook(w, true, 5*time.Millisecond, time.Now)
 		_ = t
