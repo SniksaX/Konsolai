@@ -168,6 +168,7 @@ type runState struct {
 	readSpans         []readSpan
 	planApproved      bool
 	planFiles         []string
+	planTools         []string
 	planCmds          []string
 	planText          string
 	explore           int
@@ -661,7 +662,13 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			outside := false
 			inPlanHit := false
 			if kind == tools.Mutating && cfg.RequirePlan && state.planApproved {
-				if p, ok := filePathOf(action); ok {
+				if server, tool, ok := mcpIdentity(action); ok {
+					if mcpInPlan(state.planTools, call.Function.Name, server, tool) {
+						inPlanHit = true
+					} else {
+						outside = true
+					}
+				} else if p, ok := filePathOf(action); ok {
 					planRoot, planBase := "", ""
 					if cfg.Guard != nil {
 						planRoot, planBase = cfg.Guard.Root(), cfg.Guard.Base()
@@ -775,6 +782,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 							state.planRejected = false
 							state.planFiles = planFilesOf(action)
 							state.planCmds = planCmdsOf(action)
+							state.planTools = planToolsOf(action)
 							state.planText = planTextOf(action)
 							if cfg.Guard != nil {
 								cfg.Guard.AllowPlanFiles(state.planFiles)
@@ -791,6 +799,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 							state.planRejected = false
 							state.planFiles = planFilesOf(action)
 							state.planCmds = planCmdsOf(action)
+							state.planTools = planToolsOf(action)
 							state.planText = planTextOf(action)
 							if cfg.Guard != nil {
 								cfg.Guard.AllowPlanFiles(state.planFiles)
