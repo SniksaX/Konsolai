@@ -13,6 +13,10 @@ import (
 
 var promptHeld atomic.Bool
 
+// outMu serializes every write to the terminal/line so a spinner paint cannot
+// interleave with a modal clear or a reset.
+var outMu sync.Mutex
+
 // HoldPrompt blocks spinner, step and confirm paints while readline owns
 // the input frame. The top rule is printed only inside ReadLine.
 func HoldPrompt(on bool) {
@@ -30,6 +34,8 @@ func PauseLive() {
 	if !hookTTY() {
 		return
 	}
+	outMu.Lock()
+	defer outMu.Unlock()
 	HoldPrompt(true)
 	fmt.Fprint(hookWriter(), clearLine+showCursor)
 }
@@ -215,7 +221,10 @@ func (s *spinner) loop() {
 }
 
 func (s *spinner) paint() {
-	// A modal prompt (the remote confirmation) owns the line; never paint over it.
+	outMu.Lock()
+	defer outMu.Unlock()
+	// Re-check under the write lock: a modal prompt may have taken the line
+	// while this paint was waiting.
 	if promptOwned() {
 		return
 	}
@@ -236,6 +245,8 @@ func (s *spinner) paint() {
 }
 
 func (s *spinner) clear() {
+	outMu.Lock()
+	defer outMu.Unlock()
 	if !s.shown {
 		return
 	}
@@ -251,7 +262,12 @@ func (s *spinner) Stop() {
 
 // ResetDisplay clears a leftover spinner line and shows the cursor.
 func ResetDisplay() {
-	if promptOwned() || !hookTTY() {
+	if !hookTTY() {
+		return
+	}
+	outMu.Lock()
+	defer outMu.Unlock()
+	if promptOwned() {
 		return
 	}
 	fmt.Fprint(hookWriter(), clearLine+showCursor)
