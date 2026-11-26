@@ -371,6 +371,7 @@ func ptyChildRun() {
 		}
 	}
 	client := llm.New(modelURL+"/v1", "main-model")
+	client.SetAPIKey(prof.APIKeyResolver(prof.Roles.Main))
 	client.PinContext(16384)
 	client.SetRetry(0, 0)
 	runner := &turn.Runner{
