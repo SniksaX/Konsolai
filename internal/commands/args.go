@@ -115,6 +115,7 @@ var friendlyPaths = map[string]string{
 	"elide":         "context.elide_trigger",
 	"ctx":           "ui.ctx_warn_pct",
 	"timeout":       "tools.shell.default_timeout_sec",
+	"mcp":           "mcp.max_inline_tools",
 }
 
 func friendlyNames() []string {
@@ -250,6 +251,8 @@ func friendlyNext(env *Env, name string, k config.Key) []Choice {
 		return urlLevel(env, "roles.rerank")
 	case "database":
 		return urlLevel(env, "database.url")
+	case "mcp":
+		return mcpSetLevel(env)
 	case "emoji":
 		return boolChoices(env, "ui.strip_emoji", true)
 	case "theme":
