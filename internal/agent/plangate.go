@@ -88,6 +88,7 @@ func prePlanSpecs(specs []llm.ToolSpec) []llm.ToolSpec {
 		"propose_plan": true,
 		"read_file":    true, "list_dir": true, "find_files": true,
 		"outline": true, "recall": true, "web_fetch": true,
+		"mcp_find_tool": true,
 	}
 	out := make([]llm.ToolSpec, 0, len(keep))
 	for _, s := range specs {
