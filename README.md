@@ -153,9 +153,11 @@ Konsolai is a Model Context Protocol client. A server is a local stdio command o
 konsolai /set mcp add stdio files npx -y @modelcontextprotocol/server-filesystem /data/projects
 konsolai /set mcp trust files read_only
 konsolai /mcp
+konsolai /mcp tools files
+konsolai /mcp test files
 ```
 
-Servers can be scoped by trust (`ask`, `read_only`, `auto`), tool globs and a per-server timeout; env and header values take `${ENV_VAR}` references instead of literals, and `/set mcp` refuses a value that looks like a stored secret. In a planned turn the plan lists the MCP tools it will call; anything else is outside the plan. `private` servers stay away from a remote main model unless you confirm them or pass `--yes`. The welcome shows `mcp 2/3 up` over the configured servers, `/status` and `/doctor` add per-server rows, and `--trace` counts MCP calls on the stats line.
+Servers can be scoped by trust (`ask`, `read_only`, `auto`), tool globs and a per-server timeout; env and header values take `${ENV_VAR}` references instead of literals, and `/set mcp` refuses a value that looks like a stored secret. `/mcp tools <name>` shows each tool with its read-only or mutating classification and why a tool is hidden, and `/mcp test <name>` connects once and reports the latency and tool count. In a planned turn the plan lists the MCP tools it will call; anything else is outside the plan. Above `mcp.max_inline_tools` the model searches with `mcp_find_tool` and can call a tool it found in the same turn. `private` servers stay away from a remote main model unless you confirm them or pass `--yes`. The welcome shows `mcp 2/3 up` over the configured servers, `/status` and `/doctor` add per-server rows, and `--trace` counts MCP calls on the stats line.
 
 Setup, trust levels, filesystem and database examples, and the threat model are in [docs/mcp.md](docs/mcp.md).
 
