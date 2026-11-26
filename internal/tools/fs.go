@@ -14,6 +14,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/SniksaX/Konsolai/internal/config"
 	"github.com/SniksaX/Konsolai/internal/diff"
 	"github.com/SniksaX/Konsolai/internal/llm"
 	"github.com/SniksaX/Konsolai/internal/redact"
@@ -79,6 +80,9 @@ func (t *writeFileTool) Prepare(rawArgs string) (Action, error) {
 	resolved, err := t.guard.ResolvePath(args.Path)
 	if err != nil {
 		return nil, err
+	}
+	if config.IsProtectedWritePath(resolved) {
+		return nil, fmt.Errorf("tools: write_file: %s: %s", args.Path, config.ProtectedRefusal)
 	}
 	_, statErr := os.Lstat(resolved)
 	overwrite := statErr == nil
@@ -255,7 +259,13 @@ func (a *readFileAction) Run(ctx context.Context) (Result, error) {
 	}
 	text := string(allBytes)
 	masked := 0
-	if redact.SensitivePath(a.path) || redact.SensitivePath(a.display) {
+	if kind, ok := config.ProtectedKindOf(a.path); ok {
+		if kind == config.ProtectedSecrets {
+			return Result{Output: "error: " + config.ProtectedReadHint, IsError: true, Meta: "refused"}, nil
+		}
+		text = config.MaskConfigContent(text)
+		masked = 1
+	} else if redact.SensitivePath(a.path) || redact.SensitivePath(a.display) {
 		text, masked = redact.MaskValues(text)
 	}
 	lines := strings.Split(text, "\n")
