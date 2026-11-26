@@ -7,15 +7,24 @@ import (
 	"strings"
 )
 
-// MCPServerStatus is one live row reported by an MCP manager.
+// MCPServerStatus is one live row reported by an MCP manager. Every field is
+// display-only: an env value, a header value and a command line never enter it.
 type MCPServerStatus struct {
+	// State is connected, down, not connected, or disabled.
 	State      string
 	Tools      int
 	ToolsKnown bool
+	// ToolNames lists the server's tool names once the list is known; the UI
+	// shows each one as "server: tool".
+	ToolNames []string
+	// Err is one short line from the last failure, already redacted.
+	Err string
+	// MissingEnv names unresolved ${NAME} references. It never carries a value.
+	MissingEnv []string
 }
 
-// MCPManager reports the live state of the configured MCP servers. MCP is nil
-// until a later phase wires a manager in, so /mcp list then says not connected.
+// MCPManager reports the live state of the configured MCP servers. The field is
+// nil until the runtime is wired, so /mcp list then says not connected.
 type MCPManager interface {
 	Status(name string) MCPServerStatus
 }
