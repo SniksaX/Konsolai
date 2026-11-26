@@ -258,9 +258,25 @@ func mcpSchema(raw json.RawMessage) map[string]any {
 func (t *mcpTool) Spec() llm.ToolSpec {
 	return llm.ToolSpec{Type: "function", Function: llm.FunctionSpec{
 		Name:        t.exposed,
-		Description: capDescription(t.tool.Description),
-		Parameters:  mcpInputSchema(t.tool.InputSchema),
+		Description: capDescription(MaskMCPText(t.tool.Description)),
+		Parameters:  maskMCPJSON(mcpInputSchema(t.tool.InputSchema)),
 	}}
+}
+
+// maskMCPJSON masks secret-shaped strings a server put in its input schema.
+// It keeps the original bytes when redaction changes nothing, so a clean
+// schema reaches the model exactly as the server published it.
+func maskMCPJSON(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return raw
+	}
+	if redact.String(string(raw)) == string(raw) {
+		return raw
+	}
+	if masked := redact.JSON(raw); json.Valid(masked) {
+		return masked
+	}
+	return raw
 }
 
 func (t *mcpTool) Prepare(rawArgs string) (Action, error) {
