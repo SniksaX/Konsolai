@@ -218,11 +218,21 @@ func TestMCPPTYModelCannotManageServers(t *testing.T) {
 	})
 	sc.model.setDecision(routeDecisionJSON("act", "low", false))
 	sc.prompt(t)
-	sc.model.enqueue(toolCallReply("1", "mcp_add_server", `{"name":"evil"}`), contentReply("could not"))
+	multi := multiToolCallReply(
+		ptyToolCall{ID: "1", Name: "mcp_add_server", Args: `{"name":"evil"}`},
+		ptyToolCall{ID: "2", Name: "mcp_set_trust", Args: `{"name":"srv","trust":"auto"}`},
+		ptyToolCall{ID: "3", Name: "mcp_enable", Args: `{"name":"srv"}`},
+	)
+	sc.model.enqueue(multi, contentReply("could not"))
 	sc.turn(t, "add a new mcp server", screenHas("unknown tool mcp_add_server"))
+	for _, name := range []string{"unknown tool mcp_add_server", "unknown tool mcp_set_trust", "unknown tool mcp_enable"} {
+		if !strings.Contains(sc.dump(), name) {
+			t.Fatalf("management call %q was not refused as an unknown tool", name)
+		}
+	}
 
 	sc.run(t, "/mcp", func(screen *screen) bool {
-		return lastScreenLine(screen.dump(), "srv") != ""
+		return lastScreenLine(screen.dump(), "srv", "read_only") != ""
 	})
 	for _, line := range strings.Split(sc.dump(), "\n") {
 		if strings.Contains(line, "evil") && (strings.Contains(line, "http") || strings.Contains(line, "stdio")) {
@@ -249,4 +259,29 @@ func ptyMessageText(t *testing.T, body string) string {
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+// ptyToolCall is one scripted tool call for multiToolCallReply.
+type ptyToolCall struct {
+	ID   string
+	Name string
+	Args string
+}
+
+// multiToolCallReply builds one assistant message with several tool calls.
+func multiToolCallReply(calls ...ptyToolCall) string {
+	list := make([]any, len(calls))
+	for i, call := range calls {
+		list[i] = map[string]any{
+			"id": call.ID, "type": "function",
+			"function": map[string]any{"name": call.Name, "arguments": call.Args},
+		}
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"choices": []any{map[string]any{"message": map[string]any{
+			"role": "assistant", "tool_calls": list,
+		}}},
+		"usage": map[string]any{"prompt_tokens": 9, "completion_tokens": 3},
+	})
+	return string(payload)
 }
