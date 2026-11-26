@@ -141,7 +141,7 @@ func spanVisible(sp readSpan, msgs []llm.Message) bool {
 		if m.Role != llm.RoleTool || m.ToolCallID != sp.toolID {
 			continue
 		}
-		if isElided(m.Content) || strings.HasPrefix(m.Content, "already in context") {
+		if isElided(m.Content) || strings.HasPrefix(m.Content, readNotePrefix) {
 			return false
 		}
 		return true
@@ -475,6 +475,9 @@ func prepareCall(client *llm.Client, msgs []llm.Message, tools []llm.ToolSpec, i
 	return estimate, MaxTokensFor(window, estimate, cap), elide, nil
 }
 
+// readNotePrefix starts the short reply for a read already in this turn.
+const readNotePrefix = "already read and unchanged"
+
 func skipCoveredRead(action tools.Action, call llm.ToolCall, spans []readSpan, msgs []llm.Message, out io.Writer) (bool, llm.Message) {
 	type hasResolved interface{ ResolvedPath() string }
 	rp, ok := action.(hasResolved)
@@ -501,7 +504,7 @@ func skipCoveredRead(action tools.Action, call llm.ToolCall, spans []readSpan, m
 	}
 	return true, llm.Message{
 		Role:       llm.RoleTool,
-		Content:    fmt.Sprintf("already in context above (step %d, lines %d-%d)", sp.step, sp.start, sp.end),
+		Content:    fmt.Sprintf("%s since step %d (lines %d-%d); its content is above.", readNotePrefix, sp.step, sp.start, sp.end),
 		ToolCallID: call.ID,
 	}
 }
