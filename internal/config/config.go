@@ -52,6 +52,7 @@ type Config struct {
 	Privacy  Privacy          `yaml:"privacy"`
 	Router   Router           `yaml:"router"`
 	Tools    Tools            `yaml:"tools"`
+	MCP      MCP              `yaml:"mcp"`
 	Store    Store            `yaml:"store"`
 	Stats    Stats            `yaml:"stats"`
 	Docs     Docs             `yaml:"docs"`
