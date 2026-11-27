@@ -17,3 +17,11 @@ Writes (`write_file`, `edit_file`, `export_doc`) stay inside the project root. A
 `redact.String` and `redact.JSON` run before a message or action is stored. They mask private keys, AWS and GitHub tokens, Slack tokens, `sk-` keys, JWTs, bearer tokens, URL passwords, and assignment lines that look like secrets. Reads of sensitive paths (`.env`, key and certificate files) mask values and keep the first four characters.
 
 `read_file` and `search` treat the active configuration (including a `--config` path), its `config.yaml.bak-*` backups and `~/.config/konsolai/secrets` as protected: reads and matches return the masked view, with MCP `command`/`args`/`env`/`headers` and MCP/database hostnames hidden; the secrets file is refused or skipped with a marker. Writes and shell commands that name any of these paths are refused, because the configuration is changed only through `/set` and viewed with `/config show`.
+
+## Code-running paths
+
+Some writes can run code later: build and task files (`Makefile`, `justfile`, `pyproject.toml`, `build.rs`, CI workflows, hooks, `.envrc`), anything under a root `scripts/` directory, `package.json` changes to `scripts`, `bin`, `type` or `main`, and project-relative globs in `safety.extra_sensitive_paths` (case-insensitive). A new file under those paths counts too. The same rule applies to file tools, exports, plans listing such files, and the statically visible write targets of a shell line (redirections, `tee`, `sed -i`, `mv`/`cp`/`ln`/`install`/`truncate`, `dd of=`, and interpreter writes).
+
+- **Never writable:** git metadata (`.git`, a gitdir pointer, `commondir`, git config writes, `git init --template`, `git update-index --chmod`). The agent refuses with "this is git metadata; the user changes it themselves"; reads stay as today.
+- **Confirm separately:** a code-running write gets its own prompt naming the file and reason, after the plan/outside-plan decision. Plan approval and `a` (approve all) do not cover it. With `--yes` or a non-interactive run it is refused and recorded as a tool error.
+- Safe writes (source, `go.mod`, README, tests, `.gitignore`, dependency-only `package.json`) keep the normal path. The install note for `npm/pip/go/cargo install` is shown in the preview without blocking.
