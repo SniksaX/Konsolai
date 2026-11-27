@@ -47,6 +47,24 @@ type Confirmer interface {
 	ConfirmForced(summary, preview string) (ui.Decision, string, error)
 }
 
+// sensitiveConfirmer is the optional never-auto-approvable question. The core
+// never sends the code-running write through plain Confirm: a frontend that
+// does not implement ConfirmSensitive gets ConfirmForced, which ignores an
+// earlier approve-all decision.
+type sensitiveConfirmer interface {
+	ConfirmSensitive(summary, preview string) (ui.Decision, string, error)
+}
+
+// confirmSensitive asks the separate code-running question. It prefers the
+// never-auto-approvable method and otherwise uses the forced prompt; plain
+// Confirm (which can auto-answer after approve-all) is never used here.
+func confirmSensitive(conf Confirmer, summary, preview string) (ui.Decision, string, error) {
+	if c, ok := conf.(sensitiveConfirmer); ok {
+		return c.ConfirmSensitive(summary, preview)
+	}
+	return conf.ConfirmForced(summary, preview)
+}
+
 type Config struct {
 	Client            *llm.Client
 	Tools             *tools.Registry
@@ -883,7 +901,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					if strings.TrimSpace(preview) == "" {
 						preview = ""
 					}
-					d, rejectReason, derr := cfg.Confirmer.Confirm(summary, preview)
+					d, rejectReason, derr := confirmSensitive(cfg.Confirmer, summary, preview)
 					if derr != nil {
 						return derr
 					}
