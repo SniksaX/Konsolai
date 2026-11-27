@@ -861,7 +861,46 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 			if _, ok := action.(interface{ MCPServer() string }); ok {
 				st.MCPCalls++
 			}
-			result, err := action.Run(ctx)
+			var result tools.Result
+			codeRunning := false
+			if sensitive, ok := action.(interface{ SensitiveReason() string }); ok && kind == tools.Mutating && strings.TrimSpace(sensitive.SensitiveReason()) != "" {
+				reason := sensitive.SensitiveReason()
+				codeRunning = true
+				switch {
+				case cfg.AutoApprove:
+					decision = "code_running_refused"
+					result = tools.Result{Output: "refused: " + action.Summary() + " runs code later; the user must approve this write themselves", IsError: true}
+				default:
+					summary := "runs code later: " + action.Summary()
+					preview := action.Preview()
+					if strings.TrimSpace(preview) == "" {
+						preview = reason
+					} else {
+						preview = reason + "\n\n" + preview
+					}
+					d, rejectReason, derr := cfg.Confirmer.Confirm(summary, preview)
+					if derr != nil {
+						return derr
+					}
+					switch d {
+					case ui.Approve, ui.ApproveAll:
+						decision = "code_running_approved"
+						codeRunning = false
+					case ui.Quit:
+						return ErrAborted
+					default:
+						decision = "code_running_rejected"
+						msg := "user rejected the code-running write"
+						if strings.TrimSpace(rejectReason) != "" {
+							msg += ": " + rejectReason
+						}
+						result = tools.Result{Output: msg, IsError: true, Meta: reason}
+					}
+				}
+			}
+			if !codeRunning {
+				result, err = action.Run(ctx)
+			}
 			elapsed := time.Since(start)
 			if err == nil && !result.IsError {
 				if d, ok := action.(tools.Discoverer); ok {
