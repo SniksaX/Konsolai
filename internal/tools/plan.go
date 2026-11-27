@@ -18,6 +18,18 @@ const PlanCommandReject = "list the exact command lines you will run; for a mult
 type proposePlanTool struct {
 	docsTask bool
 	request  string
+	guard    *safety.Guard
+	extra    []string
+}
+
+func (t *proposePlanTool) withExtraSensitive(extra []string) *proposePlanTool {
+	t.extra = extra
+	return t
+}
+
+func (t *proposePlanTool) withGuard(g *safety.Guard) *proposePlanTool {
+	t.guard = g
+	return t
 }
 
 func newProposePlan(docsTask bool, request string) *proposePlanTool {
@@ -58,11 +70,12 @@ type proposePlanArgs struct {
 }
 
 type proposePlanAction struct {
-	summary  string
-	steps    []string
-	files    []string
-	commands []string
-	tools    []string
+	summary        string
+	steps          []string
+	files          []string
+	commands       []string
+	tools          []string
+	sensitiveFiles map[string]string
 }
 
 func (t *proposePlanTool) Prepare(rawArgs string) (Action, error) {
@@ -106,6 +119,26 @@ func (t *proposePlanTool) Prepare(rawArgs string) (Action, error) {
 			return nil, planShapeError(err.Error(), rawArgs, args)
 		}
 	}
+	var sensitiveFiles map[string]string
+	for _, file := range nonempty(args.Files) {
+		if t.guard == nil {
+			continue
+		}
+		resolved, err := t.guard.ResolvePath(file)
+		if err != nil {
+			continue
+		}
+		class, reason := safety.ClassifyWriteAt(t.guard.Root(), resolved, t.extra)
+		switch class {
+		case safety.WriteNever:
+			return nil, planShapeError("this is git metadata; the user changes it themselves: "+file, rawArgs, args)
+		case safety.WriteConfirm:
+			if sensitiveFiles == nil {
+				sensitiveFiles = map[string]string{}
+			}
+			sensitiveFiles[file] = reason
+		}
+	}
 	var declared []string
 	for _, name := range args.Tools {
 		name = strings.TrimSpace(name)
@@ -117,7 +150,7 @@ func (t *proposePlanTool) Prepare(rawArgs string) (Action, error) {
 		}
 		declared = append(declared, name)
 	}
-	return &proposePlanAction{summary: args.Summary, steps: args.Steps, files: nonempty(args.Files), commands: cmds, tools: nonempty(declared)}, nil
+	return &proposePlanAction{summary: args.Summary, steps: args.Steps, files: nonempty(args.Files), commands: cmds, tools: nonempty(declared), sensitiveFiles: sensitiveFiles}, nil
 }
 
 // planToolDisplay shows a declared MCP tool with its server and tool, whether
@@ -379,7 +412,15 @@ func (a *proposePlanAction) Preview() string {
 	}
 	if len(a.files) > 0 {
 		b.WriteString("files: ")
-		b.WriteString(strings.Join(a.files, ", "))
+		for i, f := range a.files {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(f)
+			if _, sensitive := a.sensitiveFiles[f]; sensitive {
+				b.WriteString(" (runs code later: asks separately)")
+			}
+		}
 		b.WriteByte('\n')
 	}
 	if len(a.commands) > 0 {
