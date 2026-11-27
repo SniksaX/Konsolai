@@ -203,6 +203,9 @@ func (i *Ingester) Flush(ctx context.Context, d time.Duration) int {
 	if i == nil {
 		return 0
 	}
+	if i.store == nil || !i.store.RAGAvailable(ctx) {
+		return i.dropPending()
+	}
 	deadline := time.Now().Add(d)
 	for {
 		if time.Now().After(deadline) {
