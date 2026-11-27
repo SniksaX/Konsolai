@@ -17,6 +17,12 @@ import (
 type editFileTool struct {
 	guard    *safety.Guard
 	docsTask bool
+	extra    []string
+}
+
+func (t *editFileTool) withExtraSensitive(extra []string) *editFileTool {
+	t.extra = extra
+	return t
 }
 
 func newEditFile(g *safety.Guard, docsTask bool) *editFileTool {
@@ -42,13 +48,14 @@ type editFileArgs struct {
 }
 
 type editFileAction struct {
-	path    string
-	display string
-	oldStr  string
-	newStr  string
-	all     bool
-	oldText string
-	newText string
+	path      string
+	display   string
+	oldStr    string
+	newStr    string
+	all       bool
+	oldText   string
+	newText   string
+	sensitive string
 }
 
 func (t *editFileTool) Prepare(rawArgs string) (Action, error) {
@@ -99,9 +106,13 @@ func (t *editFileTool) Prepare(rawArgs string) (Action, error) {
 	if !args.ReplaceAll {
 		newText = strings.Replace(oldText, args.OldStr, args.NewStr, 1)
 	}
+	reason, err := sensitiveWrite(t.guard, t.extra, resolved, args.Path, oldText, newText)
+	if err != nil {
+		return nil, fmt.Errorf("tools: edit_file: %s: %w", args.Path, err)
+	}
 	return &editFileAction{
 		path: resolved, display: args.Path, oldStr: args.OldStr, newStr: args.NewStr,
-		all: args.ReplaceAll, oldText: oldText, newText: newText,
+		all: args.ReplaceAll, oldText: oldText, newText: newText, sensitive: reason,
 	}, nil
 }
 
@@ -109,6 +120,9 @@ func (a *editFileAction) FilePath() string { return a.display }
 func (a *editFileAction) Summary() string  { return "edit " + a.display }
 func (a *editFileAction) Preview() string  { return diff.Unified(a.display, a.oldText, a.newText, 3) }
 func (a *editFileAction) Kind() ActionKind { return Mutating }
+
+// SensitiveReason is non-empty when this edit can run code later.
+func (a *editFileAction) SensitiveReason() string { return a.sensitive }
 
 func (a *editFileAction) Run(ctx context.Context) (Result, error) {
 	if err := ctx.Err(); err != nil {
