@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -30,6 +31,7 @@ type Store struct {
 	pool           *pgxpool.Pool
 	queryTimeout   time.Duration
 	migrateTimeout time.Duration
+	closed         bool
 }
 
 // OpenOptions carries store deadlines. Zero values keep the built-in limits.
@@ -193,10 +195,25 @@ func validateSearchPath(schema string) error {
 }
 
 func (s *Store) Close() {
-	if s != nil && s.pool != nil {
+	if s == nil {
+		return
+	}
+	s.closed = true
+	if s.pool != nil {
 		s.pool.Close()
 		s.pool = nil
 	}
+}
+
+// closedError reports why a closed store cannot serve a query.
+func (s *Store) closedError() error {
+	if s == nil {
+		return errors.New("store: closed")
+	}
+	if s.closed || s.pool == nil {
+		return errors.New("store: closed")
+	}
+	return nil
 }
 
 func (s *Store) UpsertProject(ctx context.Context, root string, kinds, commands []string) (int64, error) {
@@ -455,6 +472,15 @@ func (s *Store) RecordAction(ctx context.Context, a ActionIn) error {
 		args = []byte("{}")
 	}
 	args = redact.JSON(args)
+	if !json.Valid(args) {
+		// Tool arguments can be arbitrary model text. Postgres jsonb rejects
+		// invalid JSON (22P02), so store the redacted text as a JSON string.
+		quoted, err := json.Marshal(redact.String(string(a.Args)))
+		if err != nil {
+			return fmt.Errorf("store: record action args: %w", err)
+		}
+		args = quoted
+	}
 	out := clipString(redact.String(a.Output), maxOutput)
 	full := a.FullOutput
 	if full == "" {
