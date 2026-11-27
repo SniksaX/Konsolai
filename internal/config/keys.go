@@ -404,6 +404,8 @@ var keyTable = []Key{
 		func(c *Config, v []string) { c.Safety.ExtraReadDeny = copyList(v) }, func(c Config) []string { return c.Safety.ExtraReadDeny }),
 	kli("safety.extra_command_deny", "extra command substrings to refuse", []string{},
 		func(c *Config, v []string) { c.Safety.ExtraCommandDeny = copyList(v) }, func(c Config) []string { return c.Safety.ExtraCommandDeny }),
+	kli("safety.extra_sensitive_paths", "extra write globs that need confirmation", []string{},
+		func(c *Config, v []string) { c.Safety.ExtraSensitivePaths = copyList(v) }, func(c Config) []string { return c.Safety.ExtraSensitivePaths }),
 
 	kli("router.action_verbs", "verbs that suggest an act or build turn", nil,
 		func(c *Config, v []string) { c.Router.ActionVerbs = copyList(v) }, func(c Config) []string { return c.Router.ActionVerbs }),
