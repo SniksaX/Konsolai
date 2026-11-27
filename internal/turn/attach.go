@@ -124,7 +124,7 @@ func attachBody(ctx context.Context, g *safety.Guard, cwd, abs string) (string, 
 			rel = abs
 		}
 		lister := func(context.Context) ([]string, error) { return repo.Files(ctx, repo.Root(cwd)) }
-		reg := tools.NewRegistry(g, io.Discard, lister, nil, nil)
+		reg := tools.NewRegistry(g, io.Discard, lister, nil, nil, tools.Options{ExtraSensitive: nil})
 		t, ok := reg.Get("outline")
 		if !ok {
 			return "", 0
