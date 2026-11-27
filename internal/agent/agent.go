@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/SniksaX/Konsolai/internal/llm"
+	"github.com/SniksaX/Konsolai/internal/redact"
 	"github.com/SniksaX/Konsolai/internal/safety"
 	"github.com/SniksaX/Konsolai/internal/tools"
 	"github.com/SniksaX/Konsolai/internal/ui"
@@ -872,7 +873,7 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 					result = tools.Result{Output: "refused: " + action.Summary() + " runs code later; the user must approve this write themselves", IsError: true}
 				default:
 					summary := "runs code later: " + action.Summary()
-					preview := action.Preview()
+					preview := redact.String(action.Preview())
 					if strings.TrimSpace(preview) == "" {
 						preview = reason
 					} else {
