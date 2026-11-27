@@ -222,15 +222,15 @@ func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 		}
 		return nil, err
 	}
+	never, sensitive := shellSensitive(t.guard, cmd, resolved, t.extra)
+	if never {
+		return nil, fmt.Errorf("tools: run_shell: %s", sensitive)
+	}
 	if err := t.guard.CheckCommandPaths(cmd, resolved); err != nil {
 		return nil, err
 	}
 	if name, ok := config.ShellProtected(cmd); ok {
 		return nil, fmt.Errorf("tools: run_shell: %s is protected: %s", name, config.ProtectedRefusal)
-	}
-	never, sensitive := shellSensitive(t.guard, cmd, resolved, t.extra)
-	if never {
-		return nil, fmt.Errorf("tools: run_shell: %s", sensitive)
 	}
 	sec := args.TimeoutSec
 	if sec == 0 {
