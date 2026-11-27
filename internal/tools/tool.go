@@ -105,6 +105,9 @@ type Options struct {
 	ShellMaxTimeout     time.Duration
 	ShellWaitDelay      time.Duration
 	DisableWeb          bool
+	// ExtraSensitive are project-relative globs that run code later and need
+	// their own confirmation (config safety.extra_sensitive_paths).
+	ExtraSensitive []string
 }
 
 const DocsSourceReject = "docs tasks may not create or modify source files; write Markdown and use export_doc for PDF/HTML"
@@ -137,14 +140,14 @@ func NewRegistry(g *safety.Guard, out io.Writer, files FileLister, cache WebCach
 		facts = NopFactStore{}
 	}
 	list := []Tool{
-		newShellLimit(g, out, o.ReadOnlyShell, o.DocsTask, o.DisplayLines).withLimits(o.ShellDefaultTimeout, o.ShellMaxTimeout, o.ShellWaitDelay),
-		newWriteFile(g, o.DocsTask),
+		newShellLimit(g, out, o.ReadOnlyShell, o.DocsTask, o.DisplayLines).withLimits(o.ShellDefaultTimeout, o.ShellMaxTimeout, o.ShellWaitDelay).withExtraSensitive(o.ExtraSensitive),
+		newWriteFile(g, o.DocsTask).withExtraSensitive(o.ExtraSensitive),
 		newReadFile(g),
 		newListDir(g),
 		newSearch(g, files),
 		newFindFiles(g, files),
-		newEditFile(g, o.DocsTask),
-		newProposePlan(o.DocsTask, o.Request),
+		newEditFile(g, o.DocsTask).withExtraSensitive(o.ExtraSensitive),
+		newProposePlan(o.DocsTask, o.Request).withGuard(g).withExtraSensitive(o.ExtraSensitive),
 		newRemember(facts),
 	}
 	if !o.DisableWeb {
@@ -152,7 +155,7 @@ func NewRegistry(g *safety.Guard, out io.Writer, files FileLister, cache WebCach
 	}
 	list = append(list,
 		newRecall(o.Recall),
-		newExportDoc(g),
+		newExportDoc(g).withExtraSensitive(o.ExtraSensitive),
 		newOutline(g, files),
 		newFinish(),
 	)
