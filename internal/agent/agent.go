@@ -874,10 +874,14 @@ func Run(ctx context.Context, cfg Config, systemContext, task string) error {
 				default:
 					summary := "runs code later: " + action.Summary()
 					preview := redact.String(action.Preview())
+					// The sensitive reason is the heading, not preview content:
+					// the prompter numbers preview lines, so leaving the reason
+					// in the preview shifted the file content to line 2+. The
+					// trailing newline keeps the historical blank line between
+					// the heading and the numbered file preview.
+					summary += "\n" + reason + "\n"
 					if strings.TrimSpace(preview) == "" {
-						preview = reason
-					} else {
-						preview = reason + "\n\n" + preview
+						preview = ""
 					}
 					d, rejectReason, derr := cfg.Confirmer.Confirm(summary, preview)
 					if derr != nil {
