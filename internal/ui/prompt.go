@@ -29,6 +29,12 @@ func OpenPrompter(autoApprove bool) (*Prompter, error) {
 	return &Prompter{autoApprove: autoApprove, out: os.Stdout}, nil
 }
 
+// NewPrompter returns a prompter over an explicit writer, for tests and for a
+// frontend that owns its output. OpenPrompter keeps writing to os.Stdout.
+func NewPrompter(out io.Writer, autoApprove bool) *Prompter {
+	return &Prompter{autoApprove: autoApprove, out: out}
+}
+
 func (p *Prompter) ConfirmForced(summary, preview string) (Decision, string, error) {
 	return p.confirm(summary, preview, true)
 }
