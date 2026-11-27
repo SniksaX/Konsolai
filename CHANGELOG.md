@@ -2,6 +2,7 @@
 
 ### Security
 - Code-running writes (build/task files, hooks, CI configs, root `scripts/`, sensitive `package.json` fields, `safety.extra_sensitive_paths`) are confirmed separately from plan and approve-all; `--yes` and non-interactive runs refuse them. Shell write targets, plans and exports follow the same rule.
+- Approve-all never skips the separate code-running confirmation.
 - Git metadata and git config writes are never written by the agent, including `git config`, `git init --template` and `git update-index --chmod`; read-only git commands and ordinary add/commit/status/diff/log/branch/checkout/switch/merge/rebase/stash/tag/restore keep working.
 
 ### Fixed
