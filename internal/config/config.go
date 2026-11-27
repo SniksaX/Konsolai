@@ -265,8 +265,9 @@ type Language struct {
 }
 
 type Safety struct {
-	ExtraReadDeny    []string `yaml:"extra_read_deny"`
-	ExtraCommandDeny []string `yaml:"extra_command_deny"`
+	ExtraReadDeny       []string `yaml:"extra_read_deny"`
+	ExtraCommandDeny    []string `yaml:"extra_command_deny"`
+	ExtraSensitivePaths []string `yaml:"extra_sensitive_paths"`
 }
 
 type Router struct {
