@@ -17,7 +17,15 @@ import (
 	"github.com/SniksaX/Konsolai/internal/ui"
 )
 
-type exportDocTool struct{ guard *safety.Guard }
+type exportDocTool struct {
+	guard *safety.Guard
+	extra []string
+}
+
+func (t *exportDocTool) withExtraSensitive(extra []string) *exportDocTool {
+	t.extra = extra
+	return t
+}
 
 func newExportDoc(g *safety.Guard) *exportDocTool { return &exportDocTool{guard: g} }
 
@@ -38,14 +46,15 @@ type exportDocArgs struct {
 }
 
 type exportDocAction struct {
-	path     string
-	display  string
-	format   string
-	title    string
-	content  string
-	existed  bool
-	oldBytes []byte
-	newBytes []byte
+	path      string
+	display   string
+	format    string
+	title     string
+	content   string
+	existed   bool
+	oldBytes  []byte
+	newBytes  []byte
+	sensitive string
 }
 
 func markdownSource(output string) string {
@@ -96,6 +105,11 @@ func (t *exportDocTool) Prepare(rawArgs string) (Action, error) {
 	} else if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("tools: export_doc: stat: %w", err)
 	}
+	reason, err := sensitiveWrite(t.guard, t.extra, resolved, args.Path, string(act.oldBytes), "")
+	if err != nil {
+		return nil, fmt.Errorf("tools: export_doc: %s: %w", args.Path, err)
+	}
+	act.sensitive = reason
 	return act, nil
 }
 
@@ -116,6 +130,9 @@ func (a *exportDocAction) Preview() string {
 }
 
 func (a *exportDocAction) Kind() ActionKind { return Mutating }
+
+// SensitiveReason is non-empty when this export target can run code later.
+func (a *exportDocAction) SensitiveReason() string { return a.sensitive }
 
 func (a *exportDocAction) Run(ctx context.Context) (Result, error) {
 	stop := ui.Start("exporting")
