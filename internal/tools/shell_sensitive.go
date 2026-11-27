@@ -39,6 +39,9 @@ func shellSensitive(guard *safety.Guard, cmd, cwd string, extra []string) (never
 		if !filepath.IsAbs(target) {
 			target = filepath.Join(base, target)
 		}
+		if dir, err := filepath.EvalSymlinks(filepath.Dir(target)); err == nil {
+			target = filepath.Join(dir, filepath.Base(target))
+		}
 		resolved := safety.ResolvePhysical(target)
 		if resolved == "" || seen[resolved] {
 			return
