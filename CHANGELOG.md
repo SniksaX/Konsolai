@@ -5,7 +5,10 @@
 - Git metadata and git config writes are never written by the agent, including `git config`, `git init --template` and `git update-index --chmod`; read-only git commands and ordinary add/commit/status/diff/log/branch/checkout/switch/merge/rebase/stash/tag/restore keep working.
 
 ### Fixed
-- None above v0.5.0.
+- Memory now accepts the code-running decision values (`code_running_approved`, `code_running_rejected`, `code_running_refused`) through a new action-decision migration; older rows stay valid.
+- Stored action arguments are always valid JSON, including the new sensitive prompt and plan texts.
+- A memory store error no longer looks like a connection error, and a disabled or closed store no longer crashes the RAG ingester or `Flush`.
+- The separate code-running confirmation shows its heading above the numbered file preview, so the content lines are not shifted.
 
 ## v0.5.0
 
