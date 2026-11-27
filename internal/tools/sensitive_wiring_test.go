@@ -200,3 +200,31 @@ func quoteJSON(s string) string {
 	b.WriteByte('"')
 	return b.String()
 }
+
+func TestShellGitMetadataEdgeCases(t *testing.T) {
+	reg, root := sensitiveRegistry(t)
+	realGit := filepath.Join(root, "realgit")
+	if err := os.MkdirAll(filepath.Join(realGit, "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: realgit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(".git", filepath.Join(root, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, cmd := range []string{
+		"echo x > .git/config",
+		"echo x > realgit/config",
+		"echo x > alias/config",
+		"echo x > .GIT/config",
+		"echo x > sub/../.git/config",
+	} {
+		if _, err := prepareTool(t, reg, "run_shell", `{"cmd":`+quoteJSON(cmd)+`}`); err == nil || !strings.Contains(err.Error(), "git metadata") {
+			t.Fatalf("%q must be refused: %v", cmd, err)
+		}
+	}
+}
