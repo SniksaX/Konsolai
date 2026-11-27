@@ -61,6 +61,9 @@ func VectorLiteral(v []float32) string {
 }
 
 func (s *Store) Meta(ctx context.Context, key string) (string, error) {
+	if err := s.closedError(); err != nil {
+		return "", err
+	}
 	ctx, cancel := s.withTimeout(ctx)
 	defer cancel()
 	var v string
