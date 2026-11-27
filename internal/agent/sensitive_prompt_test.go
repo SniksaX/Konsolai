@@ -13,6 +13,7 @@ import (
 type sensitiveConfirmSeq struct {
 	decisions []ui.Decision
 	calls     []string
+	previews  []string
 }
 
 func (s *sensitiveConfirmSeq) next(summary string) (ui.Decision, string, error) {
@@ -25,10 +26,12 @@ func (s *sensitiveConfirmSeq) next(summary string) (ui.Decision, string, error) 
 	return d, "", nil
 }
 
-func (s *sensitiveConfirmSeq) Confirm(summary, _ string) (ui.Decision, string, error) {
+func (s *sensitiveConfirmSeq) Confirm(summary, preview string) (ui.Decision, string, error) {
+	s.previews = append(s.previews, preview)
 	return s.next(summary)
 }
-func (s *sensitiveConfirmSeq) ConfirmForced(summary, _ string) (ui.Decision, string, error) {
+func (s *sensitiveConfirmSeq) ConfirmForced(summary, preview string) (ui.Decision, string, error) {
+	s.previews = append(s.previews, preview)
 	return s.next(summary)
 }
 
@@ -84,5 +87,43 @@ func TestCodeRunningPromptRejectSkipsWrite(t *testing.T) {
 	}
 	if got := rep.lastTool().Content; !strings.Contains(got, "rejected") {
 		t.Fatalf("tool result %q", got)
+	}
+}
+
+func TestSensitivePromptRedactsSecrets(t *testing.T) {
+	secret := "sk-" + "abcdefghijklmnopqrstuvwx"
+	confirm := &sensitiveConfirmSeq{decisions: []ui.Decision{ui.Approve, ui.Approve}}
+	root, _, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "write_file", `{"path":"scripts/x.sh","content":"echo `+secret+`"}`)),
+		{Role: llm.RoleAssistant, Content: "done"},
+	}, confirm, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(confirm.previews) == 0 {
+		t.Fatal("no sensitive prompt")
+	}
+	// The code-running prompt is the separate one; its reason and diff must
+	// not echo the secret value.
+	last := confirm.previews[len(confirm.previews)-1]
+	if strings.Contains(last, secret) {
+		t.Fatalf("code-running prompt leaks the secret: %q", last)
+	}
+	if _, err := os.Stat(filepath.Join(root, "scripts", "x.sh")); err != nil {
+		t.Fatalf("approved sensitive write missing: %v", err)
+	}
+}
+
+func TestInstallNoteAppearsInThePrompt(t *testing.T) {
+	confirm := &sensitiveConfirmSeq{decisions: []ui.Decision{ui.Approve}}
+	_, _, err := setupCfg(t, []llm.Message{
+		assistant(call("1", "run_shell", `{"cmd":"npm install left-pad"}`)),
+		{Role: llm.RoleAssistant, Content: "done"},
+	}, confirm, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(confirm.previews) == 0 || !strings.Contains(confirm.previews[0], "lifecycle scripts") {
+		t.Fatalf("install note missing from prompt: %v", confirm.previews)
 	}
 }
