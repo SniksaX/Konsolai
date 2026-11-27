@@ -25,6 +25,7 @@ var ErrLookupMutating = errors.New("lookup can only run read-only commands")
 
 type shellTool struct {
 	guard          *safety.Guard
+	extra          []string
 	out            io.Writer
 	readOnlyOnly   bool
 	docsTask       bool
@@ -46,6 +47,11 @@ func newShellLimit(g *safety.Guard, out io.Writer, readOnlyOnly, docsTask bool, 
 		maxTimeout:     b.ShellMaxTimeout(),
 		waitDelay:      b.ShellWaitDelay(),
 	}
+}
+
+func (t *shellTool) withExtraSensitive(extra []string) *shellTool {
+	t.extra = extra
+	return t
 }
 
 func (t *shellTool) withLimits(def, max, wait time.Duration) *shellTool {
@@ -92,6 +98,7 @@ type shellAction struct {
 	out          io.Writer
 	kind         ActionKind
 	displayLines int
+	sensitive    string
 }
 
 var reCD = regexp.MustCompile(`(^|[;&|(]\s*)cd(\s|$)`)
@@ -221,6 +228,10 @@ func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 	if name, ok := config.ShellProtected(cmd); ok {
 		return nil, fmt.Errorf("tools: run_shell: %s is protected: %s", name, config.ProtectedRefusal)
 	}
+	never, sensitive := shellSensitive(t.guard, cmd, resolved, t.extra)
+	if never {
+		return nil, fmt.Errorf("tools: run_shell: %s", sensitive)
+	}
 	sec := args.TimeoutSec
 	if sec == 0 {
 		sec = int(t.defaultTimeout / time.Second)
@@ -229,18 +240,28 @@ func (t *shellTool) Prepare(rawArgs string) (Action, error) {
 	if sec < 1 || sec > maxSec {
 		return nil, fmt.Errorf("tools: run_shell: timeout_sec must be between 1 and %d", maxSec)
 	}
-	return &shellAction{cmd: cmd, cwd: resolved, timeout: time.Duration(sec) * time.Second, waitDelay: t.waitDelay, out: t.out, kind: kind, displayLines: t.displayLines}, nil
+	return &shellAction{cmd: cmd, cwd: resolved, timeout: time.Duration(sec) * time.Second, waitDelay: t.waitDelay, out: t.out, kind: kind, displayLines: t.displayLines, sensitive: sensitive}, nil
 }
 
 func (a *shellAction) Summary() string { return "run: " + CommandHeadline(a.cmd) }
 func (a *shellAction) Preview() string {
-	if strings.Count(strings.TrimRight(a.cmd, "\n"), "\n") == 0 {
-		return ""
+	preview := ""
+	if strings.Count(strings.TrimRight(a.cmd, "\n"), "\n") != 0 {
+		preview = a.cmd
 	}
-	return a.cmd
+	if note := installNoteFor(a.cmd); note != "" {
+		if preview == "" {
+			return note
+		}
+		return preview + "\n" + note
+	}
+	return preview
 }
-func (a *shellAction) Kind() ActionKind    { return a.kind }
-func (a *shellAction) PlanCommand() string { return a.cmd }
+func (a *shellAction) Kind() ActionKind { return a.kind }
+
+// SensitiveReason is non-empty when this command writes a code-running path.
+func (a *shellAction) SensitiveReason() string { return a.sensitive }
+func (a *shellAction) PlanCommand() string     { return a.cmd }
 
 func (a *shellAction) Run(ctx context.Context) (Result, error) {
 	if fi, err := os.Stat(a.cwd); err != nil || !fi.IsDir() {
