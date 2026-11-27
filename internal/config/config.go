@@ -921,7 +921,30 @@ func DisableLine(databaseURL string, err error) string {
 	if cause == "" {
 		cause = "unknown error"
 	}
-	return "memory disabled: cannot connect to " + host + ": " + cause
+	if isConnectError(err) {
+		return "memory disabled: cannot connect to " + host + ": " + cause
+	}
+	return "memory disabled after a store error: " + cause
+}
+
+// isConnectError distinguishes a failed connection from a store error after a
+// connection was established.
+func isConnectError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var op *net.OpError
+	if errors.As(err, &op) {
+		return true
+	}
+	var ce *pgconn.ConnectError
+	if errors.As(err, &ce) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "failed to connect") || strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "no such host") || strings.Contains(msg, "dial tcp") ||
+		strings.Contains(msg, "i/o timeout")
 }
 
 func innermostCause(err error) string {
