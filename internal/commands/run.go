@@ -63,6 +63,7 @@ func runRun(ctx context.Context, env *Env, args []string) int {
 		ShellDefaultTimeout: env.Profile.ShellDefaultTimeout(),
 		ShellMaxTimeout:     env.Profile.ShellMaxTimeout(),
 		ShellWaitDelay:      env.Profile.ShellWaitDelay(),
+		ExtraSensitive:      env.Profile.Safety.ExtraSensitivePaths,
 	})
 	tool, ok := reg.Get("run_shell")
 	if !ok {
