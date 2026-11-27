@@ -31,6 +31,12 @@ const (
 type writeFileTool struct {
 	guard    *safety.Guard
 	docsTask bool
+	extra    []string
+}
+
+func (t *writeFileTool) withExtraSensitive(extra []string) *writeFileTool {
+	t.extra = extra
+	return t
 }
 
 func newWriteFile(g *safety.Guard, docsTask bool) *writeFileTool {
@@ -59,6 +65,7 @@ type writeFileAction struct {
 	content   string
 	oldText   string
 	overwrite bool
+	sensitive string
 }
 
 func (t *writeFileTool) Prepare(rawArgs string) (Action, error) {
@@ -97,7 +104,11 @@ func (t *writeFileTool) Prepare(rawArgs string) (Action, error) {
 		}
 		old = string(b)
 	}
-	return &writeFileAction{path: resolved, display: args.Path, content: args.Content, oldText: old, overwrite: overwrite}, nil
+	reason, err := sensitiveWrite(t.guard, t.extra, resolved, args.Path, old, args.Content)
+	if err != nil {
+		return nil, fmt.Errorf("tools: write_file: %s: %w", args.Path, err)
+	}
+	return &writeFileAction{path: resolved, display: args.Path, content: args.Content, oldText: old, overwrite: overwrite, sensitive: reason}, nil
 }
 
 func (a *writeFileAction) FilePath() string { return a.display }
@@ -118,6 +129,9 @@ func (a *writeFileAction) Preview() string {
 }
 
 func (a *writeFileAction) Kind() ActionKind { return Mutating }
+
+// SensitiveReason is non-empty when this write can run code later.
+func (a *writeFileAction) SensitiveReason() string { return a.sensitive }
 
 func (a *writeFileAction) Run(ctx context.Context) (Result, error) {
 	if err := ctx.Err(); err != nil {
