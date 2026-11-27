@@ -43,6 +43,14 @@ func (p *Prompter) Confirm(summary, preview string) (Decision, string, error) {
 	return p.confirm(summary, preview, false)
 }
 
+// ConfirmSensitive asks the separate "this file runs code later" question. It
+// NEVER auto-answers: an earlier approve-all decision and autoApprove (--yes)
+// are both ignored, so a frontend cannot skip the explicit prompt. The core
+// treats this as the never-auto-approvable code-running question.
+func (p *Prompter) ConfirmSensitive(summary, preview string) (Decision, string, error) {
+	return p.prompt(summary, preview)
+}
+
 func (p *Prompter) writer() io.Writer {
 	if p != nil && p.out != nil {
 		return p.out
@@ -77,6 +85,12 @@ func (p *Prompter) confirm(summary, preview string, force bool) (Decision, strin
 	if p.autoApprove || (!force && p.approveAll) {
 		return Approve, "", nil
 	}
+	return p.prompt(summary, preview)
+}
+
+// prompt renders the historical question and reads one decision. It has no
+// auto-answer path; Confirm/ConfirmForced/ConfirmSensitive decide that first.
+func (p *Prompter) prompt(summary, preview string) (Decision, string, error) {
 	w := p.writer()
 	BeforeOutput()
 	fmt.Fprintln(w)
