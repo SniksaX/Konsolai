@@ -398,6 +398,7 @@ func (r *Runner) runProfile(ctx context.Context, client *llm.Client, snap sysctx
 			ShellMaxTimeout:     r.Profile.ShellMaxTimeout(),
 			ShellWaitDelay:      r.Profile.ShellWaitDelay(),
 			DisableWeb:          !r.Profile.WebOn(),
+			ExtraSensitive:      r.Profile.Safety.ExtraSensitivePaths,
 		})
 		reg = registryForRAG(reg, r.Profile.RAGEnabled())
 		var mcpOffered []string
